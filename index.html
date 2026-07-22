@@ -1,0 +1,4946 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IELTS 词汇训练 · AI 智能版</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #f7f5f0;
+  --card: #ffffff;
+  --text: #1f1f1f;
+  --text-light: #6b6b6b;
+  --text-mute: #9a9a9a;
+  --accent: #2e6b5c;
+  --accent-light: #e8f0ed;
+  --accent-hover: #245951;
+  --border: #e8e3da;
+  --border-light: #f0ebe2;
+  --error: #b54848;
+  --error-light: #fae9e9;
+  --success: #2e6b5c;
+  --success-light: #e6f3ee;
+  --warning: #b58c3e;
+  --warning-light: #faf2dd;
+  --highlight: #f7e9b0;
+  --chinese-bg: #f5f1e8;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
+  --shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-md: 0 4px 16px rgba(0,0,0,0.08);
+  --radius: 10px;
+  --radius-sm: 8px;
+  --radius-lg: 16px;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+.app {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 16px 16px 100px;
+}
+
+.app-header {
+  text-align: center;
+  margin-bottom: 20px;
+  padding-top: 4px;
+}
+
+.app-header h1 {
+  font-size: 20px;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.app-header p {
+  color: var(--text-light);
+  font-size: 12px;
+}
+
+/* Bottom nav */
+.bottom-nav {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: var(--card);
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: space-around;
+  padding: 8px 0;
+  padding-bottom: max(8px, env(safe-area-inset-bottom));
+  z-index: 50;
+  box-shadow: 0 -1px 3px rgba(0,0,0,0.02);
+  max-width: 760px;
+  margin: 0 auto;
+}
+
+.nav-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  background: transparent;
+  border: none;
+  color: var(--text-mute);
+  cursor: pointer;
+  font-size: 11px;
+  font-family: inherit;
+  transition: color 0.15s;
+}
+
+.nav-item.active { color: var(--accent); }
+.nav-item:hover { color: var(--accent); }
+
+.nav-icon { font-size: 20px; display: block; line-height: 1; }
+
+/* Views */
+.view { display: none; }
+.view.active { display: block; }
+
+/* Cards */
+.card {
+  background: var(--card);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+  margin-bottom: 14px;
+}
+
+.card h2, .card h3 { font-weight: 600; }
+
+/* Buttons */
+.btn {
+  padding: 10px 16px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--text);
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.15s;
+  font-family: inherit;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.btn:hover { background: var(--accent-light); border-color: var(--accent); color: var(--accent); }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn:disabled:hover { background: var(--card); border-color: var(--border); color: var(--text); }
+
+.btn-primary { background: var(--accent); color: white; border-color: var(--accent); }
+.btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); color: white; }
+
+.btn-ghost { background: transparent; border-color: transparent; color: var(--text-light); }
+.btn-ghost:hover { background: var(--accent-light); color: var(--accent); }
+
+.btn-danger { color: var(--error); }
+.btn-danger:hover { background: var(--error-light); border-color: var(--error); color: var(--error); }
+
+.btn-lg { padding: 14px 24px; font-size: 15px; }
+.btn-sm { padding: 6px 12px; font-size: 12px; }
+.btn-block { width: 100%; }
+
+/* Forms */
+input[type="text"], input[type="password"], textarea, select {
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 14px;
+  font-family: inherit;
+  background: var(--card);
+  color: var(--text);
+  transition: border-color 0.15s;
+}
+
+input:focus, textarea:focus, select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+label {
+  display: block;
+  font-size: 12px;
+  color: var(--text-light);
+  margin-bottom: 6px;
+  font-weight: 500;
+}
+
+.form-row { margin-bottom: 14px; }
+.form-row .hint { font-size: 12px; color: var(--text-mute); margin-top: 4px; }
+
+/* Today card */
+.today-card {
+  background: linear-gradient(135deg, #2e6b5c 0%, #245951 100%);
+  color: white;
+  border: none;
+  padding: 24px;
+  border-radius: var(--radius-lg);
+  margin-bottom: 16px;
+  box-shadow: var(--shadow);
+}
+
+.today-card h2 { color: white; font-size: 13px; opacity: 0.85; font-weight: 500; margin-bottom: 6px; letter-spacing: 0.3px; }
+.today-stats { display: flex; gap: 20px; margin: 8px 0 18px; }
+.today-stat { flex: 1; }
+.today-stat .num { font-size: 28px; font-weight: 600; font-family: Georgia, serif; line-height: 1.1; }
+.today-stat .label { font-size: 11px; opacity: 0.75; margin-top: 2px; }
+
+.streak-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(255,255,255,0.18);
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  margin-bottom: 10px;
+}
+
+/* Word list item: 单词 · 音标 · 发音 · 翻译 */
+.word-list-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 8px;
+  transition: all 0.15s;
+  flex-wrap: wrap;
+}
+
+.word-list-item:hover { border-color: var(--accent); }
+
+.word-list-item .word-main {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.word-list-item .word-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  width: 100%;
+}
+
+.word-list-item .word {
+  font-weight: 600;
+  color: var(--accent);
+  font-family: Georgia, serif;
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.word-list-item .phonetic {
+  font-size: 13px;
+  color: var(--text-light);
+  font-family: "Segoe UI", "Arial Unicode MS", "Lucida Sans Unicode", "Noto Sans", "PingFang SC", sans-serif;
+  flex-shrink: 0;
+  line-height: 1.35;
+}
+
+.word-list-item .translation {
+  font-size: 14px;
+  color: var(--text);
+  width: 100%;
+  line-height: 1.45;
+  padding-left: 1px;
+}
+
+.word-list-item .translation.mute {
+  color: var(--text-mute);
+  font-size: 13px;
+}
+
+.speak-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 2px 6px;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+
+.speak-btn:hover {
+  background: var(--accent-light);
+  border-color: var(--accent);
+}
+
+.speak-btn:active {
+  transform: scale(0.95);
+}
+
+.speak-btn.speaking,
+.speak-btn-inline.speaking {
+  background: var(--accent) !important;
+  color: white;
+  animation: speakPulse 0.6s ease;
+}
+
+.phonetic-pair {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  font-size: 13px;
+  color: var(--text-light);
+  font-family: "Segoe UI", "Arial Unicode MS", "Lucida Sans Unicode", "Noto Sans", "PingFang SC", sans-serif;
+}
+
+.phonetic-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.accent-tag {
+  font-size: 11px;
+  color: var(--accent);
+  font-weight: 600;
+  font-family: inherit;
+}
+
+.phonetic-pair .speak-btn {
+  padding: 1px 5px;
+  font-size: 12px;
+}
+
+@keyframes speakPulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.15); }
+  100% { transform: scale(1); }
+}
+
+.word-list-item .meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.word-list-item .meta .tags { display: flex; gap: 4px; flex-wrap: wrap; }
+
+.word-list-item .actions { display: flex; gap: 2px; flex-shrink: 0; }
+.word-list-item .actions button {
+  background: transparent;
+  border: none;
+  color: var(--text-mute);
+  cursor: pointer;
+  padding: 6px 8px;
+  font-size: 14px;
+  border-radius: 6px;
+  font-family: inherit;
+}
+.word-list-item .actions button:hover { background: var(--accent-light); color: var(--accent); }
+.word-list-item .actions .delete:hover { background: var(--error-light); color: var(--error); }
+
+.word-list-item.crossed { opacity: 0.55; background: var(--border-light); }
+.word-list-item.crossed .word { text-decoration: line-through; color: var(--text-mute); }
+
+/* Tag */
+.tag {
+  display: inline-block;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 500;
+  letter-spacing: 0.3px;
+}
+
+.tag-new { background: var(--accent-light); color: var(--accent); }
+.tag-due { background: var(--warning-light); color: var(--warning); }
+.tag-mastered { background: var(--success-light); color: var(--success); }
+.tag-crossed { background: #ececec; color: var(--text-mute); }
+
+/* Practice view */
+.practice-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 0 4px;
+}
+
+.practice-header .back-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-light);
+  cursor: pointer;
+  font-size: 18px;
+  padding: 4px 8px;
+  font-family: inherit;
+}
+
+.practice-header .progress-bar {
+  flex: 1;
+  height: 6px;
+  background: var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.practice-header .progress-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.3s;
+  border-radius: 3px;
+}
+
+.practice-header .progress-text {
+  font-size: 12px;
+  color: var(--text-light);
+  font-variant-numeric: tabular-nums;
+  min-width: 50px;
+  text-align: right;
+}
+
+.practice-card {
+  background: var(--card);
+  border-radius: var(--radius-lg);
+  padding: 28px 22px;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  margin-bottom: 14px;
+  min-height: 300px;
+  position: relative;
+}
+
+.mode-tag {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--accent-light);
+  color: var(--accent);
+  margin-bottom: 14px;
+  letter-spacing: 0.5px;
+}
+
+.mode-tag.translate-mode { background: var(--chinese-bg); color: var(--text); }
+
+.word-display {
+  font-size: 30px;
+  font-family: Georgia, "Times New Roman", serif;
+  color: var(--accent);
+  margin-bottom: 2px;
+  font-weight: 600;
+}
+
+.word-phonetic {
+  font-size: 13px;
+  color: var(--text-light);
+  font-family: "Segoe UI", "Arial Unicode MS", "Lucida Sans Unicode", "Noto Sans", "PingFang SC", sans-serif;
+  margin-bottom: 18px;
+}
+
+.practice-sentence {
+  font-size: 17px;
+  line-height: 1.9;
+  margin: 16px 0 20px;
+  min-height: 50px;
+}
+
+.markable-word {
+  cursor: pointer;
+  border-bottom: 1.5px dashed transparent;
+  border-radius: 2px;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.markable-word:hover {
+  background: var(--highlight);
+  border-bottom-color: var(--accent);
+  color: var(--accent);
+}
+
+.markable-word.in-list {
+  border-bottom-color: var(--accent);
+  background: var(--accent-light);
+  color: var(--accent);
+}
+
+.markable-word.just-marked {
+  animation: speakPulse 0.5s ease;
+}
+
+.mark-tip {
+  font-size: 12px;
+  color: var(--text-mute);
+  margin-top: 4px;
+}
+
+.sentence-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 16px 0 12px;
+}
+
+.sentence-row .practice-sentence {
+  flex: 1;
+  margin: 0;
+  min-width: 0;
+}
+
+.speak-sentence-btn {
+  flex-shrink: 0;
+  margin-top: 4px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 8px;
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  transition: all 0.15s;
+}
+
+.speak-sentence-btn:hover {
+  background: var(--accent-light);
+  border-color: var(--accent);
+}
+
+.speak-sentence-btn.speaking {
+  background: var(--accent) !important;
+  color: white;
+  animation: speakPulse 0.6s ease;
+}
+
+.practice-sentence.hidden-blank {
+  filter: blur(6px);
+  user-select: none;
+  pointer-events: none;
+  transition: filter 0.4s;
+}
+
+.practice-sentence.revealed { filter: none; user-select: auto; pointer-events: auto; }
+
+.blank-input {
+  display: inline-block;
+  min-width: 130px;
+  max-width: 220px;
+  border: none;
+  border-bottom: 2px solid var(--accent);
+  padding: 4px 8px;
+  text-align: center;
+  font-size: 18px;
+  font-family: Georgia, serif;
+  color: var(--accent);
+  background: transparent;
+}
+
+.blank-input:focus { outline: none; }
+
+.chinese-sentence {
+  font-size: 16px;
+  line-height: 1.9;
+  margin: 16px 0 20px;
+  padding: 16px 18px;
+  background: var(--chinese-bg);
+  border-radius: var(--radius);
+  border-left: 3px solid var(--accent);
+}
+
+.feedback-area {
+  margin-top: 14px;
+  padding: 12px 16px;
+  border-radius: var(--radius);
+  font-size: 13.5px;
+  display: none;
+  line-height: 1.6;
+}
+
+.feedback-area.show { display: block; }
+.feedback-area.correct { background: var(--success-light); color: #1d4a3f; }
+.feedback-area.partial { background: var(--warning-light); color: #7a5d22; }
+.feedback-area.wrong { background: var(--error-light); color: #823333; }
+
+.feedback-area .label {
+  font-weight: 600;
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.feedback-area .suggestion {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed currentColor;
+  font-size: 13px;
+  opacity: 0.95;
+}
+
+.practice-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.practice-actions .btn { flex: 1; }
+
+.difficulty-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.difficulty-row .btn { flex: 1; padding: 10px 4px; font-size: 12px; }
+
+/* Spinner */
+.spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.loading-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(255,255,255,0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-lg);
+  z-index: 10;
+  backdrop-filter: blur(2px);
+}
+
+.loading-text {
+  color: var(--text-light);
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Modal */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.4);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 16px;
+}
+
+.modal-backdrop.show { display: flex; }
+
+.modal {
+  background: var(--card);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  max-width: 480px;
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: var(--shadow-md);
+}
+
+.modal h2 { margin-bottom: 6px; font-size: 18px; }
+.modal p { color: var(--text-light); font-size: 13px; margin-bottom: 14px; }
+
+/* Toast */
+.toast {
+  position: fixed;
+  bottom: 80px;
+  left: 50%;
+  transform: translateX(-50%) translateY(20px);
+  background: var(--text);
+  color: white;
+  padding: 10px 20px;
+  border-radius: 8px;
+  font-size: 14px;
+  opacity: 0;
+  transition: all 0.25s;
+  pointer-events: none;
+  z-index: 200;
+  max-width: 90%;
+  text-align: center;
+}
+
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+.toast.error { background: var(--error); }
+.toast.success { background: var(--success); }
+
+/* Empty state */
+.empty {
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--text-light);
+}
+.empty-icon { font-size: 42px; margin-bottom: 12px; opacity: 0.5; }
+.empty h3 { color: var(--text); margin-bottom: 6px; font-weight: 500; font-size: 16px; }
+.empty p { font-size: 13px; }
+
+/* Settings */
+.settings-section { margin-bottom: 24px; }
+.settings-section h3 { font-size: 12px; color: var(--text-light); margin-bottom: 10px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; }
+
+.provider-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.provider-preset {
+  padding: 6px 12px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 12px;
+  cursor: pointer;
+  font-family: inherit;
+  color: var(--text-light);
+  transition: all 0.15s;
+}
+
+.provider-preset.active { background: var(--accent); color: white; border-color: var(--accent); }
+.provider-preset:hover:not(.active) { border-color: var(--accent); color: var(--accent); }
+
+/* Add word */
+.add-word-input {
+  font-size: 18px !important;
+  font-family: Georgia, serif !important;
+  padding: 14px 16px !important;
+  text-align: center;
+  text-transform: lowercase;
+}
+
+.example-preview {
+  padding: 12px 16px;
+  background: var(--chinese-bg);
+  border-radius: var(--radius);
+  margin-bottom: 8px;
+  font-size: 14px;
+  line-height: 1.7;
+  position: relative;
+  padding-right: 36px;
+}
+
+.example-preview .english { font-family: Georgia, serif; color: var(--text); margin-bottom: 4px; }
+.example-preview .chinese { color: var(--text-light); font-size: 13px; }
+
+.example-preview .remove {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: transparent;
+  border: none;
+  color: var(--text-mute);
+  cursor: pointer;
+  font-size: 16px;
+  padding: 0 6px;
+  line-height: 1;
+}
+
+.example-preview .remove:hover { color: var(--error); }
+
+/* Stats */
+.stats-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.stat-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+  text-align: center;
+}
+
+.stat-card .num { font-size: 22px; font-weight: 600; color: var(--accent); font-family: Georgia, serif; }
+.stat-card .label { font-size: 11px; color: var(--text-light); margin-top: 2px; }
+
+/* Filter tabs */
+.filter-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 14px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.filter-tab {
+  padding: 6px 12px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 12px;
+  cursor: pointer;
+  font-family: inherit;
+  color: var(--text-light);
+  white-space: nowrap;
+}
+
+.filter-tab.active { background: var(--accent); color: white; border-color: var(--accent); }
+
+/* Utility */
+.text-mute { color: var(--text-mute); font-size: 13px; }
+.text-light { color: var(--text-light); font-size: 13px; }
+.text-center { text-align: center; }
+.mt-2 { margin-top: 8px; }
+.mt-3 { margin-top: 12px; }
+.mb-2 { margin-bottom: 8px; }
+.mb-3 { margin-bottom: 12px; }
+.hidden { display: none !important; }
+.flex-row { display: flex; gap: 8px; align-items: center; }
+.spacer { flex: 1; }
+.divider { height: 1px; background: var(--border); margin: 16px 0; }
+
+/* Welcome */
+.welcome {
+  text-align: center;
+  padding: 30px 16px;
+}
+
+.welcome-icon { font-size: 48px; margin-bottom: 12px; }
+.welcome h1 { font-size: 24px; margin-bottom: 6px; }
+.welcome p { color: var(--text-light); margin-bottom: 20px; font-size: 14px; }
+
+.steps {
+  text-align: left;
+  background: var(--chinese-bg);
+  border-radius: var(--radius);
+  padding: 16px 20px;
+  margin: 20px 0;
+}
+
+.steps li {
+  margin-bottom: 8px;
+  font-size: 13.5px;
+  color: var(--text);
+}
+
+.steps li:last-child { margin-bottom: 0; }
+
+.section-title {
+  font-size: 13px;
+  color: var(--text-light);
+  margin-bottom: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+@media (max-width: 480px) {
+  .app { padding: 12px 12px 100px; }
+  .practice-card { padding: 24px 18px; }
+  .word-display { font-size: 26px; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <div id="app-content"></div>
+</div>
+
+<nav class="bottom-nav" id="bottom-nav" style="display:none;">
+  <button class="nav-item active" data-view="today">
+    <span class="nav-icon">🏠</span>
+    <span>今日</span>
+  </button>
+  <button class="nav-item" data-view="words">
+    <span class="nav-icon">📚</span>
+    <span>词表</span>
+  </button>
+  <button class="nav-item" data-view="add">
+    <span class="nav-icon">＋</span>
+    <span>添加</span>
+  </button>
+  <button class="nav-item" data-view="settings">
+    <span class="nav-icon">⚙</span>
+    <span>设置</span>
+  </button>
+</nav>
+
+<div class="modal-backdrop" id="modal-backdrop">
+  <div class="modal" id="modal-content"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+'use strict';
+
+// ============= CONSTANTS =============
+const PROVIDERS = {
+  openai: { name: 'OpenAI', base: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
+  deepseek: { name: 'DeepSeek', base: 'https://api.deepseek.com/v1', model: 'deepseek-chat' },
+  moonshot: { name: 'Moonshot', base: 'https://api.moonshot.cn/v1', model: 'moonshot-v1-8k' },
+  zhipu: { name: '智谱 GLM', base: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4-flash' },
+  custom: { name: '自定义', base: '', model: '' }
+};
+
+const DB_NAME = 'IELTS_VocabDB';
+const DB_VERSION = 1;
+const STORE = 'words';
+const DAY_MS = 24 * 60 * 60 * 1000;
+const PRACTICE_SESSION_KEY = 'ielts-practice-session';
+
+// ============= STATE =============
+const state = {
+  view: 'today',
+  words: [],
+  settings: {
+    apiKey: '',
+    apiBase: PROVIDERS.openai.base,
+    model: PROVIDERS.openai.model,
+    provider: 'openai',
+    // Cloud sync settings
+    workerUrl: 'https://ielts-vocab-d5gu0dfe9e1a9b5e9-1257115199.ap-shanghai.app.tcloudbase.com/vocab-api',
+    syncToken: '',
+    autoSync: false,
+    lastSyncAt: 0
+  },
+  // Profile (multi-user support)
+  profile: '',          // current profile name; empty = no profile set
+  knownProfiles: [],    // list of profile names user has created
+  syncPassword: '',     // per-device encryption password for sync (NOT synced)
+  // practice session
+  session: null,
+  // current view state
+  addWord: { word: '', translation: '', generating: false, phonetic: '', partOfSpeech: '', mnemonic: '' },
+  wordsFilter: 'all'
+};
+
+// ============= PROFILE HELPERS =============
+function lsKey(name) {
+  // Profile-scoped localStorage key
+  const p = state.profile || '_default';
+  return state.profile ? `ielts-${p}-${name}` : `ielts-${name}`;
+}
+
+function loadProfile() {
+  try {
+    const cur = localStorage.getItem('ielts-profile-current');
+    const list = JSON.parse(localStorage.getItem('ielts-profile-list') || '[]');
+    state.profile = cur || '';
+    state.knownProfiles = Array.isArray(list) ? list : [];
+  } catch { state.profile = ''; state.knownProfiles = []; }
+}
+
+function saveProfile() {
+  localStorage.setItem('ielts-profile-current', state.profile || '');
+  localStorage.setItem('ielts-profile-list', JSON.stringify(state.knownProfiles || []));
+}
+
+function setProfile(name) {
+  name = String(name || '').trim();
+  if (!name) return;
+  if (!state.knownProfiles.includes(name)) state.knownProfiles.push(name);
+  state.profile = name;
+  saveProfile();
+}
+
+function cloudDocKey() {
+  return state.profile ? `vocab_data_${state.profile}` : 'vocab_data_default';
+}
+
+// ============= ENCRYPTION (for sensitive sync data) =============
+const ENC_VERSION = 1;
+let _cachedCryptoKey = null;
+let _cachedCryptoKeyPwd = '';
+
+function arrayToBase64(arr) {
+  let s = '';
+  const bytes = arr instanceof Uint8Array ? arr : new Uint8Array(arr);
+  for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+  return btoa(s);
+}
+function base64ToArray(b64) {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+async function deriveKey(password, salt) {
+  const enc = new TextEncoder();
+  const keyMaterial = await crypto.subtle.importKey(
+    'raw', enc.encode(password), 'PBKDF2', false, ['deriveKey']
+  );
+  return crypto.subtle.deriveKey(
+    { name: 'PBKDF2', salt, iterations: 120000, hash: 'SHA-256' },
+    keyMaterial,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt']
+  );
+}
+
+async function getCryptoKey(password) {
+  if (_cachedCryptoKey && _cachedCryptoKeyPwd === password) return _cachedCryptoKey;
+  // Use a stable salt derived from password (so we don't need to store salt)
+  // — OK for this use case (not high-security)
+  const salt = new TextEncoder().encode('ielts-vocab-stable-salt-v1');
+  const key = await deriveKey(password, salt);
+  _cachedCryptoKey = key;
+  _cachedCryptoKeyPwd = password;
+  return key;
+}
+
+async function encryptForSync(plaintext, password) {
+  if (!password) return null;
+  try {
+    const key = await getCryptoKey(password);
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ciphertext = await crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv },
+      key,
+      new TextEncoder().encode(JSON.stringify(plaintext))
+    );
+    return {
+      v: ENC_VERSION,
+      iv: arrayToBase64(iv),
+      data: arrayToBase64(new Uint8Array(ciphertext))
+    };
+  } catch (e) {
+    console.error('encrypt error:', e);
+    return null;
+  }
+}
+
+async function decryptForSync(encrypted, password) {
+  if (!encrypted || !password) return null;
+  try {
+    const key = await getCryptoKey(password);
+    const iv = base64ToArray(encrypted.iv);
+    const data = base64ToArray(encrypted.data);
+    const plaintext = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv },
+      key,
+      data
+    );
+    return JSON.parse(new TextDecoder().decode(plaintext));
+  } catch (e) {
+    // Wrong password or corrupted data
+    return null;
+  }
+}
+
+function getSyncPassword() {
+  // Password is stored in localStorage (per-device, NOT synced)
+  // The cloud never sees the plain password — only the encrypted ciphertext
+  return state.syncPassword || '';
+}
+function setSyncPassword(p) {
+  state.syncPassword = String(p || '');
+  try { localStorage.setItem(lsKey('sync-password'), state.syncPassword); } catch {}
+}
+function clearSyncPassword() {
+  state.syncPassword = '';
+  try { localStorage.removeItem(lsKey('sync-password')); } catch {}
+}
+function loadSyncPassword() {
+  try { state.syncPassword = localStorage.getItem(lsKey('sync-password')) || ''; } catch {}
+}
+
+// ============= TOAST =============
+function toast(msg, type = '') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show ' + type;
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => t.className = 'toast', 2200);
+}
+
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[c]));
+}
+
+// ============= AUDIO / PHONETIC =============
+// Prefer real MP3 audio (reliable). speechSynthesis is a last-resort fallback
+// because it often fails silently on Windows / file:// / some Chromium builds.
+let _audioEl = null;
+let _cachedVoices = [];
+
+function initVoices() {
+  if (!('speechSynthesis' in window)) return;
+  const refresh = () => {
+    _cachedVoices = speechSynthesis.getVoices() || [];
+  };
+  refresh();
+  if ('onvoiceschanged' in speechSynthesis) {
+    speechSynthesis.onvoiceschanged = refresh;
+  }
+}
+
+function pickEnglishVoice() {
+  if (!_cachedVoices.length) return null;
+  return _cachedVoices.find(v => v.lang.startsWith('en') && /female|samantha|victoria|karen|google|natural|aria|ava/i.test(v.name))
+      || _cachedVoices.find(v => v.lang === 'en-US')
+      || _cachedVoices.find(v => v.lang.startsWith('en'))
+      || _cachedVoices[0];
+}
+
+function stopAudio() {
+  if (_audioEl) {
+    try {
+      _audioEl.pause();
+      _audioEl.removeAttribute('src');
+      _audioEl.load();
+    } catch (_) {}
+  }
+  if ('speechSynthesis' in window) {
+    try { speechSynthesis.cancel(); } catch (_) {}
+  }
+}
+
+function playAudioUrl(url) {
+  return new Promise((resolve, reject) => {
+    stopAudio();
+    const audio = new Audio();
+    _audioEl = audio;
+    audio.preload = 'auto';
+    let settled = false;
+    const done = (ok, err) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(failTimer);
+      audio.onplaying = null;
+      audio.onended = null;
+      audio.onerror = null;
+      ok ? resolve() : reject(err || new Error('audio play failed'));
+    };
+    // If nothing starts within a few seconds, treat as failure and try next source
+    const failTimer = setTimeout(() => done(false, new Error('audio timeout')), 4000);
+    audio.onerror = () => done(false, new Error('audio load error'));
+    audio.onplaying = () => done(true);
+    audio.onended = () => done(true);
+    audio.src = url;
+    const p = audio.play();
+    if (p && typeof p.then === 'function') {
+      p.then(() => {
+        // play() resolved — treat as success even if onplaying is delayed
+        setTimeout(() => done(true), 50);
+      }).catch(err => done(false, err));
+    }
+  });
+}
+
+function speakWithSynthesis(word) {
+  return new Promise((resolve, reject) => {
+    if (!('speechSynthesis' in window)) {
+      reject(new Error('no speechSynthesis'));
+      return;
+    }
+    try {
+      if (speechSynthesis.paused) speechSynthesis.resume();
+      const utter = new SpeechSynthesisUtterance(String(word));
+      utter.lang = 'en-US';
+      utter.rate = 0.85;
+      utter.volume = 1;
+      const voice = pickEnglishVoice();
+      if (voice) utter.voice = voice;
+      utter.onend = () => resolve();
+      utter.onerror = (e) => {
+        if (e.error === 'interrupted' || e.error === 'canceled') {
+          resolve();
+          return;
+        }
+        reject(new Error(e.error || 'synthesis error'));
+      };
+      speechSynthesis.speak(utter);
+      if (speechSynthesis.paused) speechSynthesis.resume();
+      // If nothing happens (Chrome silent-fail), time out and reject
+      setTimeout(() => {
+        if (!speechSynthesis.speaking && !speechSynthesis.pending) {
+          reject(new Error('synthesis silent fail'));
+        }
+      }, 400);
+    } catch (e) {
+      reject(e);
+    }
+  });
+}
+
+function ttsUrlsFor(word, accent = 'us') {
+  const q = encodeURIComponent(String(word).trim());
+  // 有道：type=2 美音，type=1 英音（国内可访问，不走 Google）
+  const type = accent === 'uk' ? 1 : 2;
+  return [`https://dict.youdao.com/dictvoice?audio=${q}&type=${type}`];
+}
+
+async function speakWord(word, opts = {}) {
+  if (!word) return;
+  const text = String(word).trim();
+  if (!text) return;
+  const accent = opts.accent === 'uk' ? 'uk' : 'us';
+
+  stopAudio();
+
+  // 1) 词典缓存音频（按口音）
+  if (!/\s/.test(text)) {
+    const cached = state.words.find(w => w.word === text || w.word?.toLowerCase() === text.toLowerCase());
+    const preferred = accent === 'uk'
+      ? (cached?.audioUrlUk || cached?.audioUrl)
+      : (cached?.audioUrlUs || cached?.audioUrl);
+    if (preferred) {
+      try {
+        await playAudioUrl(preferred);
+        return;
+      } catch (e) {
+        console.warn('cached audio failed', e);
+      }
+    }
+  }
+
+  // 2) 有道 TTS（对应口音）
+  for (const url of ttsUrlsFor(text, accent)) {
+    try {
+      await playAudioUrl(url);
+      return;
+    } catch (e) {
+      console.warn('tts url failed', url, e);
+    }
+  }
+
+  // 3) 系统语音兜底
+  try {
+    await speakWithSynthesis(text);
+  } catch (e) {
+    console.error('speak failed', e);
+    toast('发音失败，请检查网络或系统音量', 'error');
+  }
+}
+
+function bindAccentSpeakButtons(root = document) {
+  root.querySelectorAll('.speak-btn[data-word], .speak-btn-inline[data-word]').forEach(btn => {
+    if (btn.dataset.boundSpeak === '1') return;
+    btn.dataset.boundSpeak = '1';
+    btn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const wordText = btn.dataset.word;
+      const accent = btn.dataset.accent === 'uk' ? 'uk' : 'us';
+      btn.classList.add('speaking');
+      setTimeout(() => btn.classList.remove('speaking'), 600);
+      await speakWord(wordText, { accent });
+      const w = state.words.find(x => x.word === wordText || x.word?.toLowerCase() === String(wordText || '').toLowerCase());
+      if (w && (!w.phonetic || !w.audioUrlUs || !w.audioUrlUk)) {
+        const ph = await ensurePhonetic(w, { force: !w.audioUrlUs && !w.audioUrlUk });
+        if (ph && root === document && state.view === 'words') render();
+      }
+    });
+  });
+}
+
+/** Prefer US/UK IPA; avoid AU entries that mangle æ as "ae" (e.g. /ˈdaetə/). */
+function scorePhoneticEntry(p) {
+  if (!p) return -999;
+  const text = String(p.text || '');
+  const audio = String(p.audio || '');
+  if (!text) return -50;
+  let score = 0;
+  // Proper IPA characters
+  if (/[æɪʊɔɑʌθðʃʒŋˈˌ]/.test(text)) score += 6;
+  if (/eɪ|aɪ|ɔɪ|əʊ|aʊ/.test(text)) score += 4;
+  // ASCII-mangled æ (daetə) — common Free Dictionary AU quirk
+  if (/ae/.test(text) && !/æ/.test(text)) score -= 20;
+  // Prefer US, then UK; deprioritize AU/NZ
+  if (/-us\b|_us_|en-us|us\.mp3|ca-ie-us|ie-uk-us/i.test(audio)) score += 10;
+  if (/-uk\b|_uk_|en-uk|uk\.mp3/i.test(audio)) score += 7;
+  if (/-au\b|au-nz|_au_/i.test(audio)) score -= 12;
+  if (audio) score += 2;
+  return score;
+}
+
+function pickBestPhonetic(entry) {
+  const list = Array.isArray(entry?.phonetics) ? entry.phonetics.filter(p => p && p.text) : [];
+  if (list.length === 0) {
+    const fallback = entry?.phonetic ? { text: entry.phonetic, audio: '' } : null;
+    return fallback;
+  }
+  return list.slice().sort((a, b) => scorePhoneticEntry(b) - scorePhoneticEntry(a))[0];
+}
+
+/** 清洗 IPA：重音符号、ɹ→r、ae→æ 等，避免 Georgia 字体把音标显示错 */
+function normalizePhonetic(ph) {
+  if (!ph) return '';
+  let s = String(ph).trim();
+  if (!s) return '';
+  s = s.replace(/^\/+|\/+$/g, '').trim();
+  // ASCII / 弯引号重音 → 标准 IPA
+  s = s.replace(/[''′＇`]/g, 'ˈ');
+  // Free Dictionary 常用 ɹ，国内教材多用 r
+  s = s.replace(/ɹ/g, 'r');
+  // æ 被写成 ae
+  if (/ae/.test(s) && !/æ/.test(s)) s = s.replace(/ae/g, 'æ');
+  // 误用普通 a 代替 ɑ（在重音后、且无长度记号时较常见，如 pɹasɛs）
+  // 仅在典型美式开音节环境做保守替换：重音后紧跟 pa/ta/ka... 且后面是辅音+元音
+  s = s.replace(/(ˈ)([ptkbdg])a(?=[sʃzθðfv][ɛeɪiæɑʌə])/g, '$1$2ɑ');
+  return '/' + s + '/';
+}
+
+function isBadPhonetic(ph) {
+  if (!ph || !String(ph).trim() || String(ph).trim() === '—') return true;
+  const s = String(ph);
+  // Free Dictionary often returns /ˈdaetə/ for data (æ → ae)
+  if (/ae/.test(s) && !/æ/.test(s)) return true;
+  // 旧数据：ASCII 撇号当重音、或仍含 ɹ（需重新规范化）
+  if (/[''′＇`]/.test(s)) return true;
+  if (/ɹ/.test(s)) return true;
+  return false;
+}
+
+function formatPhoneticDisplay(w) {
+  if (!w) return '—';
+  const us = w.phoneticUs ? normalizePhonetic(w.phoneticUs) : '';
+  const uk = w.phoneticUk ? normalizePhonetic(w.phoneticUk) : '';
+  const main = w.phonetic ? normalizePhonetic(w.phonetic) : '';
+  if (us && uk && us !== uk) return `美 ${us} · 英 ${uk}`;
+  if (us && uk) return us;
+  return main || us || uk || '—';
+}
+
+/** 美音/英音各带听筒（返回 HTML，勿再 escape）；音标相同时只展示一条 */
+function renderPhoneticWithSpeakers(w) {
+  if (!w) return '—';
+  const wordAttr = escapeHtml(w.word || '');
+  const us = normalizePhonetic(w.phoneticUs || '') || normalizePhonetic(w.phonetic || '') || '—';
+  const uk = normalizePhonetic(w.phoneticUk || '') || normalizePhonetic(w.phonetic || '') || '—';
+  const btn = (accent, title) =>
+    `<button type="button" class="speak-btn" data-word="${wordAttr}" data-accent="${accent}" title="${title}">🔊</button>`;
+  if (us === uk) {
+    return `<span class="phonetic-pair">
+      <span class="phonetic-item">${escapeHtml(us)} ${btn('us', '发音')}</span>
+    </span>`;
+  }
+  return `<span class="phonetic-pair">
+    <span class="phonetic-item"><span class="accent-tag">美</span> ${escapeHtml(us)} ${btn('us', '美音')}</span>
+    <span class="phonetic-item"><span class="accent-tag">英</span> ${escapeHtml(uk)} ${btn('uk', '英音')}</span>
+  </span>`;
+}
+
+// Fetch IPA phonetic (+ audio URL), preferring US/UK over mangled AU
+async function ensurePhonetic(word, { force = false } = {}) {
+  if (!force && word.phonetic && !isBadPhonetic(word.phonetic) && word.audioUrl) {
+    return word.phonetic;
+  }
+  try {
+    const resp = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(word.word)}`);
+    if (!resp.ok) return word.phonetic || null;
+    const data = await resp.json();
+    if (!Array.isArray(data) || !data[0]) return word.phonetic || null;
+    const entry = data[0];
+    const best = pickBestPhonetic(entry);
+    const ph = normalizePhonetic(best?.text || '');
+    const audioUrl = best?.audio || entry.phonetics?.find(p => p.audio)?.audio || '';
+
+    // Also keep US / UK variants when available
+    let phoneticUs = '';
+    let phoneticUk = '';
+    let audioUrlUs = '';
+    let audioUrlUk = '';
+    for (const p of (entry.phonetics || [])) {
+      if (!p?.text && !p?.audio) continue;
+      // 跳过 ae 乱码澳式；ɹ 等交给 normalizePhonetic 清洗
+      if (p.text && /ae/.test(p.text) && !/æ/.test(p.text)) continue;
+      const t = p.text ? normalizePhonetic(p.text) : '';
+      const a = p.audio || '';
+      if (/-us\b|_us_|en-us|us\.mp3|ca-ie-us/i.test(a)) {
+        if (!phoneticUs && t) phoneticUs = t;
+        if (!audioUrlUs && a) audioUrlUs = a;
+      }
+      if (/-uk\b|_uk_|en-uk|uk\.mp3/i.test(a)) {
+        if (!phoneticUk && t) phoneticUk = t;
+        if (!audioUrlUk && a) audioUrlUk = a;
+      }
+    }
+    // Prefer the highest-scored as primary; fill US from best if tagged us
+    if (!phoneticUs && best && /-us\b|us\.mp3|ca-ie-us|ie-uk-us/i.test(best.audio || '')) {
+      phoneticUs = ph;
+    }
+    if (!audioUrlUs && best?.audio && /-us\b|us\.mp3|ca-ie-us|ie-uk-us/i.test(best.audio)) {
+      audioUrlUs = best.audio;
+    }
+    if (!audioUrlUk) {
+      const ukAudio = (entry.phonetics || []).find(p => p.audio && /-uk\b|uk\.mp3/i.test(p.audio));
+      if (ukAudio) audioUrlUk = ukAudio.audio;
+    }
+
+    let changed = false;
+    if (ph && (force || isBadPhonetic(word.phonetic) || ph !== word.phonetic)) {
+      word.phonetic = ph;
+      changed = true;
+    }
+    if (phoneticUs && phoneticUs !== word.phoneticUs) {
+      word.phoneticUs = phoneticUs;
+      changed = true;
+    }
+    if (phoneticUk && phoneticUk !== word.phoneticUk) {
+      word.phoneticUk = phoneticUk;
+      changed = true;
+    }
+    if (audioUrl && audioUrl !== word.audioUrl) {
+      word.audioUrl = audioUrl;
+      changed = true;
+    }
+    if (audioUrlUs && audioUrlUs !== word.audioUrlUs) {
+      word.audioUrlUs = audioUrlUs;
+      changed = true;
+    }
+    if (audioUrlUk && audioUrlUk !== word.audioUrlUk) {
+      word.audioUrlUk = audioUrlUk;
+      changed = true;
+    }
+    if (!word.partOfSpeech && entry.meanings?.[0]?.partOfSpeech) {
+      word.partOfSpeech = entry.meanings[0].partOfSpeech;
+      changed = true;
+    }
+    if (changed) await dbPut(word);
+    return word.phonetic || null;
+  } catch (e) {
+    console.warn('fetchPhonetic failed for', word.word, e);
+    return word.phonetic || null;
+  }
+}
+
+function escapeRegex(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function formatRelative(ts) {
+  if (!ts) return '';
+  const diff = ts - Date.now();
+  const days = Math.round(diff / DAY_MS);
+  if (days < 0) return `${-days} 天前该复习`;
+  if (days === 0) return '今天复习';
+  return `${days} 天后复习`;
+}
+
+function getWordStatus(w) {
+  if (w.crossedOut) return 'crossed';
+  if (w.interval >= 21 && (w.streak || 0) >= 3) return 'mastered';
+  if (w.nextReview && w.nextReview <= Date.now()) return 'due';
+  if ((w.totalReviews || 0) === 0) return 'new';
+  return 'learning';
+}
+
+// ============= SETTINGS =============
+function loadSettings() {
+  try {
+    const s = JSON.parse(localStorage.getItem(lsKey('settings')) || '{}');
+    Object.assign(state.settings, s);
+  } catch {}
+}
+
+function saveSettings() {
+  localStorage.setItem(lsKey('settings'), JSON.stringify(state.settings));
+}
+
+function isConfigured() {
+  return state.settings.apiKey && state.settings.apiBase && state.settings.model;
+}
+
+function hasSeenWelcome() {
+  return localStorage.getItem('ielts-welcomed') === '1';
+}
+
+function markWelcomeSeen() {
+  localStorage.setItem('ielts-welcomed', '1');
+}
+
+// ============= PRACTICE SESSION PERSISTENCE =============
+function serializePracticeSession(s) {
+  if (!s || s.phase === 'done') return null;
+  const cache = {};
+  for (const [id, v] of Object.entries(s.contentCache || {})) {
+    if (v && v.content) cache[id] = { content: v.content };
+  }
+  return {
+    version: 1,
+    savedAt: Date.now(),
+    mode: s.mode,
+    wordIds: (s.words || []).map(w => w.id),
+    wordIdx: s.wordIdx || 0,
+    phase: s.phase,
+    content: s.content || null,
+    contentCache: cache,
+    results: s.results || [],
+    streak: s.streak || 0,
+    bestStreak: s.bestStreak || 0,
+    lastResult: s.lastResult || null,
+    lastUserInput: s.lastUserInput || null,
+    hintShown: !!s.hintShown
+  };
+}
+
+function savePracticeSession() {
+  try {
+    const data = serializePracticeSession(state.session);
+    if (!data) {
+      localStorage.removeItem(PRACTICE_SESSION_KEY);
+      return;
+    }
+    localStorage.setItem(PRACTICE_SESSION_KEY, JSON.stringify(data));
+  } catch (e) {
+    console.warn('savePracticeSession failed', e);
+  }
+}
+
+function clearPracticeSession() {
+  try { localStorage.removeItem(PRACTICE_SESSION_KEY); } catch (_) {}
+}
+
+function readSavedPracticeSession() {
+  try {
+    const raw = localStorage.getItem(PRACTICE_SESSION_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw);
+    if (!data || !Array.isArray(data.wordIds) || !data.wordIds.length) return null;
+    return data;
+  } catch (_) {
+    return null;
+  }
+}
+
+function getSavedPracticeSummary() {
+  const saved = readSavedPracticeSession();
+  if (!saved) return null;
+  const total = saved.wordIds.length;
+  const idx = Math.min(saved.wordIdx || 0, total);
+  if (idx >= total) return null;
+  const modeLabel = saved.mode === 'translate' ? '句子翻译' : '完形填空';
+  const when = saved.savedAt ? new Date(saved.savedAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+  return {
+    mode: saved.mode === 'translate' ? 'translate' : 'cloze',
+    modeLabel,
+    current: idx + 1,
+    total,
+    when,
+    answered: (saved.results || []).length
+  };
+}
+
+function hydratePracticeSession(saved) {
+  if (!saved || !Array.isArray(saved.wordIds)) return null;
+  const idToWord = new Map(state.words.map(w => [w.id, w]));
+  const words = saved.wordIds.map(id => idToWord.get(id)).filter(Boolean);
+  if (!words.length) return null;
+
+  const idSet = new Set(words.map(w => w.id));
+  let newIdx = 0;
+  let found = false;
+  for (let i = 0; i < saved.wordIds.length; i++) {
+    const id = saved.wordIds[i];
+    if (!idSet.has(id)) continue;
+    if (i < (saved.wordIdx || 0)) {
+      newIdx++;
+      continue;
+    }
+    newIdx = words.findIndex(w => w.id === id);
+    found = true;
+    break;
+  }
+  if (!found) newIdx = words.length;
+  if (newIdx < 0 || newIdx >= words.length) return null;
+
+  const contentCache = saved.contentCache || {};
+  const cur = words[newIdx];
+  let content = saved.content;
+  if (content && cur && saved.wordIds[saved.wordIdx] && saved.wordIds[saved.wordIdx] !== cur.id) {
+    content = contentCache[cur.id]?.content || null;
+  }
+  if (!content && cur) content = contentCache[cur.id]?.content || null;
+
+  let phase = saved.phase || 'answer';
+  if (phase === 'done') return null;
+  if (phase === 'error') phase = content ? 'answer' : 'generating';
+  if (phase === 'generating' && content) phase = 'answer';
+  if (phase === 'feedback' && !saved.lastResult) phase = 'answer';
+
+  return {
+    words,
+    wordIdx: newIdx,
+    mode: saved.mode === 'translate' ? 'translate' : 'cloze',
+    content,
+    contentCache,
+    _inflight: {},
+    _prefetchRunning: false,
+    phase,
+    results: (saved.results || []).filter(r => idSet.has(r.wordId)),
+    streak: saved.streak || 0,
+    bestStreak: saved.bestStreak || 0,
+    lastResult: saved.lastResult || null,
+    lastUserInput: saved.lastUserInput || null,
+    hintShown: !!saved.hintShown
+  };
+}
+
+async function resumePracticeSession() {
+  const saved = readSavedPracticeSession();
+  const s = hydratePracticeSession(saved);
+  if (!s) {
+    clearPracticeSession();
+    toast('没有可继续的进度', 'error');
+    render();
+    return;
+  }
+  state.session = s;
+  state.view = 'practice';
+  render();
+
+  if (!s.content || s.phase === 'generating') {
+    await ensureContent();
+  } else {
+    kickPrefetch(s);
+    if (s.phase === 'feedback' && s.lastResult) {
+      setTimeout(() => {
+        if (!sessionAlive(s)) return;
+        const w = s.words[s.wordIdx];
+        showFeedback(s.lastResult, s.mode, w, s.content);
+        showDifficultyRow();
+        const reveal = document.getElementById('reveal-btn');
+        if (reveal) reveal.style.display = 'none';
+        const hintBtn = document.getElementById('hint-btn');
+        if (hintBtn) hintBtn.style.display = 'none';
+        const checkBtn = document.getElementById('check-btn');
+        if (checkBtn) {
+          checkBtn.style.display = 'inline-flex';
+          checkBtn.textContent = '下一题 →';
+        }
+      }, 30);
+    }
+  }
+  savePracticeSession();
+  toast('已恢复练习进度', 'success');
+}
+
+function abandonPracticeSession() {
+  clearPracticeSession();
+  state.session = null;
+}
+
+// ============= INDEXEDDB =============
+function openDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onupgradeneeded = (e) => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains(STORE)) {
+        const store = db.createObjectStore(STORE, { keyPath: 'id' });
+        store.createIndex('crossedOut', 'crossedOut');
+        store.createIndex('nextReview', 'nextReview');
+        store.createIndex('addedAt', 'addedAt');
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function dbAll() {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readonly');
+    const req = tx.objectStore(STORE).getAll();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function dbPut(word) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readwrite');
+    const req = tx.objectStore(STORE).put(word);
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function dbGet(id) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readonly');
+    const req = tx.objectStore(STORE).get(id);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function dbDelete(id) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readwrite');
+    const req = tx.objectStore(STORE).delete(id);
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function dbClear() {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readwrite');
+    const req = tx.objectStore(STORE).clear();
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function loadAllWords() {
+  try {
+    state.words = await dbAll();
+  } catch (e) {
+    console.error('loadAllWords error', e);
+    state.words = [];
+  }
+  // 本地清洗已存音标（ɹ、ASCII 重音等），避免词表继续显示错
+  for (const w of state.words) {
+    let changed = false;
+    for (const key of ['phonetic', 'phoneticUs', 'phoneticUk']) {
+      if (!w[key]) continue;
+      const cleaned = normalizePhonetic(w[key]);
+      if (cleaned && cleaned !== w[key]) {
+        w[key] = cleaned;
+        changed = true;
+      }
+    }
+    if (changed) dbPut(w).catch(() => {});
+  }
+}
+
+// ============= LLM =============
+async function callLLM(messages, opts = {}) {
+  const { apiKey, apiBase, model } = state.settings;
+  if (!apiKey || !apiBase || !model) throw new Error('请先在设置中配置 API');
+
+  const resp = await fetch(apiBase.replace(/\/$/, '') + '/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer ' + apiKey
+    },
+    body: JSON.stringify({
+      model,
+      messages,
+      temperature: opts.temperature ?? 0.7,
+      response_format: opts.json ? { type: 'json_object' } : undefined
+    })
+  });
+
+  if (!resp.ok) {
+    const errText = await resp.text();
+    throw new Error(`API 错误 (${resp.status}): ${errText.slice(0, 200)}`);
+  }
+
+  const data = await resp.json();
+  return data.choices?.[0]?.message?.content ?? '';
+}
+
+function parseJSON(s) {
+  if (!s) throw new Error('AI 返回为空');
+  // try to extract JSON from the response
+  const m = s.match(/\{[\s\S]*\}/);
+  const json = m ? m[0] : s;
+  return JSON.parse(json);
+}
+
+async function generateWordInfo(word) {
+  // Prefer free dictionary gloss (word-level), fall back to AI
+  const youdao = await fetchYoudaoGloss(word);
+  let phonetic = '';
+  let partOfSpeech = '';
+  try {
+    const resp = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(word)}`);
+    if (resp.ok) {
+      const data = await resp.json();
+      if (Array.isArray(data) && data[0]) {
+        const best = pickBestPhonetic(data[0]);
+        phonetic = normalizePhonetic(best?.text || '');
+        partOfSpeech = data[0].meanings?.[0]?.partOfSpeech || '';
+      }
+    }
+  } catch (_) {}
+
+  if (youdao) {
+    const posMatch = youdao.match(/^([a-z]+\.)\s*/i);
+    const base = {
+      phonetic,
+      partOfSpeech: partOfSpeech || (posMatch ? posMatch[1].replace(/\.$/, '') : ''),
+      translation: youdao,
+      mnemonic: ''
+    };
+    try {
+      base.mnemonic = await generateMnemonicTip(word);
+    } catch (_) {}
+    return base;
+  }
+
+  const prompt = `You are an English vocabulary tutor for an IELTS test taker. Look up the English word "${word}".
+
+Provide:
+- Correct IPA phonetic transcription, prefer General American (e.g. data → /ˈdeɪtə/ or /ˈdætə/, NEVER /ˈdaetə/)
+- Part of speech
+- Concise Chinese WORD gloss only (词语释义). Examples of GOOD: "洞察力；洞悉" or "n. 影响；效果；效力".
+- NEVER write example sentences. NEVER write 句子翻译 like "这本书提供了…". Only short dictionary-style meanings, separated by ； or ，.
+- A short Chinese mnemonic tip: prefer root/prefix/suffix breakdown; if none, a brief vivid association. Do NOT invent fake etymology.
+
+Return JSON in EXACTLY this format:
+{
+  "phonetic": "/ˈdeɪtə/",
+  "partOfSpeech": "noun",
+  "translation": "数据；资料",
+  "mnemonic": "data 来自拉丁 dare「给予」→ 给出的事实/资料"
+}`;
+  const text = await callLLM([{ role: 'user', content: prompt }], { json: true, temperature: 0.2 });
+  const parsed = parseJSON(text) || {};
+  if (!parsed.phonetic && phonetic) parsed.phonetic = phonetic;
+  if (!parsed.partOfSpeech && partOfSpeech) parsed.partOfSpeech = partOfSpeech;
+  if (!parsed.mnemonic) {
+    try { parsed.mnemonic = await generateMnemonicTip(word); } catch (_) {}
+  }
+  return parsed;
+}
+
+/** 词根词缀 / 联想助记（中文，短） */
+async function generateMnemonicTip(word) {
+  if (!word || !isConfigured()) return '';
+  const prompt = `为雅思学习者写英文词「${word}」的助记提示（用中文，1–3 句）。
+
+优先顺序：
+1) 词根 / 前缀 / 后缀拆解（有把握再写语源；不要编造离谱词源）
+2) 构词联想、近义对比、画面记忆
+3) 若实在无明显词缀，给一句好记的用法/场景提示
+
+不要写成完整例句翻译。只要助记。
+
+Return JSON ONLY:
+{ "mnemonic": "..." }`;
+  const text = await callLLM([{ role: 'user', content: prompt }], { json: true, temperature: 0.4 });
+  const parsed = parseJSON(text);
+  return String(parsed?.mnemonic || '').trim();
+}
+
+async function ensureMnemonic(wordObj, { force = false } = {}) {
+  if (!wordObj) return '';
+  const existing = String(wordObj.mnemonic || '').trim();
+  if (!force && existing) return existing;
+  if (!isConfigured()) return existing;
+  try {
+    const tip = await generateMnemonicTip(wordObj.word);
+    if (tip) {
+      wordObj.mnemonic = tip;
+      dbPut(wordObj).catch(() => {});
+      return tip;
+    }
+  } catch (e) {
+    console.warn('ensureMnemonic failed', e);
+  }
+  return existing;
+}
+
+function mnemonicHtml(tip, { loading = false } = {}) {
+  if (loading) {
+    return `<div class="suggestion cloze-mnemonic" style="margin-top:8px;"><span class="text-light" style="font-size:12px;">助记加载中…</span></div>`;
+  }
+  const t = String(tip || '').trim();
+  if (!t) return '';
+  return `<div class="suggestion cloze-mnemonic" style="margin-top:8px;">
+    <div class="text-light" style="font-size:12px; margin-bottom:2px;">💡 助记 · 词根词缀</div>
+    <div style="line-height:1.65;">${escapeHtml(t)}</div>
+  </div>`;
+}
+
+/** 句子翻译（旧例句）不算词语释义 */
+function isSentenceLikeChinese(s) {
+  if (!s) return false;
+  const t = String(s).trim();
+  if (/[。！？]/.test(t)) return true;
+  // 过长且像完整陈述句
+  if (t.length > 28 && /[了着过]/.test(t) && !/[；、]/.test(t)) return true;
+  return false;
+}
+
+function hasValidTranslation(w) {
+  const t = w && w.translation ? String(w.translation).trim() : '';
+  return !!t && !isSentenceLikeChinese(t);
+}
+
+function getWordTranslation(w) {
+  if (!w) return '';
+  if (hasValidTranslation(w)) return String(w.translation).trim();
+  return '';
+}
+
+function cleanYoudaoExplain(explain) {
+  if (!explain) return '';
+  return String(explain)
+    .replace(/[;；]\s*【名】[\s\S]*$/u, '')
+    .replace(/【名】[\s\S]*$/u, '')
+    .replace(/\s*[;；]\s*$/u, '')
+    .trim();
+}
+
+/** JSONP — Youdao blocks browser CORS on fetch */
+function jsonp(url, timeoutMs = 8000) {
+  return new Promise((resolve, reject) => {
+    const cb = '_ydcb_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+    const script = document.createElement('script');
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(new Error('jsonp timeout'));
+    }, timeoutMs);
+    function cleanup() {
+      clearTimeout(timer);
+      try { delete window[cb]; } catch (_) { window[cb] = undefined; }
+      if (script.parentNode) script.parentNode.removeChild(script);
+    }
+    window[cb] = (data) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(data);
+    };
+    script.onerror = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(new Error('jsonp network error'));
+    };
+    script.src = url + (url.includes('?') ? '&' : '?') + 'callback=' + cb;
+    document.head.appendChild(script);
+  });
+}
+
+async function fetchYoudaoGloss(word) {
+  const q = String(word || '').trim();
+  if (!q) return '';
+  const data = await jsonp(`https://dict.youdao.com/suggest?q=${encodeURIComponent(q)}&num=1&doctype=json`);
+  const explain = data?.data?.entries?.[0]?.explain || '';
+  const cleaned = cleanYoudaoExplain(explain);
+  if (!cleaned || isSentenceLikeChinese(cleaned)) return '';
+  return cleaned;
+}
+
+let _glossBackfillRunning = false;
+
+async function backfillWordGlosses({ force = false } = {}) {
+  if (_glossBackfillRunning) return;
+
+  for (const w of state.words) {
+    if (w.translation && isSentenceLikeChinese(w.translation)) {
+      w.translation = '';
+    }
+  }
+
+  const needGloss = state.words.filter(w => force || !hasValidTranslation(w));
+  const needPhonetic = state.words.filter(w => force || isBadPhonetic(w.phonetic) || !w.phonetic);
+  if (needGloss.length === 0 && needPhonetic.length === 0) {
+    toast('没有需要修正的词');
+    return;
+  }
+
+  _glossBackfillRunning = true;
+  if (state.view === 'words') render(); // show「修正中」
+
+  let done = 0;
+  let okGloss = 0;
+  let okPh = 0;
+  const todo = [...new Set([...needGloss, ...needPhonetic])];
+  const withTimeout = (p, ms) => Promise.race([
+    p,
+    new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))
+  ]);
+
+  try {
+    toast(`正在修正 0/${todo.length}…`);
+    const queue = todo.slice();
+    const workers = Array.from({ length: Math.min(3, queue.length) }, async () => {
+      while (queue.length) {
+        const w = queue.shift();
+        try {
+          if (force || !hasValidTranslation(w)) {
+            const gloss = await withTimeout(fetchYoudaoGloss(w.word), 8000);
+            if (gloss) {
+              w.translation = gloss;
+              okGloss++;
+            }
+          }
+          if (force || isBadPhonetic(w.phonetic) || !w.phonetic) {
+            // Local repair first (ae → æ), then network
+            if (w.phonetic && /ae/.test(w.phonetic) && !/æ/.test(w.phonetic)) {
+              w.phonetic = normalizePhonetic(w.phonetic);
+              if (!isBadPhonetic(w.phonetic)) okPh++;
+            }
+            if (isBadPhonetic(w.phonetic) || !w.phonetic) {
+              const ph = await withTimeout(ensurePhonetic(w, { force: true }), 10000);
+              if (ph && !isBadPhonetic(ph)) okPh++;
+            } else {
+              await dbPut(w);
+            }
+          }
+          await dbPut(w);
+        } catch (e) {
+          console.warn('backfill failed', w.word, e);
+        }
+        done++;
+        if (done % 10 === 0 || done === todo.length) {
+          toast(`正在修正 ${done}/${todo.length}…`);
+        }
+      }
+    });
+    await Promise.all(workers);
+    toast(`完成：释义 ${okGloss} · 音标 ${okPh}`, 'success');
+  } finally {
+    _glossBackfillRunning = false;
+    if (state.view === 'words') render();
+  }
+}
+
+// Generate practice content for one mode only
+async function generateContentForWord(word, mode = 'cloze') {
+  for (let attempt = 0; attempt < 4; attempt++) {
+    let prompt;
+    if (mode === 'translate') {
+      prompt = `You are an English vocabulary tutor for an IELTS test taker.
+
+Target word: "${word.word}"
+
+Create a Chinese-to-English translation exercise.
+HARD RULE: translateReference MUST contain the exact word "${word.word}" (or a clear inflection like ${word.word}s / ${word.word}ed / ${word.word}ing) as its own word.
+Do NOT replace it with a synonym.
+HARD RULE: translateChinese MUST be fully Chinese — do NOT leave "${word.word}" or any other English words in it; express the meaning in Chinese only.
+
+Return JSON ONLY:
+{
+  "translateChinese": "...",
+  "translateReference": "... ${word.word} ..."
+}`;
+    } else {
+      prompt = `You are an English vocabulary tutor for an IELTS test taker.
+
+Target word: "${word.word}"
+
+Create ONE cloze sentence.
+HARD RULE: clozeEnglish MUST contain the exact word "${word.word}" (or inflection ${word.word}s / ${word.word}ed / ${word.word}ing) as its own word.
+Example shape: "Researchers decided to ${word.word} the experiment after careful review."
+Do NOT replace it with a synonym.
+HARD RULE: clozeChinese MUST be a full Chinese translation of the English sentence — do NOT leave "${word.word}" or any Latin/English words in the Chinese; translate everything into Chinese.
+
+Return JSON ONLY:
+{
+  "clozeEnglish": "... ${word.word} ...",
+  "clozeChinese": "..."
+}`;
+    }
+
+    try {
+      const text = await callLLM([{ role: 'user', content: prompt }], { json: true, temperature: 0.7 + attempt * 0.08 });
+      const parsed = parseJSON(text);
+      const ok = validateGeneratedContent(word, mode, parsed);
+      if (ok) return ok;
+      console.warn(`generateContentForWord(${mode}): attempt ${attempt + 1} invalid for`, word.word, parsed);
+    } catch (e) {
+      console.warn(`generateContentForWord(${mode}): attempt ${attempt + 1} error`, e);
+    }
+  }
+
+  // Last resort template — never leave the learner stuck
+  return fallbackContentForWord(word, mode);
+}
+
+function fallbackContentForWord(word, mode) {
+  const w = word.word;
+  const gloss = glossSnippetForSentence(word);
+  if (mode === 'translate') {
+    return {
+      translateChinese: `在学术写作中，准确理解并运用「${gloss}」这一概念非常重要。`,
+      translateReference: `In academic writing, it is very important to use the word ${w} accurately.`
+    };
+  }
+  return {
+    clozeEnglish: `In academic writing, it is important to use ${w} accurately and appropriately.`,
+    clozeChinese: `在学术写作中，准确、恰当地使用「${gloss}」很重要。`
+  };
+}
+
+/** 取短释义，用于造句中文兜底（绝不塞回英文原词） */
+function glossSnippetForSentence(word) {
+  const raw = getWordTranslation(word) || String(word?.translation || '').trim();
+  if (!raw) return '该词';
+  let t = raw.split(/[；;]/)[0].trim();
+  t = t.replace(/^(n\.|v\.|vt\.|vi\.|adj\.|adv\.|prep\.|conj\.|pron\.|num\.)\s*/i, '').trim();
+  // 去掉释义里残留的英文单词
+  t = t.replace(/\b[A-Za-z][A-Za-z'-]{1,}\b/g, '').replace(/\s{2,}/g, ' ').trim();
+  t = t.replace(/^[、，,；;\s]+|[、，,；;\s]+$/g, '').trim();
+  return t || '该词';
+}
+
+function wordMatchRe(word) {
+  const stem = String(word || '').toLowerCase().trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  if (!stem) return /(?!)/;
+  return new RegExp('\\b' + stem + '(?:s|es|ed|ing|ings|er|ers|est|ly|ies|ied|iness|ment|ments|tion|tions|ative|al|ally)?\\b', 'i');
+}
+
+/** 生成常见词形对应的词干集合（用于 abandon / abandoned / abandoning 去重） */
+function inflectionStems(word) {
+  const w = String(word || '').toLowerCase().trim().replace(/[^a-z'-]/g, '');
+  const stems = new Set();
+  if (!w || w.length < 2) return stems;
+  stems.add(w);
+
+  const add = (s) => {
+    if (s && s.length >= 2) stems.add(s);
+  };
+
+  // y → ies / ied / iness
+  if (w.endsWith('ies') && w.length > 4) add(w.slice(0, -3) + 'y');
+  if (w.endsWith('ied') && w.length > 4) add(w.slice(0, -3) + 'y');
+  if (w.endsWith('iness') && w.length > 6) add(w.slice(0, -5) + 'y');
+
+  // -ing（含去 e、双写辅音）
+  if (w.endsWith('ing') && w.length > 4) {
+    const base = w.slice(0, -3);
+    add(base);
+    add(base + 'e');
+    if (base.length >= 2 && base[base.length - 1] === base[base.length - 2] && /[b-df-hj-np-tv-z]/.test(base[base.length - 1])) {
+      add(base.slice(0, -1));
+    }
+  }
+
+  // -ed
+  if (w.endsWith('ed') && w.length > 3) {
+    const base = w.slice(0, -2);
+    add(base);
+    add(base + 'e');
+    add(w.slice(0, -1)); // like → liked 的反向近似
+    if (base.length >= 2 && base[base.length - 1] === base[base.length - 2] && /[b-df-hj-np-tv-z]/.test(base[base.length - 1])) {
+      add(base.slice(0, -1));
+    }
+  }
+
+  // 复数 / 三单
+  if (w.endsWith('es') && w.length > 3) add(w.slice(0, -2));
+  if (w.endsWith('s') && !w.endsWith('ss') && !w.endsWith('us') && w.length > 3) add(w.slice(0, -1));
+
+  // 副词 / 比较级（保守）
+  if (w.endsWith('ly') && w.length > 4) add(w.slice(0, -2));
+  if (w.endsWith('est') && w.length > 4) add(w.slice(0, -3));
+  if (w.endsWith('er') && w.length > 4) add(w.slice(0, -2));
+
+  return stems;
+}
+
+/** 是否为同一词的不同词形（复数、分词、三单等） */
+function areInflectionVariants(a, b) {
+  const x = String(a || '').toLowerCase().trim();
+  const y = String(b || '').toLowerCase().trim();
+  if (!x || !y) return false;
+  if (x === y) return true;
+
+  const [shorter, longer] = x.length <= y.length ? [x, y] : [y, x];
+  // 过短词干易误伤（如 as/ask），要求较短词 ≥3
+  if (shorter.length >= 3 && wordMatchRe(shorter).test(longer)) return true;
+
+  const sx = inflectionStems(x);
+  const sy = inflectionStems(y);
+  for (const s of sx) {
+    if (s.length < 3) continue;
+    if (sy.has(s)) return true;
+  }
+  return false;
+}
+
+/**
+ * 在词表中找已存在的同词形词。
+ * @returns {{ entry: object, exact: boolean } | null}
+ */
+function findRelatedWordInList(word, { includeCrossed = false } = {}) {
+  const target = String(word || '').toLowerCase().trim();
+  if (!target) return null;
+  let inflectionHit = null;
+  for (const w of state.words) {
+    if (!w?.word) continue;
+    if (!includeCrossed && w.crossedOut) continue;
+    const existing = w.word.toLowerCase();
+    if (existing === target) return { entry: w, exact: true };
+    if (!inflectionHit && areInflectionVariants(existing, target)) {
+      inflectionHit = { entry: w, exact: false };
+    }
+  }
+  return inflectionHit;
+}
+
+/** More lenient: create→creating, study→studies, etc. */
+function sentenceContainsTarget(sentence, word) {
+  const s = String(sentence || '');
+  const w = String(word || '').trim();
+  if (!w || !s) return false;
+  if (wordMatchRe(w).test(s)) return true;
+  const esc = escapeRegex(w.toLowerCase());
+  if (/y$/i.test(w) && w.length > 2) {
+    const stem = escapeRegex(w.slice(0, -1).toLowerCase());
+    if (new RegExp('\\b' + stem + '(?:ies|ied|ying)\\b', 'i').test(s)) return true;
+  }
+  if (/e$/i.test(w) && w.length > 3) {
+    const stem = escapeRegex(w.slice(0, -1).toLowerCase());
+    if (new RegExp('\\b' + stem + '(?:ing|ed|er|est|able)\\b', 'i').test(s)) return true;
+  }
+  if (new RegExp('(?:^|[^A-Za-z])' + esc + '(?:[^A-Za-z]|$)', 'i').test(s)) return true;
+  return false;
+}
+
+/** 中文题面不得残留目标英文词或其他英文单词 */
+function chineseIsFullyChinese(text, targetWord) {
+  const s = String(text || '').trim();
+  if (!s) return false;
+  if (sentenceContainsTarget(s, targetWord)) return false;
+  // 允许单个字母缩写极少见；拒绝明显英文词（≥2 个拉丁字母）
+  if (/\b[A-Za-z][A-Za-z'-]+\b/.test(s)) return false;
+  return true;
+}
+
+/** 把中文里夹着的目标英文词换成释义（兼容旧缓存/旧兜底） */
+function sanitizeChineseLeavingNoEnglish(text, word) {
+  let s = String(text || '').trim();
+  if (!s) return s;
+  const gloss = glossSnippetForSentence(word);
+  const w = String(word?.word || '').trim();
+  if (w && sentenceContainsTarget(s, w)) {
+    s = s.replace(wordMatchRe(w), gloss);
+    if (/y$/i.test(w) && w.length > 2) {
+      const stem = escapeRegex(w.slice(0, -1));
+      s = s.replace(new RegExp('\\b' + stem + '(?:ies|ied|ying)\\b', 'gi'), gloss);
+    }
+    if (/e$/i.test(w) && w.length > 3) {
+      const stem = escapeRegex(w.slice(0, -1));
+      s = s.replace(new RegExp('\\b' + stem + '(?:ing|ed|er|est|able)\\b', 'gi'), gloss);
+    }
+  }
+  // 去掉剩余英文词（≥2 字母）
+  s = s.replace(/\b[A-Za-z][A-Za-z'-]+\b/g, '').replace(/\s{2,}/g, ' ').trim();
+  s = s.replace(/\s+([，。！？、；：])/g, '$1').replace(/（\s*）/g, '').trim();
+  return s || `这句话里需要理解并运用「${gloss}」。`;
+}
+
+function repairPracticeContent(word, mode, content) {
+  if (!content || !word) return content;
+  if (mode === 'translate') {
+    if (content.translateChinese && !chineseIsFullyChinese(content.translateChinese, word.word)) {
+      content.translateChinese = sanitizeChineseLeavingNoEnglish(content.translateChinese, word);
+    }
+  } else if (content.clozeChinese && !chineseIsFullyChinese(content.clozeChinese, word.word)) {
+    content.clozeChinese = sanitizeChineseLeavingNoEnglish(content.clozeChinese, word);
+  }
+  return content;
+}
+
+function validateGeneratedContent(wordObj, mode, parsed) {
+  if (!parsed || typeof parsed !== 'object') return null;
+  if (mode === 'translate') {
+    const zh = String(parsed.translateChinese || '').trim();
+    const en = String(parsed.translateReference || '').trim();
+    if (zh && en && sentenceContainsTarget(en, wordObj.word) && chineseIsFullyChinese(zh, wordObj.word)) {
+      return { translateChinese: zh, translateReference: en };
+    }
+  } else {
+    const zh = String(parsed.clozeChinese || '').trim();
+    const en = String(parsed.clozeEnglish || '').trim();
+    if (zh && en && sentenceContainsTarget(en, wordObj.word) && chineseIsFullyChinese(zh, wordObj.word)) {
+      return { clozeEnglish: en, clozeChinese: zh };
+    }
+  }
+  return null;
+}
+
+/** 一次请求批量出题（更快） */
+async function generateContentBatch(words, mode = 'cloze') {
+  if (!words.length) return {};
+  if (words.length === 1) {
+    const c = await generateContentForWord(words[0], mode);
+    return { [words[0].id]: c };
+  }
+
+  const list = words.map(w => w.word).join(', ');
+  let prompt;
+  if (mode === 'translate') {
+    prompt = `You are an English vocabulary tutor for an IELTS test taker.
+
+Create a Chinese-to-English translation exercise for EACH of these words: ${list}
+
+Rules for every item:
+- Chinese sentence MUST be fully Chinese — do NOT leave the target word or any other English/Latin words in translateChinese
+- Its English reference MUST contain that exact word (or common inflection) as a standalone word
+- B1-B2, IELTS topics
+- Different contexts for different words
+
+Return JSON EXACTLY:
+{
+  "items": [
+    {"word": "example", "translateChinese": "...", "translateReference": "..."}
+  ]
+}
+Include exactly one item per word, using the same spelling as given.`;
+  } else {
+    prompt = `You are an English vocabulary tutor for an IELTS test taker.
+
+Create a cloze (fill-in-the-blank) exercise for EACH of these words: ${list}
+
+Rules for every item:
+- English sentence MUST contain that exact word (or common inflection) as a standalone word
+- clozeChinese MUST be a FULL Chinese translation — do NOT leave the target word or any English/Latin words in the Chinese
+- B1-B2, IELTS topics
+- Different contexts for different words
+
+Return JSON EXACTLY:
+{
+  "items": [
+    {"word": "example", "clozeEnglish": "...", "clozeChinese": "..."}
+  ]
+}
+Include exactly one item per word, using the same spelling as given.`;
+  }
+
+  const text = await callLLM([{ role: 'user', content: prompt }], { json: true, temperature: 0.8 });
+  const parsed = parseJSON(text);
+  const items = Array.isArray(parsed?.items) ? parsed.items : [];
+  const byWord = {};
+  for (const it of items) {
+    if (it && it.word) byWord[String(it.word).toLowerCase()] = it;
+  }
+
+  const result = {};
+  const missing = [];
+  for (const w of words) {
+    const raw = byWord[w.word.toLowerCase()];
+    const ok = validateGeneratedContent(w, mode, raw);
+    if (ok) result[w.id] = ok;
+    else missing.push(w);
+  }
+
+  // 批量里失败的词，逐个补齐（最终必有兜底题）
+  if (missing.length) {
+    const repaired = await Promise.all(missing.map(async w => {
+      try {
+        return [w.id, await generateContentForWord(w, mode)];
+      } catch (e) {
+        console.warn('batch repair failed', w.word, e);
+        return [w.id, fallbackContentForWord(w, mode)];
+      }
+    }));
+    for (const [id, content] of repaired) {
+      if (content) result[id] = content;
+    }
+  }
+  return result;
+}
+
+// ---- Prefetch queue ----
+const PREFETCH_INITIAL = 2;
+const PREFETCH_BATCH = 8;
+const PREFETCH_AHEAD = 10;
+
+function sessionAlive(s) {
+  return state.session === s;
+}
+
+async function prefetchWords(s, words) {
+  const todo = words.filter(w => w && !s.contentCache[w.id] && !s._inflight[w.id]);
+  if (!todo.length) return;
+
+  const promise = (async () => {
+    try {
+      const map = await generateContentBatch(todo, s.mode);
+      if (!sessionAlive(s)) return;
+      for (const w of todo) {
+        if (map[w.id]) s.contentCache[w.id] = { content: map[w.id] };
+        else if (!s.contentCache[w.id]) s.contentCache[w.id] = { error: '生成失败，请换一句或跳过' };
+      }
+    } catch (e) {
+      console.warn('prefetch batch failed, fallback single', e);
+      if (!sessionAlive(s)) return;
+      await Promise.all(todo.map(async w => {
+        if (s.contentCache[w.id]) return;
+        try {
+          const content = await generateContentForWord(w, s.mode);
+          if (sessionAlive(s)) s.contentCache[w.id] = { content };
+        } catch (err) {
+          if (sessionAlive(s)) s.contentCache[w.id] = { error: err.message || '生成失败' };
+        }
+      }));
+    } finally {
+      for (const w of todo) delete s._inflight[w.id];
+    }
+  })();
+
+  for (const w of todo) s._inflight[w.id] = promise;
+  return promise;
+}
+
+function wordsNeedingPrefetch(s, count) {
+  const out = [];
+  const end = Math.min(s.words.length, s.wordIdx + PREFETCH_AHEAD);
+  for (let i = s.wordIdx; i < end && out.length < count; i++) {
+    const w = s.words[i];
+    if (!s.contentCache[w.id] && !s._inflight[w.id]) out.push(w);
+  }
+  return out;
+}
+
+/** 后台把队列补到 PREFETCH_AHEAD */
+function kickPrefetch(s = state.session) {
+  if (!s || s._prefetchRunning) return;
+  s._prefetchRunning = true;
+  (async () => {
+    try {
+      while (sessionAlive(s)) {
+        const need = wordsNeedingPrefetch(s, PREFETCH_BATCH);
+        if (!need.length) break;
+        await prefetchWords(s, need);
+      }
+    } finally {
+      if (sessionAlive(s)) s._prefetchRunning = false;
+    }
+  })();
+}
+
+async function waitForWordContent(s, w) {
+  if (s.contentCache[w.id]) return s.contentCache[w.id];
+  if (s._inflight[w.id]) {
+    await s._inflight[w.id];
+    return s.contentCache[w.id];
+  }
+  await prefetchWords(s, [w]);
+  return s.contentCache[w.id];
+}
+
+async function judgeCloze(word, userInput, fullSentence) {
+  const escapedWord = escapeRegex(word);
+  const highlighted = String(fullSentence || '').replace(
+    new RegExp('\\b' + escapedWord + '(?:s|ed|ing|es|ly|d|er|est)?\\b', 'gi'),
+    '[' + word + ']'
+  );
+  const prompt = `You are an IELTS English teacher evaluating a cloze (fill-in-the-blank) answer.
+
+Target word: "${word}"
+User typed: "${userInput}"
+Full sentence (blank marked): "${highlighted}"
+
+Judging rules:
+1) Correct if the user typed the target word OR a grammatically fitting inflection (abandon/abandoned/abandoning/abandons, etc.), ignoring case.
+2) Wrong if it is a different word (including near-synonyms), a misspelling that changes the word, or a form that does not fit the sentence grammar.
+3) Be pedagogically helpful for wrong / almost-right answers.
+
+When the user's word ≠ target (synonym or wrong word):
+- Explain the nuance difference vs the target in this sentence
+- Give brief usage habits / collocations (什么场合用、常跟什么搭配)
+When there is a grammar/form issue (wrong tense, wrong part of speech, subject-verb, article, etc.):
+- Point out the error and give a short correction tip
+When correct: keep tips empty; feedback can briefly affirm.
+
+Write ALL teaching text in concise Chinese (IELTS learner friendly). Leave unused tip fields as "".
+
+Return JSON ONLY:
+{
+  "correct": true or false,
+  "expected": "exact form as in the sentence, e.g. abandoned",
+  "issueType": "exact|inflection|synonym|wrong_word|grammar|spelling|other",
+  "feedback": "总评，1-2句中文",
+  "wordCompare": "用词对比与辨析（仅当用户词≠目标词时填写，否则空字符串）",
+  "usageTip": "使用习惯/搭配建议（有则填，无则空字符串）",
+  "grammarTip": "语法纠正（仅当有语法/词形问题时填写，否则空字符串）"
+}`;
+  const text = await callLLM([{ role: 'user', content: prompt }], { json: true, temperature: 0.3 });
+  const parsed = parseJSON(text) || {};
+  return {
+    correct: !!parsed.correct,
+    expected: parsed.expected || word,
+    issueType: parsed.issueType || '',
+    feedback: parsed.feedback || '',
+    wordCompare: parsed.wordCompare || '',
+    usageTip: parsed.usageTip || '',
+    grammarTip: parsed.grammarTip || ''
+  };
+}
+
+/** 完形填空：用词对比 / 用法 / 语法提示块 */
+function clozeCoachHtml(result) {
+  if (!result) return '';
+  const blocks = [];
+  const add = (title, text) => {
+    const t = String(text || '').trim();
+    if (!t) return;
+    blocks.push(`<div class="suggestion cloze-coach">
+      <div class="text-light" style="font-size:12px; margin-bottom:2px;">${escapeHtml(title)}</div>
+      <div style="line-height:1.65;">${escapeHtml(t)}</div>
+    </div>`);
+  };
+  add('用词对比', result.wordCompare);
+  add('使用习惯', result.usageTip);
+  add('语法纠正', result.grammarTip);
+  return blocks.join('');
+}
+
+async function judgeTranslation(word, chinese, reference, userInput) {
+  const prompt = `You are an English teacher evaluating a Chinese-to-English translation exercise.
+
+Word being practiced: "${word}"
+Chinese sentence: "${chinese}"
+Reference English: "${reference}"
+User's translation: "${userInput}"
+
+Evaluate the user's translation:
+- Meaning accuracy is most important (does it convey the same meaning as the reference?)
+- Grammar and naturalness
+- Whether the user correctly used "${word}"
+- Spelling and basic grammar
+
+Be REASONABLE and lenient: accept translations that convey the same meaning even with different structure.
+Be strict about: incorrect meaning, missing key information, severe grammar errors.
+
+Scoring guide:
+- 90-100: excellent, same meaning, natural
+- 75-89: good, mostly correct
+- 60-74: needs improvement, partial meaning
+- 0-59: wrong, different meaning or major errors
+
+Return JSON:
+{
+  "score": 0-100,
+  "correct": true or false,  // true if score >= 75
+  "feedback": "specific feedback in Chinese, 1-2 sentences",
+  "improvedVersion": "a slightly improved English version if user's has minor issues, otherwise empty string"
+}`;
+  const text = await callLLM([{ role: 'user', content: prompt }], { json: true, temperature: 0.2 });
+  return parseJSON(text);
+}
+
+// ============= SPACED REPETITION =============
+function updateSchedule(word, performance) {
+  let ease = word.ease ?? 2.5;
+  let interval = word.interval ?? 0;
+  let streak = word.streak ?? 0;
+
+  if (performance === 'wrong') {
+    streak = 0;
+    interval = 1;
+    ease = Math.max(1.3, ease - 0.2);
+  } else if (performance === 'hard') {
+    streak += 1;
+    interval = Math.max(1, Math.round(interval * 1.2));
+    ease = Math.max(1.3, ease - 0.15);
+  } else if (performance === 'good') {
+    streak += 1;
+    if (interval === 0) interval = 1;
+    else if (interval === 1) interval = 3;
+    else interval = Math.round(interval * ease);
+  } else if (performance === 'easy') {
+    streak += 1;
+    if (interval === 0) interval = 3;
+    else interval = Math.round(interval * ease * 1.3);
+    ease = Math.min(3.0, ease + 0.05);
+  }
+
+  return {
+    ease,
+    interval,
+    streak,
+    nextReview: Date.now() + interval * DAY_MS,
+    lastReviewed: Date.now()
+  };
+}
+
+// ============= DAILY SELECTION =============
+function selectDailyWords() {
+  const now = Date.now();
+  const active = state.words.filter(w => !w.crossedOut);
+
+  const due = active.filter(w => (w.nextReview ?? 0) <= now && (w.totalReviews ?? 0) > 0);
+  const newWords = active.filter(w => (w.totalReviews ?? 0) === 0);
+  const soon = active.filter(w => {
+    const t = w.nextReview ?? 0;
+    return t > now && t <= now + 3 * DAY_MS;
+  });
+
+  // shuffle each category, then concat (new first)
+  const shuffle = arr => [...arr].sort(() => Math.random() - 0.5);
+
+  const selected = [
+    ...shuffle(newWords),
+    ...shuffle(due),
+    ...shuffle(soon)
+  ];
+
+  return selected;
+}
+
+function getStats() {
+  const now = Date.now();
+  const active = state.words.filter(w => !w.crossedOut);
+  const crossed = state.words.filter(w => w.crossedOut);
+
+  const newCount = active.filter(w => (w.totalReviews || 0) === 0).length;
+  const dueCount = active.filter(w => (w.nextReview ?? 0) <= now && (w.totalReviews || 0) > 0).length;
+  const soonCount = active.filter(w => {
+    const t = w.nextReview ?? 0;
+    return t > now && t <= now + 3 * DAY_MS;
+  }).length;
+  const mastered = active.filter(w => (w.interval ?? 0) >= 21 && (w.streak ?? 0) >= 3).length;
+
+  // streak from localStorage
+  const streak = parseInt(localStorage.getItem(lsKey('streak')) || '0');
+  const lastDay = localStorage.getItem(lsKey('last-day')) || '';
+
+  return { active: active.length, crossed: crossed.length, newCount, dueCount, soonCount, mastered, streak, lastDay };
+}
+
+// ============= NAV =============
+function switchView(view) {
+  if (state.view === 'practice' && state.session && state.session.phase !== 'done') {
+    savePracticeSession();
+  }
+  state.view = view;
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.view === view));
+  render();
+  window.scrollTo(0, 0);
+}
+
+// ============= RENDER =============
+function render() {
+  const root = document.getElementById('app-content');
+  const nav = document.getElementById('bottom-nav');
+
+  // No profile selected yet — show profile picker first
+  if (!state.profile) {
+    nav.style.display = 'none';
+    root.innerHTML = renderProfilePicker();
+    bindProfilePicker();
+    return;
+  }
+
+  if (!isConfigured() && state.words.length === 0 && !hasSeenWelcome()) {
+    nav.style.display = 'none';
+    root.innerHTML = renderWelcome();
+    bindWelcome();
+    return;
+  }
+
+  nav.style.display = 'flex';
+
+  if (state.view === 'practice' && state.session?.phase === 'done') {
+    root.innerHTML = renderSessionDone();
+    document.getElementById('back-today')?.addEventListener('click', () => {
+      clearPracticeSession();
+      state.session = null;
+      state.view = 'today';
+      render();
+    });
+    document.getElementById('practice-again')?.addEventListener('click', () => {
+      const mode = state.session?.mode || 'cloze';
+      clearPracticeSession();
+      startPractice(null, mode);
+    });
+    return;
+  }
+
+  if (state.view === 'today') {
+    root.innerHTML = renderToday();
+    bindToday();
+  } else if (state.view === 'words') {
+    root.innerHTML = renderWords();
+    bindWords();
+  } else if (state.view === 'add') {
+    root.innerHTML = renderAdd();
+    bindAdd();
+  } else if (state.view === 'settings') {
+    root.innerHTML = renderSettings();
+    bindSettings();
+  } else if (state.view === 'practice') {
+    root.innerHTML = renderPractice();
+    bindPractice();
+  }
+}
+
+// --- Welcome ---
+function renderWelcome() {
+  return `
+    <div class="welcome">
+      <div class="welcome-icon">📖</div>
+      <h1>IELTS 词汇训练</h1>
+      <p>AI 驱动的生词本，让记单词更高效</p>
+
+      <div class="card" style="text-align:left; margin-top: 24px;">
+        <h3 style="margin-bottom:12px;">工作流：</h3>
+        <ol class="steps" style="margin:0;">
+          <li>配置你的 AI（用自己的 API key）</li>
+          <li>添加生词，AI 自动生成音标与翻译</li>
+          <li>每天做练习，AI 智能评判</li>
+          <li>已掌握的词自动延长复习间隔</li>
+        </ol>
+      </div>
+
+      <button class="btn btn-primary btn-lg btn-block" id="welcome-start">开始设置</button>
+      <p class="text-mute mt-3" style="font-size:12px;">支持 OpenAI / DeepSeek / Moonshot / 智谱 等 OpenAI 兼容 API</p>
+    </div>
+  `;
+}
+
+function bindWelcome() {
+  document.getElementById('welcome-start').addEventListener('click', () => {
+    markWelcomeSeen();
+    state.view = 'settings';
+    render();
+  });
+}
+
+// --- Profile picker (first launch / switch) ---
+function renderProfilePicker() {
+  const known = state.knownProfiles || [];
+  return `
+    <div class="welcome">
+      <div class="welcome-icon">👤</div>
+      <h1>选择你的身份</h1>
+      <p>每个身份的数据（单词、API key、学习进度）完全分开</p>
+
+      <div class="card" style="text-align:left; margin-top: 20px;">
+        <h3 style="margin-bottom: 12px; font-size: 14px;">新身份</h3>
+        <div class="form-row">
+          <input type="text" id="profile-new-name" placeholder="输入你的名字，如：我、Alice" maxlength="32" style="font-size: 16px;">
+        </div>
+        <button class="btn btn-primary btn-block" id="profile-create-btn">创建 / 进入</button>
+        <p class="text-mute mt-2" style="font-size: 12px;">名字支持中文、英文、数字、下划线</p>
+      </div>
+
+      ${known.length > 0 ? `
+        <div class="card" style="text-align:left; margin-top: 16px;">
+          <h3 style="margin-bottom: 12px; font-size: 14px;">已有身份</h3>
+          <div id="profile-list" style="display: flex; flex-direction: column; gap: 8px;">
+            ${known.map(p => `
+              <button class="btn profile-known-btn" data-profile="${escapeHtml(p)}" style="justify-content: space-between; text-align: left;">
+                <span>👤 ${escapeHtml(p)}</span>
+                <span class="text-mute" style="font-size: 12px;">点击进入 →</span>
+              </button>
+            `).join('')}
+          </div>
+        </div>
+      ` : ''}
+    </div>
+  `;
+}
+
+function bindProfilePicker() {
+  const newInput = document.getElementById('profile-new-name');
+  if (newInput) {
+    newInput.focus();
+    newInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        createProfileFromInput();
+      }
+    });
+  }
+  document.getElementById('profile-create-btn')?.addEventListener('click', createProfileFromInput);
+  document.querySelectorAll('.profile-known-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      setProfile(btn.dataset.profile);
+      reloadForProfile();
+    });
+  });
+}
+
+function createProfileFromInput() {
+  const name = (document.getElementById('profile-new-name')?.value || '').trim();
+  if (!name) { toast('请输入名字'); return; }
+  if (!/^[\u4e00-\u9fa5a-zA-Z0-9_\-]+$/.test(name)) {
+    toast('名字只能用中文、英文、数字、下划线、连字符', 'error');
+    return;
+  }
+  setProfile(name);
+  reloadForProfile();
+  toast(`欢迎，${name}！`, 'success');
+}
+
+async function reloadForProfile() {
+  // Clear current words, load from cloud for this profile if possible
+  await dbClear();
+  state.words = [];
+  // Try to pull from cloud for this profile (silent)
+  const url = (state.settings.workerUrl || '').trim();
+  if (url) {
+    try {
+      const resp = await fetch(url.replace(/\/$/, '') + '/api/all', {
+        method: 'GET',
+        headers: syncHeaders()
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data && (data.words?.length > 0 || (data.state && Object.keys(data.state).length > 0))) {
+          await applySyncPayload(data);
+          toast(`已加载 ${state.words.length} 个单词`, 'success');
+        }
+      }
+    } catch (e) { /* silent */ }
+  }
+  state.view = 'today';
+  render();
+}
+
+// --- Today ---
+function renderToday() {
+  const stats = getStats();
+  const todayWords = selectDailyWords();
+  const todayDone = localStorage.getItem(lsKey('done-' + new Date().toDateString())) === '1';
+  const saved = getSavedPracticeSummary();
+
+  return `
+    <div class="app-header">
+      <h1>IELTS 词汇训练</h1>
+      <p>${new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })} · 👤 ${escapeHtml(state.profile || '')}</p>
+    </div>
+
+    ${saved ? `
+      <div class="card" style="border-color: var(--accent); background: var(--accent-light);">
+        <h3 style="font-size:14px; margin-bottom:6px;">继续上次练习</h3>
+        <p class="text-light" style="font-size:13px; margin-bottom:12px;">
+          ${escapeHtml(saved.modeLabel)} · 第 ${saved.current}/${saved.total} 题
+          ${saved.when ? ` · 保存于 ${escapeHtml(saved.when)}` : ''}
+        </p>
+        <div class="flex-row" style="gap:8px; flex-wrap:wrap;">
+          <button class="btn btn-primary" id="resume-practice">▶ 继续学习</button>
+          <button class="btn" id="discard-practice">放弃进度</button>
+        </div>
+      </div>
+    ` : ''}
+
+    <div class="today-card">
+      <h2>今日学习</h2>
+      ${stats.streak > 0 ? `<div class="streak-pill">🔥 连续学习 ${stats.streak} 天</div>` : ''}
+      <div class="today-stats">
+        <div class="today-stat">
+          <div class="num">${stats.newCount}</div>
+          <div class="label">新词</div>
+        </div>
+        <div class="today-stat">
+          <div class="num">${stats.dueCount}</div>
+          <div class="label">待复习</div>
+        </div>
+        <div class="today-stat">
+          <div class="num">${stats.soonCount}</div>
+          <div class="label">即将复习</div>
+        </div>
+      </div>
+      <div style="display:flex; flex-direction:column; gap:10px; margin-top:4px;">
+        <button class="btn btn-lg btn-block" id="start-cloze" style="background: white; color: var(--accent); border-color: white; font-weight: 600;" ${todayWords.length === 0 ? 'disabled' : ''}>
+          完形填空 · ${todayDone ? '再练' : '开始'} (${todayWords.length})
+        </button>
+        <button class="btn btn-lg btn-block" id="start-translate" style="background: rgba(255,255,255,0.85); color: var(--accent); border-color: white; font-weight: 600;" ${todayWords.length === 0 ? 'disabled' : ''}>
+          句子翻译 · ${todayDone ? '再练' : '开始'} (${todayWords.length})
+        </button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-bottom:12px;">快速统计</h3>
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="num">${stats.active}</div>
+          <div class="label">学习中</div>
+        </div>
+        <div class="stat-card">
+          <div class="num">${stats.mastered}</div>
+          <div class="label">已掌握</div>
+        </div>
+        <div class="stat-card">
+          <div class="num">${stats.crossed}</div>
+          <div class="label">已划掉</div>
+        </div>
+        <div class="stat-card">
+          <div class="num">${state.words.length}</div>
+          <div class="label">总词数</div>
+        </div>
+      </div>
+    </div>
+
+    ${todayWords.length === 0 ? `
+      <div class="card empty">
+        <div class="empty-icon">🎉</div>
+        <h3>今日无任务</h3>
+        <p>所有词都掌握了，去「添加」加几个新词吧</p>
+      </div>
+    ` : ''}
+  `;
+}
+
+function bindToday() {
+  document.getElementById('resume-practice')?.addEventListener('click', () => resumePracticeSession());
+  document.getElementById('discard-practice')?.addEventListener('click', () => {
+    if (!confirm('确定放弃上次未完成的练习进度？')) return;
+    abandonPracticeSession();
+    render();
+    toast('已清除进度');
+  });
+
+  const maybeStart = (mode) => {
+    const saved = readSavedPracticeSession();
+    if (saved) {
+      if (!confirm('开始新练习会覆盖未完成的进度，确定吗？')) return;
+      clearPracticeSession();
+    }
+    startPractice(null, mode);
+  };
+  document.getElementById('start-cloze')?.addEventListener('click', () => maybeStart('cloze'));
+  document.getElementById('start-translate')?.addEventListener('click', () => maybeStart('translate'));
+}
+
+// --- Words ---
+function renderWords() {
+  const filter = state.wordsFilter;
+  const filtered = state.words.filter(w => {
+    if (filter === 'all') return !w.crossedOut;
+    if (filter === 'crossed') return w.crossedOut;
+    return getWordStatus(w) === filter;
+  }).sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0));
+
+  const counts = {
+    all: state.words.filter(w => !w.crossedOut).length,
+    new: state.words.filter(w => !w.crossedOut && (w.totalReviews || 0) === 0).length,
+    due: state.words.filter(w => !w.crossedOut && (w.nextReview ?? 0) <= Date.now() && (w.totalReviews || 0) > 0).length,
+    learning: state.words.filter(w => !w.crossedOut && (w.totalReviews || 0) > 0 && (w.interval ?? 0) < 21).length,
+    mastered: state.words.filter(w => !w.crossedOut && (w.interval ?? 0) >= 21 && (w.streak ?? 0) >= 3).length,
+    crossed: state.words.filter(w => w.crossedOut).length,
+  };
+
+  const missingGloss = state.words.filter(w => !w.crossedOut && !hasValidTranslation(w)).length;
+  const badPhonetic = state.words.filter(w => !w.crossedOut && isBadPhonetic(w.phonetic)).length;
+
+  return `
+    <div class="app-header">
+      <h1>词表</h1>
+      <p>共 ${state.words.length} 个单词 · 单词 · 音标 · 发音 · 词语释义</p>
+    </div>
+
+    ${(missingGloss > 0 || badPhonetic > 0) ? `
+      <div class="card" style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+        <div style="font-size:13px; color:var(--text-light);">
+          ${missingGloss > 0 ? `缺释义 <b style="color:var(--accent);">${missingGloss}</b>` : ''}
+          ${missingGloss > 0 && badPhonetic > 0 ? ' · ' : ''}
+          ${badPhonetic > 0 ? `音标需修正 <b style="color:var(--accent);">${badPhonetic}</b>` : ''}
+        </div>
+        <button class="btn btn-primary btn-sm" id="backfill-gloss" ${_glossBackfillRunning ? 'disabled' : ''}>
+          ${_glossBackfillRunning ? '修正中…' : '一键修正释义/音标'}
+        </button>
+      </div>
+    ` : ''}
+
+    <div class="filter-tabs">
+      <button class="filter-tab ${filter === 'all' ? 'active' : ''}" data-filter="all">全部 (${counts.all})</button>
+      <button class="filter-tab ${filter === 'new' ? 'active' : ''}" data-filter="new">新词 (${counts.new})</button>
+      <button class="filter-tab ${filter === 'due' ? 'active' : ''}" data-filter="due">待复习 (${counts.due})</button>
+      <button class="filter-tab ${filter === 'learning' ? 'active' : ''}" data-filter="learning">学习中 (${counts.learning})</button>
+      <button class="filter-tab ${filter === 'mastered' ? 'active' : ''}" data-filter="mastered">已掌握 (${counts.mastered})</button>
+      <button class="filter-tab ${filter === 'crossed' ? 'active' : ''}" data-filter="crossed">已划掉 (${counts.crossed})</button>
+    </div>
+
+    ${filtered.length === 0 ? `
+      <div class="card empty">
+        <div class="empty-icon">📭</div>
+        <h3>这里空空如也</h3>
+        <p>${filter === 'all' ? '去「添加」加几个新词吧' : '切换其他分类看看'}</p>
+      </div>
+    ` : filtered.map(w => {
+      const status = getWordStatus(w);
+      const tagMap = { new: '<span class="tag tag-new">新词</span>', due: '<span class="tag tag-due">待复习</span>', learning: '<span class="tag tag-due">学习中</span>', mastered: '<span class="tag tag-mastered">已掌握</span>', crossed: '<span class="tag tag-crossed">已划掉</span>' };
+      const isCrossed = status === 'crossed';
+      const translation = getWordTranslation(w);
+      return `
+        <div class="word-list-item ${isCrossed ? 'crossed' : ''}">
+          <div class="word-main">
+            <div class="word-row">
+              <span class="word">${escapeHtml(w.word)}</span>
+              ${renderPhoneticWithSpeakers(w)}
+            </div>
+            <div class="translation ${translation ? '' : 'mute'}">${escapeHtml(translation || '暂无翻译')}</div>
+          </div>
+          <div class="meta">
+            <div class="tags">${tagMap[status] || ''}</div>
+            <div class="actions">
+              <button class="view-btn" data-id="${w.id}" title="查看详情">👁</button>
+              ${isCrossed
+                ? `<button class="restore-btn" data-id="${w.id}" title="恢复">↩</button>
+                   <button class="delete" data-id="${w.id}" title="删除">✕</button>`
+                : `<button class="cross-btn" data-id="${w.id}" title="划掉">−</button>`}
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('')}
+  `;
+}
+
+function bindWords() {
+  document.querySelectorAll('.filter-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      state.wordsFilter = btn.dataset.filter;
+      render();
+    });
+  });
+
+  const backfillBtn = document.getElementById('backfill-gloss');
+  if (backfillBtn) {
+    backfillBtn.addEventListener('click', () => backfillWordGlosses());
+  }
+
+  // Speaker buttons — 美音 / 英音
+  bindAccentSpeakButtons();
+
+  document.querySelectorAll('.view-btn').forEach(btn => {
+    btn.addEventListener('click', () => showWordDetail(btn.dataset.id));
+  });
+
+  document.querySelectorAll('.cross-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('划掉这个单词？之后不会再出现。')) return;
+      const w = state.words.find(x => x.id === btn.dataset.id);
+      if (w) {
+        w.crossedOut = true;
+        await dbPut(w);
+        render();
+        toast('已划掉');
+      }
+    });
+  });
+
+  document.querySelectorAll('.restore-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const w = state.words.find(x => x.id === btn.dataset.id);
+      if (w) {
+        w.crossedOut = false;
+        await dbPut(w);
+        render();
+        toast('已恢复');
+      }
+    });
+  });
+
+  document.querySelectorAll('.delete').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('永久删除这个单词？')) return;
+      await dbDelete(btn.dataset.id);
+      await loadAllWords();
+      render();
+      toast('已删除', 'success');
+    });
+  });
+}
+
+async function showWordDetail(id) {
+  const w = state.words.find(x => x.id === id);
+  if (!w) return;
+  const status = getWordStatus(w);
+  const statusText = { new: '新词', due: '待复习', learning: '学习中', mastered: '已掌握', crossed: '已划掉' }[status];
+  const translation = getWordTranslation(w);
+
+  const content = `
+    <h2>${escapeHtml(w.word)}</h2>
+    <div style="margin-bottom: 10px;">${renderPhoneticWithSpeakers(w)}${w.partOfSpeech ? ` <span class="text-light">· ${escapeHtml(w.partOfSpeech)}</span>` : ''}</div>
+    <p style="font-size: 16px; margin-bottom: 14px; line-height: 1.5;">${escapeHtml(translation || '暂无翻译')}</p>
+    <div id="detail-mnemonic">${w.mnemonic ? mnemonicHtml(w.mnemonic) : (isConfigured() ? mnemonicHtml('', { loading: true }) : '')}</div>
+
+    <div class="text-light mb-3" style="font-size:12px;">
+      ${statusText} · 已复习 ${w.totalReviews || 0} 次 · 正确率 ${w.totalReviews ? Math.round((w.correctReviews || 0) / w.totalReviews * 100) : 0}% · ${formatRelative(w.nextReview) || '未复习'}
+    </div>
+
+    <div class="flex-row mt-3" style="justify-content: flex-end; flex-wrap: wrap; gap: 8px;">
+      <button class="btn" id="close-modal">关闭</button>
+      <button class="btn" id="practice-cloze">完形填空</button>
+      <button class="btn btn-primary" id="practice-translate">句子翻译</button>
+    </div>
+  `;
+
+  showModal(content);
+
+  document.getElementById('close-modal').addEventListener('click', closeModal);
+  document.getElementById('practice-cloze').addEventListener('click', () => {
+    closeModal();
+    startPractice([w], 'cloze');
+  });
+  document.getElementById('practice-translate').addEventListener('click', () => {
+    closeModal();
+    startPractice([w], 'translate');
+  });
+
+  bindAccentSpeakButtons(document.getElementById('modal-content'));
+
+  if (!w.mnemonic && isConfigured()) {
+    ensureMnemonic(w).then(tip => {
+      const slot = document.getElementById('detail-mnemonic');
+      if (slot) slot.innerHTML = mnemonicHtml(tip);
+    }).catch(() => {
+      const slot = document.getElementById('detail-mnemonic');
+      if (slot) slot.innerHTML = '';
+    });
+  }
+}
+
+// --- Add word ---
+function renderAdd() {
+  return `
+    <div class="app-header">
+      <h1>添加生词</h1>
+      <p>输入单词，AI 自动生成音标与翻译</p>
+    </div>
+
+    <div class="card">
+      <label>单词</label>
+      <input type="text" class="add-word-input" id="add-word-input" placeholder="例如: abandon" value="${escapeHtml(state.addWord.word)}" autocomplete="off" spellcheck="false">
+      <div class="flex-row mt-2" style="justify-content: flex-end;">
+        <button class="btn" id="add-clear">清空</button>
+        <button class="btn btn-primary" id="add-generate" ${state.addWord.generating ? 'disabled' : ''}>
+          ${state.addWord.generating ? '<span class="spinner"></span> 生成中…' : '🤖 AI 查词'}
+        </button>
+      </div>
+    </div>
+
+    ${state.addWord.translation || state.addWord.phonetic ? `
+      <div class="card">
+        <h3 style="margin-bottom: 12px; font-size: 14px;">预览</h3>
+        <div class="word-list-item" style="margin: 0; border: none; padding: 0; background: transparent;">
+          <div class="word-main">
+            <span class="word">${escapeHtml(state.addWord.word || '')}</span>
+            ${renderPhoneticWithSpeakers({
+              word: state.addWord.word,
+              phonetic: state.addWord.phonetic,
+              phoneticUs: state.addWord.phoneticUs,
+              phoneticUk: state.addWord.phoneticUk
+            })}
+            <span class="translation">${escapeHtml(state.addWord.translation || '')}</span>
+          </div>
+        </div>
+        ${state.addWord.partOfSpeech ? `<div class="text-light mt-2" style="font-size: 12px;">词性：${escapeHtml(state.addWord.partOfSpeech)}</div>` : ''}
+        ${state.addWord.mnemonic ? `<div class="mt-2" style="font-size:13px; line-height:1.55; color: var(--text);"><span class="text-light" style="font-size:12px;">💡 助记</span><br>${escapeHtml(state.addWord.mnemonic)}</div>` : ''}
+        <div class="flex-row mt-3" style="justify-content: space-between;">
+          <button class="btn btn-sm" id="add-regenerate" ${state.addWord.generating ? 'disabled' : ''}>🔄 重新生成</button>
+          <button class="btn btn-primary" id="add-save">✓ 保存到词表</button>
+        </div>
+      </div>
+    ` : ''}
+
+    <div class="card">
+      <h3 style="font-size: 14px; margin-bottom: 8px;">💡 提示</h3>
+      <ul style="padding-left: 20px; color: var(--text-light); font-size: 13px; line-height: 1.8;">
+        <li>一次输入一个词，AI 会生成音标和中文释义</li>
+        <li>词表格式：单词 · 音标 · 发音 · 翻译</li>
+        <li>保存后这个单词就进入你的学习计划</li>
+        <li>如果不再想看到某个词，去词表里「划掉」</li>
+      </ul>
+    </div>
+  `;
+}
+
+function bindAdd() {
+  const input = document.getElementById('add-word-input');
+  input.focus();
+  input.addEventListener('input', () => {
+    state.addWord.word = input.value.trim();
+  });
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && state.addWord.word) {
+      e.preventDefault();
+      handleGenerate();
+    }
+  });
+
+  document.getElementById('add-generate').addEventListener('click', handleGenerate);
+  document.getElementById('add-clear').addEventListener('click', () => {
+    state.addWord = { word: '', translation: '', generating: false, phonetic: '', partOfSpeech: '', mnemonic: '' };
+    render();
+  });
+
+  bindAccentSpeakButtons();
+
+  const regenBtn = document.getElementById('add-regenerate');
+  if (regenBtn) regenBtn.addEventListener('click', handleGenerate);
+
+  const saveBtn = document.getElementById('add-save');
+  if (saveBtn) saveBtn.addEventListener('click', handleSave);
+}
+
+async function handleGenerate() {
+  if (!isConfigured()) {
+    toast('请先在设置里配置 API', 'error');
+    state.view = 'settings';
+    render();
+    return;
+  }
+  const word = state.addWord.word.trim().toLowerCase();
+  if (!word) {
+    toast('请输入单词');
+    return;
+  }
+  const related = findRelatedWordInList(word);
+  if (related) {
+    if (related.exact) {
+      if (!confirm(`「${related.entry.word}」已在词表里，要重新查词吗？`)) return;
+    } else {
+      toast(`词表已有「${related.entry.word}」，「${word}」是其词形变化，无需重复添加`, 'error');
+      return;
+    }
+  }
+
+  state.addWord.generating = true;
+  render();
+
+  try {
+    const result = await generateWordInfo(word);
+    state.addWord.phonetic = result.phonetic || '';
+    state.addWord.partOfSpeech = result.partOfSpeech || '';
+    state.addWord.translation = result.translation || '';
+    state.addWord.mnemonic = result.mnemonic || '';
+    if (!state.addWord.translation) {
+      toast('AI 没有生成翻译，再试一次？', 'error');
+    }
+  } catch (e) {
+    console.error(e);
+    toast('生成失败：' + e.message, 'error');
+  } finally {
+    state.addWord.generating = false;
+    render();
+  }
+}
+
+async function handleSave() {
+  const word = state.addWord.word.trim().toLowerCase();
+  if (!word || !state.addWord.translation) {
+    toast('先生成翻译再保存');
+    return;
+  }
+
+  const related = findRelatedWordInList(word, { includeCrossed: true });
+  if (related && !related.exact) {
+    toast(`词表已有「${related.entry.word}」，「${word}」是词形变化，已跳过`, 'error');
+    return;
+  }
+
+  const existing = related?.exact ? related.entry : state.words.find(w => w.word.toLowerCase() === word);
+  if (existing) {
+    existing.translation = state.addWord.translation;
+    existing.phonetic = state.addWord.phonetic;
+    existing.partOfSpeech = state.addWord.partOfSpeech;
+    if (state.addWord.mnemonic) existing.mnemonic = state.addWord.mnemonic;
+    existing.crossedOut = false;
+    if (existing.interval === undefined) {
+      existing.interval = 0;
+      existing.streak = 0;
+      existing.ease = 2.5;
+      existing.nextReview = Date.now();
+    }
+    await dbPut(existing);
+  } else {
+    const w = {
+      id: crypto.randomUUID(),
+      word,
+      phonetic: state.addWord.phonetic,
+      partOfSpeech: state.addWord.partOfSpeech,
+      translation: state.addWord.translation,
+      mnemonic: state.addWord.mnemonic || '',
+      examples: [],
+      addedAt: Date.now(),
+      crossedOut: false,
+      ease: 2.5,
+      interval: 0,
+      streak: 0,
+      nextReview: Date.now(),
+      lastReviewed: null,
+      totalReviews: 0,
+      correctReviews: 0
+    };
+    await dbPut(w);
+    state.words.push(w);
+  }
+
+  state.addWord = { word: '', translation: '', generating: false, phonetic: '', partOfSpeech: '', mnemonic: '' };
+  render();
+  toast(`已保存「${word}」`, 'success');
+}
+
+// --- Settings ---
+function renderSettings() {
+  const s = state.settings;
+  return `
+    <div class="app-header">
+      <h1>设置</h1>
+      <p>AI 配置和数据管理</p>
+    </div>
+
+    <div class="card">
+      <div class="settings-section">
+        <h3>当前身份</h3>
+        <div class="flex-row" style="justify-content: space-between; align-items: center;">
+          <div>
+            <div style="font-size: 18px; font-weight: 600; color: var(--accent);">👤 ${escapeHtml(state.profile || '未选择')}</div>
+            <div class="text-light" style="font-size: 12px;">${(state.knownProfiles || []).length} 个已创建身份</div>
+          </div>
+          <button class="btn" id="switch-profile-btn">切换身份</button>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <h3>AI 服务商</h3>
+        <div class="provider-presets" id="provider-presets">
+          ${Object.entries(PROVIDERS).map(([key, p]) => `
+            <button class="provider-preset ${s.provider === key ? 'active' : ''}" data-provider="${key}">${p.name}</button>
+          `).join('')}
+      <div class="settings-section">
+        <h3>AI 服务商</h3>
+        <div class="provider-presets" id="provider-presets">
+          ${Object.entries(PROVIDERS).map(([key, p]) => `
+            <button class="provider-preset ${s.provider === key ? 'active' : ''}" data-provider="${key}">${p.name}</button>
+          `).join('')}
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <h3>API 配置</h3>
+        <div class="form-row">
+          <label>API Key</label>
+          <input type="password" id="setting-key" value="${escapeHtml(s.apiKey)}" placeholder="sk-..." autocomplete="off">
+          <div class="hint">保存在你浏览器本地，不会上传</div>
+        </div>
+        <div class="form-row">
+          <label>API Base URL</label>
+          <input type="text" id="setting-base" value="${escapeHtml(s.apiBase)}" placeholder="https://api.openai.com/v1">
+        </div>
+        <div class="form-row">
+          <label>模型</label>
+          <input type="text" id="setting-model" value="${escapeHtml(s.model)}" placeholder="gpt-4o-mini">
+        </div>
+        <button class="btn btn-primary btn-block" id="test-api">测试连接</button>
+        <div id="test-result" class="mt-2"></div>
+      </div>
+
+      <div class="settings-section">
+        <h3>数据</h3>
+        <div class="flex-row" style="flex-wrap: wrap; gap: 8px;">
+          <button class="btn" id="export-data">📥 导出</button>
+          <button class="btn" id="import-data">📤 选择文件导入</button>
+          <input type="file" id="import-file" accept=".json,application/json" style="display:none;">
+          <button class="btn btn-danger" id="clear-data">🗑 清空词表</button>
+        </div>
+        <div class="mt-3">
+          <label style="font-size: 12px;">或者直接粘贴 JSON：</label>
+          <textarea id="import-paste" placeholder="把 JSON 内容粘贴到这里..." style="min-height: 100px; font-family: 'SF Mono', Consolas, monospace; font-size: 12px;"></textarea>
+          <button class="btn btn-primary btn-sm mt-2" id="import-paste-btn">从粘贴内容导入</button>
+        </div>
+        <p class="text-mute mt-2" style="font-size:12px;">数据存储在浏览器 IndexedDB，清缓存会丢失</p>
+      </div>
+
+      <div class="settings-section">
+        <h3>☁️ 云同步</h3>
+        <div class="form-row">
+          <label>Worker URL</label>
+          <input type="text" id="sync-url" value="${escapeHtml(s.workerUrl || '')}" placeholder="https://xxx.workers.dev">
+        </div>
+        <div class="form-row">
+          <label>同步 Token（可选）</label>
+          <input type="password" id="sync-token" value="${escapeHtml(s.syncToken || '')}" placeholder="如果 Worker 设置了 AUTH_TOKEN 就填">
+        </div>
+        <div class="form-row">
+          <label>同步密码 ${state.syncPassword ? '<span style="color: var(--success); font-size: 12px;">✓ 已设置</span>' : '<span style="color: var(--warning); font-size: 12px;">未设置</span>'}</label>
+          <input type="password" id="sync-password-input" value="${escapeHtml(state.syncPassword || '')}" placeholder="用于加密 API key 和练习进度">
+          <div class="hint">同一密码在多设备间要输入一致才能解密。这台设备存密码，其他设备用时要重新输入。</div>
+        </div>
+        <div class="form-row">
+          <label class="flex-row" style="cursor: pointer;">
+            <input type="checkbox" id="sync-auto" ${s.autoSync ? 'checked' : ''} style="width: auto; margin-right: 6px;">
+            <span>练习完后自动同步</span>
+          </label>
+        </div>
+        <div class="flex-row" style="gap: 8px;">
+          <button class="btn btn-primary" id="sync-push" style="flex: 1;">📤 推送到云端</button>
+          <button class="btn" id="sync-pull" style="flex: 1;">📥 从云端拉取</button>
+          <button class="btn btn-sm" id="sync-reset-pwd" style="margin-top: 8px; width: 100%;">🔑 忘记密码 / 重置密码</button>
+        </div>
+        <p class="text-light mt-2" style="font-size: 12px;" id="sync-status">
+          ${s.lastSyncAt ? `上次同步：${new Date(s.lastSyncAt).toLocaleString('zh-CN')}` : '尚未同步'}
+        </p>
+        <p class="text-mute mt-2" style="font-size: 12px;">数据同步到腾讯云 CloudBase（国内访问快），多设备间共享</p>
+      </div>
+
+      <div class="settings-section">
+        <h3>关于</h3>
+        <p class="text-light" style="font-size: 13px; line-height: 1.7;">
+          这是一个个人 IELTS 词汇学习工具，AI 驱动的智能出题和评判。
+          <br><br>
+          <b>支持的服务：</b>OpenAI / DeepSeek / Moonshot / 智谱 GLM / 任何 OpenAI 兼容 API
+          <br><br>
+          <b>推荐：</b>用 DeepSeek 或 GLM-4-Flash 这种便宜的模型，性价比高
+        </p>
+      </div>
+    </div>
+  `;
+}
+
+async function importWordsFromJSON(text) {
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch (e) {
+    toast('JSON 解析失败：' + e.message, 'error');
+    throw e;
+  }
+  if (!data.words || !Array.isArray(data.words)) {
+    toast('文件格式不对，找不到 words 数组', 'error');
+    throw new Error('格式不对');
+  }
+  if (data.words.length === 0) {
+    toast('文件里没有单词', 'error');
+    return;
+  }
+
+  // Generate UUID helper with fallback
+  const newId = () => {
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
+    return 'id-' + Date.now() + '-' + Math.random().toString(36).slice(2, 10);
+  };
+
+  let added = 0, skipped = 0;
+  for (const w of data.words) {
+    if (!w.word) { skipped++; continue; }
+    if (!w.id) w.id = newId();
+    const related = findRelatedWordInList(w.word, { includeCrossed: true });
+    if (related || state.words.find(x => x.id === w.id)) {
+      skipped++;
+      continue;
+    }
+    // Ensure all required fields
+    if (!w.examples) w.examples = [];
+    if (w.crossedOut === undefined) w.crossedOut = false;
+    if (w.ease === undefined) w.ease = 2.5;
+    if (w.interval === undefined) w.interval = 0;
+    if (w.streak === undefined) w.streak = 0;
+    if (w.nextReview === undefined) w.nextReview = Date.now();
+    if (w.totalReviews === undefined) w.totalReviews = 0;
+    if (w.correctReviews === undefined) w.correctReviews = 0;
+    await dbPut(w);
+    state.words.push(w);
+    added++;
+  }
+  if (added > 0) {
+    toast(`已导入 ${added} 个单词${skipped > 0 ? `（${skipped} 个重复已跳过）` : ''}`, 'success');
+  } else if (skipped > 0) {
+    toast('这些单词已经在词表里了', 'error');
+  }
+  render();
+}
+
+function bindSettings() {
+  document.getElementById('switch-profile-btn')?.addEventListener('click', () => {
+    if (confirm('切换身份会清空当前显示的数据（下次进入会从云端拉取）。继续？')) {
+      state.profile = '';
+      saveProfile();
+      // Clear local state so the new profile doesn't see old words
+      dbClear().then(() => { state.words = []; render(); });
+    }
+  });
+  document.querySelectorAll('.provider-preset').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const key = btn.dataset.provider;
+      const p = PROVIDERS[key];
+      state.settings.provider = key;
+      if (key !== 'custom') {
+        state.settings.apiBase = p.base;
+        state.settings.model = p.model;
+      }
+      saveSettings();
+      render();
+    });
+  });
+
+  const keyInput = document.getElementById('setting-key');
+  const baseInput = document.getElementById('setting-base');
+  const modelInput = document.getElementById('setting-model');
+
+  [keyInput, baseInput, modelInput].forEach(input => {
+    input.addEventListener('input', () => {
+      state.settings.apiKey = keyInput.value.trim();
+      state.settings.apiBase = baseInput.value.trim();
+      state.settings.model = modelInput.value.trim();
+      saveSettings();
+    });
+  });
+
+  document.getElementById('test-api').addEventListener('click', async () => {
+    const resultEl = document.getElementById('test-result');
+    resultEl.innerHTML = '<div class="text-light"><span class="spinner"></span> 测试中…</div>';
+    try {
+      const reply = await callLLM([{ role: 'user', content: 'Reply with just the word "ok" and nothing else.' }], { temperature: 0 });
+      if (reply.toLowerCase().includes('ok')) {
+        resultEl.innerHTML = '<div style="color: var(--success); font-size: 13px;">✓ 连接成功</div>';
+        toast('连接成功', 'success');
+      } else {
+        resultEl.innerHTML = '<div style="color: var(--warning); font-size: 13px;">⚠ 返回异常：' + escapeHtml(reply.slice(0, 50)) + '</div>';
+      }
+    } catch (e) {
+      resultEl.innerHTML = '<div style="color: var(--error); font-size: 13px;">✗ ' + escapeHtml(e.message) + '</div>';
+    }
+  });
+
+  document.getElementById('export-data').addEventListener('click', () => {
+    const data = {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      words: state.words
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `ielts-vocab-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast('已导出', 'success');
+  });
+
+  document.getElementById('import-data').addEventListener('click', () => {
+    document.getElementById('import-file').click();
+  });
+
+  document.getElementById('import-file').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) {
+      toast('没选文件', 'error');
+      return;
+    }
+    try {
+      const text = await file.text();
+      await importWordsFromJSON(text);
+      e.target.value = ''; // reset so the same file can be re-selected
+    } catch (err) {
+      toast('读取文件失败：' + err.message, 'error');
+    }
+  });
+
+  document.getElementById('import-paste-btn').addEventListener('click', async () => {
+    const text = document.getElementById('import-paste').value.trim();
+    if (!text) {
+      toast('粘贴框是空的', 'error');
+      return;
+    }
+    try {
+      await importWordsFromJSON(text);
+      document.getElementById('import-paste').value = '';
+    } catch (err) {
+      // error already toasted
+    }
+  });
+
+  document.getElementById('clear-data').addEventListener('click', async () => {
+    if (!confirm('确定清空所有单词？此操作不可恢复！')) return;
+    await dbClear();
+    state.words = [];
+    render();
+    toast('已清空', 'success');
+  });
+
+  // Cloud sync inputs
+  const syncUrlInput = document.getElementById('sync-url');
+  const syncTokenInput = document.getElementById('sync-token');
+  const syncAutoInput = document.getElementById('sync-auto');
+  if (syncUrlInput) {
+    syncUrlInput.addEventListener('input', () => {
+      state.settings.workerUrl = syncUrlInput.value.trim();
+      saveSettings();
+    });
+  }
+  if (syncTokenInput) {
+    syncTokenInput.addEventListener('input', () => {
+      state.settings.syncToken = syncTokenInput.value;
+      saveSettings();
+    });
+  }
+  if (syncAutoInput) {
+    syncAutoInput.addEventListener('change', () => {
+      state.settings.autoSync = syncAutoInput.checked;
+      saveSettings();
+    });
+  }
+  const syncPwdInput = document.getElementById('sync-password-input');
+  if (syncPwdInput) {
+    syncPwdInput.addEventListener('change', () => {
+      setSyncPassword(syncPwdInput.value);
+      // Re-render to update the status indicator
+      render();
+    });
+  }
+  document.getElementById('sync-push')?.addEventListener('click', () => pushToCloud());
+  document.getElementById('sync-pull')?.addEventListener('click', () => pullFromCloud());
+  document.getElementById('sync-reset-pwd')?.addEventListener('click', () => resetSyncPassword());
+}
+
+// ============= RESET SYNC PASSWORD =============
+async function resetSyncPassword() {
+  // Show explanation modal first
+  const confirmed = await new Promise((resolve) => {
+    showModal(`
+      <h2>重置同步密码</h2>
+      <p style="line-height: 1.7;">
+        <b>什么时候用：</b><br>
+        • 忘了原密码<br>
+        • 想换个密码<br>
+        • 想清掉云端旧数据
+      </p>
+      <p style="line-height: 1.7; margin-top: 12px;">
+        <b>会发生什么：</b><br>
+        ✓ 你的<strong>单词</strong>和<strong>学习进度</strong>不会丢<br>
+        ✗ <strong>API key 要重新填</strong>（会被新密码重新加密）<br>
+        ✗ 云端旧数据变不可读，但<strong>新推送会覆盖</strong><br>
+        • 其他设备用旧密码拉不了了
+      </p>
+      <div class="flex-row mt-3" style="justify-content: flex-end; gap: 8px;">
+        <button class="btn" id="reset-cancel">取消</button>
+        <button class="btn btn-danger" id="reset-confirm">确认重置</button>
+      </div>
+    `);
+    document.getElementById('reset-cancel').addEventListener('click', () => { closeModal(); resolve(false); });
+    document.getElementById('reset-confirm').addEventListener('click', () => { closeModal(); resolve(true); });
+  });
+  if (!confirmed) return;
+
+  // Ask for new password
+  const newPwd = await promptForPassword('设置新密码\n（推荐至少 8 位）', '');
+  if (!newPwd) return;
+  if (newPwd.length < 4) {
+    toast('密码太短了，至少 4 位', 'error');
+    return;
+  }
+
+  // Apply new password
+  setSyncPassword(newPwd);
+
+  // Clear API key (user needs to re-enter)
+  state.settings.apiKey = '';
+  state.settings.syncToken = '';
+  saveSettings();
+
+  toast('密码已重置，请重新填 API key 然后推送', 'success');
+
+  // Re-render to show updated UI
+  render();
+
+  // Optionally auto-push to overwrite cloud
+  if (confirm('现在推送新数据到云端吗？（会覆盖云端旧数据）')) {
+    await pushToCloud();
+  }
+}
+
+// ============= CLOUD SYNC =============
+async function getSyncPayload() {
+  // Gather all data to sync (per-profile)
+  const words = state.words.map(w => ({ ...w }));
+  const stateObj = {
+    streak: localStorage.getItem(lsKey('streak')) || '0',
+    lastDay: localStorage.getItem(lsKey('last-day')) || ''
+  };
+  // Also gather today's done flag (could be a few keys)
+  const todayDone = {};
+  const donePrefix = lsKey('done-');
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (k && k.startsWith(donePrefix)) {
+      todayDone[k] = localStorage.getItem(k);
+    }
+  }
+
+  // Gather SENSITIVE data to encrypt: API key, sync token, current practice session
+  const sensitive = {
+    apiKey: state.settings.apiKey || '',
+    syncToken: state.settings.syncToken || '',
+    provider: state.settings.provider || 'openai',
+    apiBase: state.settings.apiBase || '',
+    model: state.settings.model || '',
+    session: serializePracticeSession(state.session)
+  };
+
+  // Encrypt if a password is set
+  const pwd = getSyncPassword();
+  const encrypted = pwd ? await encryptForSync(sensitive, pwd) : null;
+
+  return { words, state: { ...stateObj, todayDone }, encrypted };
+}
+
+async function applySyncPayload(data) {
+  if (!data || typeof data !== 'object') return { added: 0, replaced: false, needsPassword: false };
+  let added = 0;
+  let decrypted = null;
+
+  // First, try to decrypt the encrypted payload
+  if (data.encrypted) {
+    const pwd = getSyncPassword();
+    if (pwd) {
+      decrypted = await decryptForSync(data.encrypted, pwd);
+    }
+    if (!decrypted) {
+      // Need to prompt for password
+      return { added: 0, replaced: false, needsPassword: true, encrypted: data.encrypted };
+    }
+  }
+
+  if (Array.isArray(data.words)) {
+    // Clear existing and replace
+    await dbClear();
+    state.words = [];
+    for (const w of data.words) {
+      if (!w || !w.word) continue;
+      if (!w.id) w.id = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : 'id-' + Date.now() + Math.random();
+      // normalize fields
+      if (!w.examples) w.examples = [];
+      if (w.crossedOut === undefined) w.crossedOut = false;
+      if (w.ease === undefined) w.ease = 2.5;
+      if (w.interval === undefined) w.interval = 0;
+      if (w.streak === undefined) w.streak = 0;
+      if (w.nextReview === undefined) w.nextReview = Date.now();
+      if (w.totalReviews === undefined) w.totalReviews = 0;
+      if (w.correctReviews === undefined) w.correctReviews = 0;
+      await dbPut(w);
+      state.words.push(w);
+      added++;
+    }
+  }
+  if (data.state) {
+    if (data.state.streak !== undefined) localStorage.setItem(lsKey('streak'), String(data.state.streak));
+    if (data.state.lastDay !== undefined) localStorage.setItem(lsKey('last-day'), data.state.lastDay);
+    if (data.state.todayDone && typeof data.state.todayDone === 'object') {
+      for (const [k, v] of Object.entries(data.state.todayDone)) {
+        localStorage.setItem(k, v);
+      }
+    }
+  }
+  // Apply decrypted sensitive data
+  if (decrypted) {
+    if (decrypted.apiKey) state.settings.apiKey = decrypted.apiKey;
+    if (decrypted.syncToken !== undefined) state.settings.syncToken = decrypted.syncToken;
+    if (decrypted.apiBase) state.settings.apiBase = decrypted.apiBase;
+    if (decrypted.model) state.settings.model = decrypted.model;
+    if (decrypted.provider) state.settings.provider = decrypted.provider;
+    saveSettings();
+    if (decrypted.session) {
+      try { localStorage.setItem(PRACTICE_SESSION_KEY, JSON.stringify(decrypted.session)); } catch {}
+    }
+  }
+  return { added, replaced: true, decrypted: !!decrypted };
+}
+
+function syncHeaders() {
+  const headers = { 'Content-Type': 'application/json' };
+  if (state.settings.syncToken) headers['X-Auth-Token'] = state.settings.syncToken;
+  if (state.profile) headers['X-Profile'] = state.profile;
+  return headers;
+}
+
+async function pushToCloud() {
+  const url = (state.settings.workerUrl || '').trim();
+  if (!url) {
+    toast('请先在设置中填 Worker URL', 'error');
+    return;
+  }
+  // Prompt for sync password on first push (if API key is set, we want to encrypt it)
+  if (state.settings.apiKey && !getSyncPassword()) {
+    const pwd = await promptForPassword('设个同步密码（用于加密 API key 和练习进度）\n这台设备记住密码，其他设备需要输入同样的密码才能解密', '');
+    if (!pwd) { toast('已取消推送'); return; }
+    setSyncPassword(pwd);
+  }
+  const btn = document.getElementById('sync-push');
+  if (btn) { btn.disabled = true; btn.textContent = '推送中…'; }
+  try {
+    const payload = await getSyncPayload();
+    const resp = await fetch(url.replace(/\/$/, '') + '/api/all', {
+      method: 'POST',
+      headers: syncHeaders(),
+      body: JSON.stringify(payload)
+    });
+    if (!resp.ok) {
+      const errText = await resp.text();
+      throw new Error(`HTTP ${resp.status}: ${errText.slice(0, 100)}`);
+    }
+    state.settings.lastSyncAt = Date.now();
+    saveSettings();
+    const statusEl = document.getElementById('sync-status');
+    if (statusEl) statusEl.textContent = `上次同步：${new Date().toLocaleString('zh-CN')}`;
+    const encMsg = payload.encrypted ? '（API key 和 session 已加密）' : '（未设置同步密码，API key 未加密）';
+    toast(`已推送 ${payload.words.length} 个单词到云端 ${encMsg}`, 'success');
+  } catch (e) {
+    console.error(e);
+    toast('推送失败：' + e.message, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '📤 推送到云端'; }
+  }
+}
+
+async function pullFromCloud() {
+  const url = (state.settings.workerUrl || '').trim();
+  if (!url) {
+    toast('请先在设置中填 Worker URL', 'error');
+    return;
+  }
+  if (!confirm('从云端拉取会覆盖本地所有数据，确定吗？\n（建议先导出本地数据做备份）')) return;
+  const btn = document.getElementById('sync-pull');
+  if (btn) { btn.disabled = true; btn.textContent = '拉取中…'; }
+  try {
+    const resp = await fetch(url.replace(/\/$/, '') + '/api/all', {
+      method: 'GET',
+      headers: syncHeaders()
+    });
+    if (!resp.ok) {
+      const errText = await resp.text();
+      throw new Error(`HTTP ${resp.status}: ${errText.slice(0, 100)}`);
+    }
+    const data = await resp.json();
+    // If cloud has encrypted data and we don't have a password (or it's wrong), prompt
+    if (data.encrypted) {
+      const pwd = getSyncPassword();
+      if (!pwd || !(await decryptForSync(data.encrypted, pwd))) {
+        // Try once with current password
+        if (pwd) toast('云端密码与你本地的不同', 'error');
+        const choice = await new Promise((resolve) => {
+          showModal(`
+            <h2>需要同步密码</h2>
+            <p>云端数据已加密，请输入密码以解密。</p>
+            <div class="form-row">
+              <input type="password" id="pull-pw-input" placeholder="同步密码" autocomplete="off" style="font-size: 16px;">
+            </div>
+            <p class="text-light mt-2" style="font-size: 12px;">忘了密码？点下面“忘了/重置”。</p>
+            <div class="flex-row mt-3" style="justify-content: flex-end; gap: 8px;">
+              <button class="btn" id="pull-cancel">取消</button>
+              <button class="btn btn-danger" id="pull-forgot">忘了/重置</button>
+              <button class="btn btn-primary" id="pull-ok">确定</button>
+            </div>
+          `);
+          setTimeout(() => document.getElementById('pull-pw-input')?.focus(), 50);
+          document.getElementById('pull-cancel').addEventListener('click', () => { closeModal(); resolve({ type: 'cancel' }); });
+          document.getElementById('pull-forgot').addEventListener('click', () => { closeModal(); resolve({ type: 'forgot' }); });
+          document.getElementById('pull-ok').addEventListener('click', () => {
+            const v = (document.getElementById('pull-pw-input').value || '').trim();
+            resolve({ type: 'ok', pwd: v });
+          });
+          document.getElementById('pull-pw-input').addEventListener('keydown', e => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              const v = (document.getElementById('pull-pw-input').value || '').trim();
+              resolve({ type: 'ok', pwd: v });
+            }
+          });
+        });
+        if (choice.type === 'cancel') { toast('已取消'); return; }
+        if (choice.type === 'forgot') {
+          if (confirm('重置密码后，本次拉取会取消。\n你需要在“设置”里点“忘记密码/重置密码”来重置。\n\n确定取消本次拉取吗？')) {
+            return;
+          }
+          return;
+        }
+        if (!choice.pwd) { toast('已取消'); return; }
+        setSyncPassword(choice.pwd);
+        const test = await decryptForSync(data.encrypted, choice.pwd);
+        if (!test) { toast('密码错误，拉取取消', 'error'); return; }
+      }
+    }
+    const result = await applySyncPayload(data);
+    state.settings.lastSyncAt = Date.now();
+    saveSettings();
+    render();
+    const statusEl = document.getElementById('sync-status');
+    if (statusEl) statusEl.textContent = `上次同步：${new Date().toLocaleString('zh-CN')}`;
+    const decMsg = result.decrypted ? '（已恢复 API key 和练习进度）' : '';
+    toast(`已从云端拉取 ${result.added} 个单词 ${decMsg}`, 'success');
+  } catch (e) {
+    console.error(e);
+    toast('拉取失败：' + e.message, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '📥 从云端拉取'; }
+  }
+}
+
+// Password prompt modal (returns the entered password, or null if cancelled)
+function promptForPassword(message, defaultValue = '') {
+  return new Promise((resolve) => {
+    showModal(`
+      <h2>输入同步密码</h2>
+      <p>${escapeHtml(message)}</p>
+      <div class="form-row">
+        <input type="password" id="pw-prompt-input" value="${escapeHtml(defaultValue)}" autocomplete="off" style="font-size: 16px;">
+      </div>
+      <div class="flex-row" style="justify-content: flex-end; gap: 8px;">
+        <button class="btn" id="pw-prompt-cancel">取消</button>
+        <button class="btn btn-primary" id="pw-prompt-ok">确定</button>
+      </div>
+    `);
+    setTimeout(() => document.getElementById('pw-prompt-input')?.focus(), 50);
+    const finish = (val) => { closeModal(); resolve(val); };
+    document.getElementById('pw-prompt-ok').addEventListener('click', () => {
+      const v = (document.getElementById('pw-prompt-input').value || '').trim();
+      if (!v) { toast('请输入密码', 'error'); return; }
+      finish(v);
+    });
+    document.getElementById('pw-prompt-cancel').addEventListener('click', () => finish(null));
+    document.getElementById('pw-prompt-input').addEventListener('keydown', e => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const v = (document.getElementById('pw-prompt-input').value || '').trim();
+        if (v) finish(v);
+      }
+    });
+  });
+}
+
+// Auto-sync helper (called after practice sessions)
+let _autoSyncTimer = null;
+function scheduleAutoSync() {
+  if (!state.settings.autoSync) return;
+  if (!(state.settings.workerUrl || '').trim()) return;
+  clearTimeout(_autoSyncTimer);
+  _autoSyncTimer = setTimeout(() => {
+    pushToCloud().catch(() => {});
+  }, 3000);
+}
+
+// --- Practice ---
+function renderPractice() {
+  const s = state.session;
+  if (!s) {
+    return '<div class="card empty"><h3>无练习任务</h3><button class="btn btn-primary mt-3" id="back-today-empty">返回</button></div>';
+  }
+
+  // Error state
+  if (s.phase === 'error') {
+    return `
+      <div class="app-header"><h1>出题失败</h1><p class="text-light">${escapeHtml(s.error || '未知错误')}</p></div>
+      <div class="card">
+        <button class="btn btn-primary btn-block" id="retry-gen">🔄 重新生成</button>
+        <button class="btn btn-block mt-2" id="skip-error-word">⏭ 跳过这个词</button>
+        <button class="btn btn-block mt-2" id="back-today">返回主页</button>
+      </div>
+    `;
+  }
+
+  // Generating state
+  if (s.phase === 'generating' || !s.content) {
+    return `
+      <div class="practice-header">
+        <button class="back-btn" id="exit-practice">←</button>
+        <div class="progress-bar"><div class="progress-fill" style="width: 0%"></div></div>
+        <div class="progress-text">${s.wordIdx + 1} / ${s.words.length}</div>
+      </div>
+      <div class="card" style="text-align: center; padding: 60px 20px; margin-top: 16px;">
+        <span class="spinner" style="width: 28px; height: 28px; border-width: 3px;"></span>
+        <p class="text-light mt-3" style="font-size: 14px;">AI 正在出题…</p>
+        <p class="text-mute mt-2" style="font-size: 12px;">先准备前几题，其余答题时后台生成</p>
+        <p class="text-mute mt-2" style="font-size: 12px;">${s.mode === 'translate' ? '句子翻译' : '完形填空'} · ${s.wordIdx + 1} / ${s.words.length}</p>
+      </div>
+    `;
+  }
+
+  // Active practice
+  const w = s.words[s.wordIdx];
+  const c = repairPracticeContent(w, s.mode, s.content);
+  const mode = s.mode;
+  const totalQuestions = s.words.length;
+  const currentQ = s.wordIdx + 1;
+  const progress = Math.min(100, ((currentQ - 1) / totalQuestions * 100)).toFixed(0);
+  const correctCount = s.results.filter(r => r.correct).length;
+  const modeTitle = mode === 'translate' ? '句子翻译' : '完形填空';
+
+  return `
+    <div class="practice-header">
+      <button class="back-btn" id="exit-practice" title="退出">←</button>
+      <div class="progress-bar"><div class="progress-fill" style="width: ${progress}%"></div></div>
+      <div class="progress-text">${Math.min(currentQ, totalQuestions)} / ${totalQuestions}</div>
+    </div>
+
+    <div class="practice-card" id="practice-card">
+      <div class="mode-tag ${mode === 'translate' ? 'translate-mode' : ''}">${modeTitle}</div>
+      ${mode === 'translate' ? `
+        <div class="word-display">${escapeHtml(w.word)}</div>
+        <div class="word-phonetic" style="margin-bottom:14px;">${renderPhoneticWithSpeakers(w)}${w.partOfSpeech ? ` · ${escapeHtml(w.partOfSpeech)}` : ''}</div>
+      ` : (state.session.phase === 'feedback'
+          ? `<div class="word-display" style="font-size: 22px; opacity: 0.9; margin-bottom:6px;">答案是 <b style="color: var(--accent);">${escapeHtml(w.word)}</b></div>
+             <div class="word-phonetic" style="margin-bottom:14px;">${renderPhoneticWithSpeakers(w)}</div>`
+          : `<div class="text-light" style="font-size: 13px; margin-bottom: 14px;">🔍 词不告诉你，看语境猜</div>`)}
+
+      ${mode === 'cloze' ? renderClozeQuestion(w, c) : renderTranslateQuestion(w, c)}
+
+      <div class="practice-actions" id="practice-actions">
+        ${mode === 'cloze' && s.phase !== 'feedback' ? `<button class="btn" id="hint-btn">💡 提示</button>` : ''}
+        <button class="btn" id="reveal-btn" ${s.phase === 'feedback' ? 'style="display:none"' : ''}>显示答案</button>
+        <button class="btn btn-primary" id="check-btn" style="display:${s.phase === 'feedback' ? 'inline-flex' : 'none'};">${s.phase === 'feedback' ? '下一题 →' : '检查答案'}</button>
+      </div>
+
+      <div class="feedback-area" id="feedback"></div>
+      <div class="difficulty-row" id="difficulty-row" style="display:none;">
+        <button class="btn btn-danger" data-perf="wrong">不认识</button>
+        <button class="btn" style="color: var(--warning); border-color: var(--warning);" data-perf="hard">模糊</button>
+        <button class="btn" style="color: var(--accent); border-color: var(--accent);" data-perf="good">认识</button>
+        <button class="btn btn-primary" data-perf="easy">很熟</button>
+      </div>
+    </div>
+
+    <div class="flex-row mt-2" style="justify-content: center; gap: 8px;">
+      <button class="btn btn-ghost btn-sm" id="regen-content" title="换一道题">🔄 换一句</button>
+      <button class="btn btn-ghost btn-sm" id="skip-word" title="跳过这个词">⏭ 跳过</button>
+    </div>
+
+    <div class="card text-light" style="font-size: 12px; text-align: center; padding: 12px; margin-top: 14px;">
+      本轮已答对 <b style="color: var(--accent);">${correctCount}</b> · 连续答对 ${s.streak} 次
+    </div>
+  `;
+}
+
+function renderClozeQuestion(w, c) {
+  const sentence = c.clozeEnglish;
+  const re = wordMatchRe(w.word);
+  const m = sentence.match(re);
+  const parts = [];
+  if (m) {
+    const idx = m.index;
+    const before = sentence.slice(0, idx);
+    const after = sentence.slice(idx + m[0].length);
+    parts.push(renderMarkableText(before));
+    parts.push(`<input type="text" class="blank-input" id="cloze-input" placeholder="填入单词" autocomplete="off" spellcheck="false">`);
+    parts.push(renderMarkableText(after));
+  } else {
+    parts.push(renderMarkableText(sentence));
+    parts.push(`<br><br><input type="text" class="blank-input" id="cloze-input" placeholder="填入单词" autocomplete="off" spellcheck="false">`);
+  }
+
+  // For cloze: Chinese meaning after feedback, or after user taps 提示
+  const showMeaning = state.session && (state.session.phase === 'feedback' || state.session.hintShown);
+  return `<div class="sentence-row">
+            <div class="practice-sentence" id="practice-sentence">${parts.join('')}</div>
+            <button type="button" class="speak-sentence-btn" data-speak-key="cloze" title="朗读整句">🔊</button>
+          </div>
+          <div class="mark-tip">点句子里不认识的词 → 加入生词表</div>
+          <div id="cloze-hint-slot">
+            ${showMeaning
+              ? `<div class="chinese-sentence" id="cloze-meaning"><div class="text-light" style="font-size:12px; margin-bottom:4px;">整句意思</div>${escapeHtml(c.clozeChinese || '')}</div>`
+              : `<div class="text-light" style="font-size:12px; margin-top: 4px; opacity: 0.5;">需要帮助？点「提示」看整句翻译</div>`}
+          </div>`;
+}
+
+/** 常见词不标生词 */
+const MARK_STOPWORDS = new Set([
+  'a','an','the','and','or','but','if','as','at','by','for','from','in','into','of','on','onto','to','with','without',
+  'is','am','are','was','were','be','been','being','do','does','did','done','have','has','had','having',
+  'will','would','shall','should','can','could','may','might','must','need','dare',
+  'i','me','my','mine','you','your','yours','he','him','his','she','her','hers','it','its','we','us','our','ours','they','them','their','theirs',
+  'this','that','these','those','there','here','then','than','so','such','very','too','also','just','only','even','still',
+  'not','no','nor','yes','all','any','each','every','both','few','more','most','other','some','such','own','same',
+  'what','which','who','whom','whose','where','when','why','how',
+  'about','above','after','again','against','along','among','around','before','behind','below','between','during','over','through','under','until','upon','within',
+  'up','down','out','off','again','further','once','twice',
+  'one','two','three','first','second','third'
+]);
+
+function isWordInList(word) {
+  return !!findRelatedWordInList(word);
+}
+
+/** 把英文片段渲染成可点击生词 */
+function renderMarkableText(text) {
+  return String(text || '').replace(/[A-Za-z][A-Za-z'-]*/g, (match) => {
+    const lower = match.toLowerCase();
+    if (match.length < 3 || MARK_STOPWORDS.has(lower)) return escapeHtml(match);
+    const related = findRelatedWordInList(lower);
+    const inList = !!related;
+    const tip = related
+      ? (related.exact ? '已在词表' : `已有词形「${related.entry.word}」`)
+      : '点击加入生词';
+    return `<span class="markable-word${inList ? ' in-list' : ''}" data-word="${escapeHtml(lower)}" title="${escapeHtml(tip)}">${escapeHtml(match)}</span>`;
+  });
+}
+
+async function addMarkedWord(rawWord) {
+  const word = String(rawWord || '').toLowerCase().replace(/[^a-z'-]/g, '');
+  if (!word || word.length < 3) return;
+  if (MARK_STOPWORDS.has(word)) {
+    toast('常见词，不用加入');
+    return;
+  }
+
+  const related = findRelatedWordInList(word, { includeCrossed: true });
+  if (related && !related.entry.crossedOut) {
+    if (related.exact) {
+      toast(`「${word}」已在词表`);
+    } else {
+      toast(`词表已有「${related.entry.word}」，「${word}」是词形变化，无需再加`);
+    }
+    highlightMarkedWord(word, false);
+    return;
+  }
+
+  const existing = related?.exact ? related.entry : null;
+
+  toast(`正在添加「${word}」…`);
+  try {
+    let translation = '';
+    let phonetic = '';
+    let partOfSpeech = '';
+    let audioUrl = '';
+
+    try {
+      translation = await fetchYoudaoGloss(word);
+    } catch (_) {}
+
+    try {
+      const resp = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(word)}`);
+      if (resp.ok) {
+        const data = await resp.json();
+        if (Array.isArray(data) && data[0]) {
+          const best = pickBestPhonetic(data[0]);
+          phonetic = normalizePhonetic(best?.text || '');
+          partOfSpeech = data[0].meanings?.[0]?.partOfSpeech || '';
+          audioUrl = best?.audio || data[0].phonetics?.find(p => p.audio)?.audio || '';
+        }
+      }
+    } catch (_) {}
+
+    if (!translation && isConfigured()) {
+      try {
+        const info = await generateWordInfo(word);
+        translation = info.translation || translation;
+        phonetic = phonetic || info.phonetic || '';
+        partOfSpeech = partOfSpeech || info.partOfSpeech || '';
+      } catch (_) {}
+    }
+
+    if (!translation) translation = '（待补充释义）';
+
+    let saved;
+    if (existing) {
+      existing.crossedOut = false;
+      existing.translation = translation;
+      if (phonetic) existing.phonetic = phonetic;
+      if (partOfSpeech) existing.partOfSpeech = partOfSpeech;
+      if (audioUrl) existing.audioUrl = audioUrl;
+      existing.nextReview = Date.now();
+      await dbPut(existing);
+      saved = existing;
+    } else {
+      saved = {
+        id: (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : ('id-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8)),
+        word,
+        phonetic,
+        partOfSpeech,
+        translation,
+        audioUrl,
+        examples: [],
+        addedAt: Date.now(),
+        crossedOut: false,
+        ease: 2.5,
+        interval: 0,
+        streak: 0,
+        nextReview: Date.now(),
+        lastReviewed: null,
+        totalReviews: 0,
+        correctReviews: 0
+      };
+      await dbPut(saved);
+      state.words.push(saved);
+    }
+
+    highlightMarkedWord(word, true);
+    toast(`已加入生词「${word}」`, 'success');
+  } catch (e) {
+    console.error(e);
+    toast('添加失败：' + (e.message || 'unknown'), 'error');
+  }
+}
+
+function highlightMarkedWord(word, justMarked) {
+  const lower = String(word).toLowerCase();
+  document.querySelectorAll('.markable-word').forEach(el => {
+    if ((el.dataset.word || '').toLowerCase() !== lower) return;
+    el.classList.add('in-list');
+    el.title = '已在词表';
+    if (justMarked) {
+      el.classList.add('just-marked');
+      setTimeout(() => el.classList.remove('just-marked'), 600);
+    }
+  });
+}
+
+/** 完形填空作答后：展示整句中文意思 */
+function showClozeSentenceMeaning(c) {
+  if (!c?.clozeChinese) return;
+  const slot = document.getElementById('cloze-hint-slot');
+  const html = `<div class="chinese-sentence" id="cloze-meaning"><div class="text-light" style="font-size:12px; margin-bottom:4px;">整句意思</div>${escapeHtml(c.clozeChinese)}</div>`;
+  if (slot) {
+    slot.innerHTML = html;
+  } else {
+    const sentence = document.getElementById('practice-sentence');
+    if (sentence) sentence.insertAdjacentHTML('afterend', html);
+  }
+}
+
+function renderTranslateQuestion(w, c) {
+  // Only show the reference English AFTER the user has answered
+  const showRef = state.session && state.session.phase === 'feedback';
+  return `<div class="chinese-sentence" id="chinese-display">${escapeHtml(c.translateChinese)}</div>
+          <textarea id="translate-input" placeholder="把上面的中文翻译成英文..." spellcheck="false"></textarea>
+          <div class="text-light" style="font-size:12px; margin-top: -4px;">提示：用上「${escapeHtml(w.word)}」这个词${showRef ? '' : ' · 写完点检查，会显示参考译文'}</div>
+          ${showRef ? `
+            <div class="sentence-row" style="margin-top:12px;">
+              <div class="practice-sentence" id="translate-ref" style="margin:0; flex:1;">${escapeHtml(c.translateReference || '')}</div>
+              <button type="button" class="speak-sentence-btn" data-speak-key="translate-ref" title="朗读参考译文">🔊</button>
+            </div>
+          ` : ''}`;
+}
+
+function bindPractice() {
+  // exit
+  document.getElementById('exit-practice')?.addEventListener('click', () => {
+    savePracticeSession();
+    state.session = null;
+    state.view = 'today';
+    render();
+    toast('进度已保存，可随时继续');
+  });
+
+  // back to today (from done / error states)
+  document.getElementById('back-today')?.addEventListener('click', () => {
+    if (state.session?.phase === 'done') clearPracticeSession();
+    else savePracticeSession();
+    state.session = null;
+    state.view = 'today';
+    render();
+  });
+
+  document.getElementById('back-today-empty')?.addEventListener('click', () => {
+    state.session = null;
+    state.view = 'today';
+    render();
+  });
+
+  // retry generate (must clear contentCache error, otherwise ensureContent replays the same failure)
+  document.getElementById('retry-gen')?.addEventListener('click', () => {
+    regenerateCurrent();
+  });
+  document.getElementById('skip-error-word')?.addEventListener('click', () => {
+    skipCurrentWord();
+  });
+
+  const s = state.session;
+  if (!s || !s.content) return;
+
+  // input handling
+  if (s.mode === 'cloze') {
+    const input = document.getElementById('cloze-input');
+    if (input) {
+      input.focus();
+      input.addEventListener('keydown', e => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          if (s.phase === 'feedback') nextQuestion();
+          else checkCurrentAnswer();
+        }
+      });
+    }
+  } else if (s.mode === 'translate') {
+    const input = document.getElementById('translate-input');
+    if (input) {
+      input.focus();
+      // Enter inserts newline naturally in textarea; user clicks button
+    }
+  }
+
+  // buttons
+  document.getElementById('hint-btn')?.addEventListener('click', () => {
+    const c = state.session?.content;
+    if (!c) return;
+    state.session.hintShown = true;
+    showClozeSentenceMeaning(c);
+    const hintBtn = document.getElementById('hint-btn');
+    if (hintBtn) hintBtn.style.display = 'none';
+  });
+  document.getElementById('reveal-btn')?.addEventListener('click', revealAnswer);
+  const checkBtn = document.getElementById('check-btn');
+  if (checkBtn) {
+    checkBtn.addEventListener('click', () => {
+      if (s.phase === 'feedback') nextQuestion();
+      else checkCurrentAnswer();
+    });
+  }
+
+  document.querySelectorAll('[data-perf]').forEach(btn => {
+    btn.addEventListener('click', () => rateAnswer(btn.dataset.perf));
+  });
+
+  document.getElementById('regen-content')?.addEventListener('click', regenerateCurrent);
+  document.getElementById('skip-word')?.addEventListener('click', skipCurrentWord);
+
+  // 完形填空：点击句子中的词加入生词
+  document.getElementById('practice-sentence')?.addEventListener('click', (e) => {
+    const el = e.target.closest('.markable-word');
+    if (!el) return;
+    e.preventDefault();
+    e.stopPropagation();
+    addMarkedWord(el.dataset.word);
+  });
+
+  // Inline speak buttons in the practice card (美/英听筒 + 旧 inline)
+  bindAccentSpeakButtons(document.getElementById('practice-card') || document);
+
+  // Sentence-level speak (cloze English / translate reference)
+  document.querySelectorAll('.speak-sentence-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      const key = btn.dataset.speakKey;
+      const c = state.session?.content;
+      let text = '';
+      if (key === 'cloze') text = c?.clozeEnglish || '';
+      else if (key === 'translate-ref') text = c?.translateReference || '';
+      if (!text) {
+        toast('没有可朗读的句子');
+        return;
+      }
+      btn.classList.add('speaking');
+      setTimeout(() => btn.classList.remove('speaking'), 800);
+      speakWord(text);
+    });
+  });
+}
+
+function revealAnswer() {
+  const s = state.session;
+  if (!s || !s.content) return;
+  const w = s.words[s.wordIdx];
+  const c = s.content;
+  if (s.mode === 'cloze') {
+    const expected = getClozeExpectedForm(w, c);
+    const input = document.getElementById('cloze-input');
+    if (input) {
+      input.value = expected;
+      input.readOnly = true;
+    }
+    showClozeSentenceMeaning(c);
+    const hintBtn = document.getElementById('hint-btn');
+    if (hintBtn) hintBtn.style.display = 'none';
+    const fb = document.getElementById('feedback');
+    if (fb) {
+      fb.className = 'feedback-area show';
+      const localGloss = getWordTranslation(w);
+      fb.innerHTML = `<div class="label">已显示答案</div>本题答案是 <b>${escapeHtml(expected)}</b>${clozeAnswerPronHtml(w)}${clozeGlossHtml(w.word, localGloss)}${w.mnemonic ? mnemonicHtml(w.mnemonic) : (isConfigured() ? mnemonicHtml('', { loading: true }) : '')}`;
+      bindAccentSpeakButtons(fb);
+      fillClozeAnswerPron(fb, w);
+      fillClozeGloss(fb, w);
+    }
+    showDifficultyRow();
+  } else {
+    const input = document.getElementById('translate-input');
+    if (input) input.value = c.translateReference;
+  }
+  s.phase = 'feedback';
+  document.getElementById('reveal-btn').style.display = 'none';
+  const checkBtn = document.getElementById('check-btn');
+  if (checkBtn) {
+    checkBtn.style.display = 'inline-flex';
+    checkBtn.textContent = '下一题 →';
+  }
+  savePracticeSession();
+}
+
+async function checkCurrentAnswer() {
+  const s = state.session;
+  if (!s || !s.content) return;
+  const w = s.words[s.wordIdx];
+  const c = s.content;
+  const mode = s.mode;
+
+  if (s.phase === 'feedback') {
+    nextQuestion();
+    return;
+  }
+
+  let userInput = '';
+  if (mode === 'cloze') {
+    userInput = document.getElementById('cloze-input')?.value?.trim() || '';
+    if (!userInput) {
+      toast('先填个答案 ~');
+      return;
+    }
+  } else {
+    userInput = document.getElementById('translate-input')?.value?.trim() || '';
+    if (!userInput) {
+      toast('先写一句英文 ~');
+      return;
+    }
+  }
+
+  setPracticeLoading(true);
+
+  try {
+    let result;
+    if (mode === 'cloze') {
+      result = await judgeCloze(w.word, userInput, c.clozeEnglish);
+    } else {
+      result = await judgeTranslation(w.word, c.translateChinese, c.translateReference, userInput);
+    }
+    s.lastResult = result;
+    s.lastUserInput = userInput;
+    showFeedback(result, mode, w, c);
+    showDifficultyRow();
+
+    document.getElementById('reveal-btn').style.display = 'none';
+    const checkBtn = document.getElementById('check-btn');
+    if (checkBtn) {
+      checkBtn.style.display = 'inline-flex';
+      checkBtn.textContent = '下一题 →';
+    }
+    s.phase = 'feedback';
+  } catch (e) {
+    console.error(e);
+    toast('AI 评判失败：' + e.message, 'error');
+  } finally {
+    setPracticeLoading(false);
+  }
+  savePracticeSession();
+}
+
+function setPracticeLoading(loading) {
+  const actions = document.getElementById('practice-actions');
+  if (actions) {
+    actions.style.opacity = loading ? '0.4' : '1';
+    actions.style.pointerEvents = loading ? 'none' : 'auto';
+  }
+  let overlay = document.querySelector('.loading-overlay');
+  if (loading && !overlay) {
+    const card = document.getElementById('practice-card');
+    if (card) {
+      overlay = document.createElement('div');
+      overlay.className = 'loading-overlay';
+      overlay.innerHTML = '<div class="loading-text"><span class="spinner"></span> AI 评判中…</div>';
+      card.appendChild(overlay);
+    }
+  } else if (!loading && overlay) {
+    overlay.remove();
+  }
+}
+
+/** 从完形句子中取出目标词的原始形态 */
+function getClozeExpectedForm(w, c) {
+  const sentence = c?.clozeEnglish || '';
+  const re = wordMatchRe(w.word);
+  const m = sentence.match(re);
+  return m ? m[0] : w.word;
+}
+
+function clozeGlossHtml(wordLabel, gloss) {
+  if (!gloss) {
+    return `<div class="suggestion cloze-gloss" style="margin-top:8px;"><span class="text-light" style="font-size:12px;">词义加载中…</span></div>`;
+  }
+  // 把 ； ; ， 等拆开，方便复习多个义项
+  const senses = String(gloss)
+    .split(/[;；]/)
+    .map(s => s.trim())
+    .filter(Boolean);
+  const body = senses.length > 1
+    ? `<ul style="margin:6px 0 0; padding-left:18px; line-height:1.7;">${senses.map(s => `<li>${escapeHtml(s)}</li>`).join('')}</ul>`
+    : `<div style="margin-top:4px; line-height:1.6;">${escapeHtml(gloss)}</div>`;
+  return `<div class="suggestion cloze-gloss" style="margin-top:8px;">
+    <div class="text-light" style="font-size:12px; margin-bottom:2px;">「${escapeHtml(wordLabel)}」词义复习</div>
+    ${body}
+  </div>`;
+}
+
+/** 完形填空揭晓答案时的音标 + 发音 */
+function clozeAnswerPronHtml(w) {
+  return `<div class="cloze-answer-pron" style="margin-top:10px;">
+    <div class="text-light" style="font-size:12px; margin-bottom:4px;">读音复习 · 点喇叭听</div>
+    <div class="word-phonetic">${renderPhoneticWithSpeakers(w)}</div>
+  </div>`;
+}
+
+async function fillClozeAnswerPron(fb, w) {
+  if (!fb || !w) return;
+  try {
+    await ensurePhonetic(w);
+  } catch (_) {}
+  const box = fb.querySelector('.cloze-answer-pron');
+  const html = clozeAnswerPronHtml(w);
+  if (box) box.outerHTML = html;
+  else fb.insertAdjacentHTML('beforeend', html);
+  bindAccentSpeakButtons(fb);
+}
+
+async function fillClozeGloss(fb, w) {
+  if (!fb || !w) return;
+  let gloss = getWordTranslation(w);
+  try {
+    const yd = await fetchYoudaoGloss(w.word);
+    if (yd && (!gloss || yd.length > gloss.length || !hasValidTranslation(w))) {
+      gloss = yd;
+      if (!hasValidTranslation(w) || (w.translation && isSentenceLikeChinese(w.translation))) {
+        w.translation = yd;
+        dbPut(w).catch(() => {});
+      } else if (yd.length > String(w.translation || '').length + 4) {
+        // 有道释义更完整时更新
+        w.translation = yd;
+        dbPut(w).catch(() => {});
+      }
+    }
+  } catch (_) {}
+
+  if (!gloss && isConfigured()) {
+    try {
+      const info = await generateWordInfo(w.word);
+      if (info?.translation) {
+        gloss = info.translation;
+        w.translation = info.translation;
+        if (info.phonetic && !w.phonetic) w.phonetic = info.phonetic;
+        if (info.mnemonic) w.mnemonic = info.mnemonic;
+        dbPut(w).catch(() => {});
+      }
+    } catch (_) {}
+  }
+
+  const box = fb.querySelector('.cloze-gloss');
+  const html = clozeGlossHtml(w.word, gloss || '暂无更多释义');
+  if (box) box.outerHTML = html;
+  else fb.insertAdjacentHTML('beforeend', html);
+  fillClozeMnemonic(fb, w);
+}
+
+async function fillClozeMnemonic(fb, w) {
+  if (!fb || !w) return;
+  let tip = String(w.mnemonic || '').trim();
+  const existing = fb.querySelector('.cloze-mnemonic');
+  if (!tip && isConfigured()) {
+    if (!existing) fb.insertAdjacentHTML('beforeend', mnemonicHtml('', { loading: true }));
+    tip = await ensureMnemonic(w);
+  }
+  const html = mnemonicHtml(tip);
+  const box = fb.querySelector('.cloze-mnemonic');
+  if (!html) {
+    if (box) box.remove();
+    return;
+  }
+  if (box) box.outerHTML = html;
+  else fb.insertAdjacentHTML('beforeend', html);
+}
+
+function showFeedback(result, mode, w, c) {
+  const fb = document.getElementById('feedback');
+  fb.className = 'feedback-area show';
+
+  if (mode === 'cloze') {
+    showClozeSentenceMeaning(c);
+    const hintBtn = document.getElementById('hint-btn');
+    if (hintBtn) hintBtn.style.display = 'none';
+    const expected = getClozeExpectedForm(w, c);
+    const input = document.getElementById('cloze-input');
+    if (input) {
+      input.value = expected;
+      input.readOnly = true;
+    }
+    const localGloss = getWordTranslation(w);
+    const coach = clozeCoachHtml(result);
+    const memoSlot = w.mnemonic ? mnemonicHtml(w.mnemonic) : (isConfigured() ? mnemonicHtml('', { loading: true }) : '');
+    if (result.correct) {
+      fb.classList.add('correct');
+      fb.innerHTML = `<div class="label">✓ 答对了</div>本题答案是 <b>${escapeHtml(expected)}</b>${clozeAnswerPronHtml(w)}<br>${escapeHtml(result.feedback || '很好！')}${coach}${clozeGlossHtml(w.word, localGloss)}${memoSlot}`;
+    } else {
+      fb.classList.add('wrong');
+      fb.innerHTML = `<div class="label">✗ 答错了</div>正确答案是 <b>${escapeHtml(expected)}</b>${clozeAnswerPronHtml(w)}<br>${escapeHtml(result.feedback || '')}${coach}${clozeGlossHtml(w.word, localGloss)}${memoSlot}`;
+    }
+    bindAccentSpeakButtons(fb);
+    fillClozeAnswerPron(fb, w);
+    fillClozeGloss(fb, w);
+  } else {
+    const score = result.score || 0;
+    const ref = result.improvedVersion || c.translateReference || '';
+    const speakBtn = ref
+      ? ` <button type="button" class="speak-sentence-btn" data-speak-key="translate-ref" title="朗读参考译文" style="vertical-align:middle;">🔊</button>`
+      : '';
+    if (score >= 75) {
+      fb.classList.add('correct');
+      fb.innerHTML = `<div class="label">✓ 不错 (${score}分)</div>${escapeHtml(result.feedback || '')}${ref ? `<div class="suggestion">参考改进：${speakBtn}<br>${escapeHtml(ref)}</div>` : ''}`;
+    } else if (score >= 60) {
+      fb.classList.add('partial');
+      fb.innerHTML = `<div class="label">⚠ 还需要改进 (${score}分)</div>${escapeHtml(result.feedback || '')}${ref ? `<div class="suggestion">参考：${speakBtn}<br>${escapeHtml(ref)}</div>` : ''}`;
+    } else {
+      fb.classList.add('wrong');
+      fb.innerHTML = `<div class="label">✗ 需要重新理解 (${score}分)</div>${escapeHtml(result.feedback || '')}<div class="suggestion">参考：${speakBtn}<br>${escapeHtml(ref)}</div>`;
+    }
+    fb.querySelectorAll('.speak-sentence-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        const text = state.session?.content?.translateReference || result.improvedVersion || '';
+        if (!text) return;
+        btn.classList.add('speaking');
+        setTimeout(() => btn.classList.remove('speaking'), 800);
+        speakWord(text);
+      });
+    });
+  }
+}
+
+function showDifficultyRow() {
+  const row = document.getElementById('difficulty-row');
+  if (row) row.style.display = 'flex';
+}
+
+async function rateAnswer(perf) {
+  const s = state.session;
+  if (!s) return;
+  const w = s.words[s.wordIdx];
+  const result = s.lastResult || {};
+  const isCorrect = result.correct === true;
+
+  // Only update spaced repetition once per word in this session
+  {
+    const updated = {
+      ...w,
+      ...updateSchedule(w, perf),
+      totalReviews: (w.totalReviews || 0) + 1,
+      correctReviews: (w.correctReviews || 0) + (isCorrect ? 1 : 0)
+    };
+    await dbPut(updated);
+    Object.assign(w, updated);
+  }
+
+  s.results.push({ wordId: w.id, mode: s.mode, correct: isCorrect, perf });
+  if (isCorrect) {
+    s.streak = (s.streak || 0) + 1;
+    s.bestStreak = Math.max(s.bestStreak || 0, s.streak);
+  } else {
+    s.streak = 0;
+  }
+
+  nextQuestion();
+}
+
+function nextQuestion() {
+  const s = state.session;
+  if (!s) return;
+
+  // Single-mode session: always advance to next word
+  s.wordIdx += 1;
+  s.content = null;
+  s.lastResult = null;
+  s.lastUserInput = null;
+  s.hintShown = false;
+
+  if (s.wordIdx >= s.words.length) {
+    finishSession();
+    return;
+  }
+
+  // 有缓存就秒开；没有再转圈等待，同时继续后台补题
+  const cached = s.contentCache[s.words[s.wordIdx].id];
+  if (cached?.content) {
+    s.content = cached.content;
+    s.phase = 'answer';
+    savePracticeSession();
+    render();
+    kickPrefetch(s);
+    return;
+  }
+
+  s.phase = 'generating';
+  savePracticeSession();
+  render();
+  ensureContent();
+}
+
+async function ensureContent() {
+  const s = state.session;
+  if (!s) return;
+  const w = s.words[s.wordIdx];
+  if (!w) return;
+
+  const hit = s.contentCache[w.id];
+  if (hit?.content) {
+    s.content = hit.content;
+    s.phase = 'answer';
+    savePracticeSession();
+    render();
+    kickPrefetch(s);
+    return;
+  }
+  if (hit?.error) {
+    s.phase = 'error';
+    s.error = hit.error;
+    savePracticeSession();
+    render();
+    kickPrefetch(s);
+    return;
+  }
+
+  s.phase = 'generating';
+  render();
+
+  try {
+    const entry = await waitForWordContent(s, w);
+    if (!sessionAlive(s) || s.wordIdx >= s.words.length || s.words[s.wordIdx]?.id !== w.id) return;
+    if (entry?.content) {
+      s.content = entry.content;
+      s.phase = 'answer';
+    } else {
+      s.phase = 'error';
+      s.error = entry?.error || '生成失败';
+    }
+  } catch (e) {
+    console.error(e);
+    if (!sessionAlive(s)) return;
+    s.phase = 'error';
+    s.error = e.message;
+  }
+  savePracticeSession();
+  render();
+  kickPrefetch(s);
+}
+
+async function regenerateCurrent() {
+  const s = state.session;
+  if (!s) return;
+  const w = s.words[s.wordIdx];
+  if (!w) return;
+  delete s.contentCache[w.id];
+  delete s._inflight[w.id];
+  s.content = null;
+  s.error = null;
+  s.lastResult = null;
+  s.lastUserInput = null;
+  s.hintShown = false;
+  s.phase = 'generating';
+  render();
+  try {
+    const content = await generateContentForWord(w, s.mode);
+    if (!sessionAlive(s) || s.words[s.wordIdx]?.id !== w.id) return;
+    s.contentCache[w.id] = { content };
+    s.content = content;
+    s.phase = 'answer';
+  } catch (e) {
+    if (!sessionAlive(s)) return;
+    // Even on unexpected errors, fall back to a template sentence
+    try {
+      const content = fallbackContentForWord(w, s.mode);
+      s.contentCache[w.id] = { content };
+      s.content = content;
+      s.phase = 'answer';
+      toast('已使用备用题目', 'success');
+    } catch (_) {
+      s.contentCache[w.id] = { error: e.message };
+      s.phase = 'error';
+      s.error = e.message;
+    }
+  }
+  render();
+  kickPrefetch(s);
+  savePracticeSession();
+}
+
+function skipCurrentWord() {
+  const s = state.session;
+  if (!s) return;
+  s.results.push({
+    wordId: s.words[s.wordIdx].id,
+    mode: s.mode,
+    correct: false,
+    perf: 'hard',
+    skipped: true
+  });
+  nextQuestion();
+}
+
+function finishSession() {
+  // update streak
+  const today = new Date().toDateString();
+  const lastDay = localStorage.getItem(lsKey('last-day'));
+  let streak = parseInt(localStorage.getItem(lsKey('streak')) || '0');
+  if (lastDay !== today) {
+    const yesterday = new Date(Date.now() - DAY_MS).toDateString();
+    if (lastDay === yesterday || !lastDay) {
+      streak = lastDay ? streak + 1 : 1;
+    } else {
+      streak = 1;
+    }
+    localStorage.setItem(lsKey('streak'), streak);
+    localStorage.setItem(lsKey('last-day'), today);
+  }
+  localStorage.setItem(lsKey('done-' + today), '1');
+
+  state.session.phase = 'done';
+  clearPracticeSession();
+  render();
+  // Auto-sync to cloud after practice session
+  scheduleAutoSync();
+}
+
+function renderSessionDone() {
+  const s = state.session || { results: [], bestStreak: 0, words: [] };
+  const correct = s.results.filter(r => r.correct).length;
+  const total = s.results.length;
+  const pct = total > 0 ? Math.round(correct / total * 100) : 0;
+  const encouragement = pct >= 90 ? '太牛了！' : pct >= 75 ? '不错！' : pct >= 60 ? '加油！' : '继续努力！';
+
+  return `
+    <div class="app-header">
+      <h1>${encouragement}</h1>
+      <p>本次${s.mode === 'translate' ? '句子翻译' : '完形填空'}完成</p>
+    </div>
+
+    <div class="today-card" style="text-align: center;">
+      <h2>本次成绩</h2>
+      <div style="font-size: 48px; font-family: Georgia, serif; font-weight: 600; margin: 12px 0 4px;">${pct}%</div>
+      <div style="opacity: 0.85; font-size: 14px;">${correct} / ${total} 答对 · 最长连击 ${s.bestStreak || 0}</div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-bottom: 12px; font-size: 14px;">本轮详情</h3>
+      ${s.results.length === 0 ? '<p class="text-light">没答几道题呢~</p>' : s.results.map(r => {
+        const w = state.words.find(x => x.id === r.wordId);
+        if (!w) return '';
+        const modeLabel = r.mode === 'cloze' ? '完形填空' : '句子翻译';
+        const perfLabel = r.skipped ? '跳过' : (r.perf === 'wrong' ? '不认识' : r.perf === 'hard' ? '模糊' : r.perf === 'good' ? '认识' : '很熟');
+        return `<div class="word-list-item">
+          <div class="word">${escapeHtml(w.word)}</div>
+          <div class="meta">
+            <div><span class="tag ${r.correct ? 'tag-mastered' : 'tag-due'}">${r.correct ? '✓ 答对' : '✗ 答错'}</span> <span class="text-light">${modeLabel} · ${perfLabel}</span></div>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>
+
+    <button class="btn btn-primary btn-lg btn-block" id="back-today">回到主页</button>
+    <button class="btn btn-block mt-2" id="practice-again">再来一轮</button>
+  `;
+}
+
+async function startPractice(customWords, mode = 'cloze') {
+  const words = Array.isArray(customWords) ? customWords : selectDailyWords();
+  if (words.length === 0) {
+    toast('没有可练习的单词，去「添加」加几个吧', 'error');
+    return;
+  }
+  if (mode !== 'cloze' && mode !== 'translate') mode = 'cloze';
+
+  // Shuffle the words
+  const shuffled = [...words].sort(() => Math.random() - 0.5);
+
+  const s = {
+    words: shuffled,
+    wordIdx: 0,
+    mode,                 // fixed for the whole session: 'cloze' | 'translate'
+    content: null,
+    contentCache: {},     // wordId -> { content } | { error }
+    _inflight: {},
+    _prefetchRunning: false,
+    phase: 'generating',
+    results: [],
+    streak: 0,
+    bestStreak: 0,
+    lastResult: null,
+    lastUserInput: null,
+    hintShown: false
+  };
+  state.session = s;
+  state.view = 'practice';
+  clearPracticeSession(); // 新开一轮，先清旧进度，出题后再写入
+  render();
+
+  // 先出 1–2 题，等第一题就绪即可开始；其余后台批量补齐
+  const initial = shuffled.slice(0, Math.min(PREFETCH_INITIAL, shuffled.length));
+  try {
+    await prefetchWords(s, initial);
+  } catch (e) {
+    console.warn('initial prefetch', e);
+  }
+  if (!sessionAlive(s)) return;
+  await ensureContent();
+  kickPrefetch(s);
+  savePracticeSession();
+}
+
+// ============= MODAL =============
+function showModal(content) {
+  const back = document.getElementById('modal-backdrop');
+  document.getElementById('modal-content').innerHTML = content;
+  back.classList.add('show');
+}
+
+function closeModal() {
+  document.getElementById('modal-backdrop').classList.remove('show');
+}
+
+// ============= INIT =============
+async function init() {
+  loadProfile();
+  loadSettings();
+  loadSyncPassword();
+  await loadAllWords();
+  initVoices();
+
+  document.querySelectorAll('.nav-item').forEach(item => {
+    item.addEventListener('click', () => {
+      // 离开练习页时记住进度
+      if (item.dataset.view !== 'practice' && state.view === 'practice') {
+        savePracticeSession();
+        state.session = null;
+      }
+      switchView(item.dataset.view);
+    });
+  });
+
+  document.getElementById('modal-backdrop').addEventListener('click', (e) => {
+    if (e.target.id === 'modal-backdrop') closeModal();
+  });
+
+  window.addEventListener('beforeunload', () => {
+    if (state.session && state.session.phase !== 'done') savePracticeSession();
+  });
+
+  render();
+}
+
+init();
+</script>
+</body>
+</html>
