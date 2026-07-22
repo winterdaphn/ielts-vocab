@@ -715,6 +715,41 @@ label {
 .settings-section { margin-bottom: 24px; }
 .settings-section h3 { font-size: 12px; color: var(--text-light); margin-bottom: 10px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; }
 
+.settings-tabs {
+  display: flex;
+  gap: 6px;
+  background: var(--card);
+  padding: 4px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  margin-bottom: 14px;
+}
+
+.settings-tab {
+  flex: 1;
+  padding: 10px 12px;
+  border: none;
+  background: transparent;
+  color: var(--text-light);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.15s;
+  font-family: inherit;
+  white-space: nowrap;
+}
+
+.settings-tab.active {
+  background: var(--accent);
+  color: white;
+}
+
+.settings-tab:hover:not(.active) {
+  background: var(--accent-light);
+  color: var(--accent);
+}
+
 .provider-presets {
   display: flex;
   flex-wrap: wrap;
@@ -935,48 +970,132 @@ const state = {
     autoSync: false,
     lastSyncAt: 0
   },
-  // Profile (multi-user support)
-  profile: '',          // current profile name; empty = no profile set
-  knownProfiles: [],    // list of profile names user has created
-  syncPassword: '',     // per-device encryption password for sync (NOT synced)
+  // Auth (user login system)
+  authUsername: '',     // current logged-in username; empty = not logged in
+  authPassword: '',     // current password (used for both auth and encryption)
+  knownUsers: [],       // list of usernames from cloud (cached)
   // practice session
   session: null,
   // current view state
   addWord: { word: '', translation: '', generating: false, phonetic: '', partOfSpeech: '', mnemonic: '' },
-  wordsFilter: 'all'
+  wordsFilter: 'all',
+  settingsTab: 'ai'  // 'ai' | 'data' | 'account'
 };
 
 // ============= PROFILE HELPERS =============
 function lsKey(name) {
-  // Profile-scoped localStorage key
-  const p = state.profile || '_default';
-  return state.profile ? `ielts-${p}-${name}` : `ielts-${name}`;
+  // Username-scoped localStorage key
+  const p = state.authUsername || '_default';
+  return state.authUsername ? `ielts-${p}-${name}` : `ielts-${name}`;
 }
 
 function loadProfile() {
   try {
-    const cur = localStorage.getItem('ielts-profile-current');
-    const list = JSON.parse(localStorage.getItem('ielts-profile-list') || '[]');
-    state.profile = cur || '';
-    state.knownProfiles = Array.isArray(list) ? list : [];
-  } catch { state.profile = ''; state.knownProfiles = []; }
+    state.authUsername = localStorage.getItem('ielts-auth-username') || '';
+    state.authPassword = localStorage.getItem('ielts-auth-password') || '';
+    // Cleanup: clear old profile-list (no longer used)
+    localStorage.removeItem('ielts-profile-current');
+    localStorage.removeItem('ielts-profile-list');
+  } catch { state.authUsername = ''; state.authPassword = ''; }
 }
 
-function saveProfile() {
-  localStorage.setItem('ielts-profile-current', state.profile || '');
-  localStorage.setItem('ielts-profile-list', JSON.stringify(state.knownProfiles || []));
-}
-
-function setProfile(name) {
-  name = String(name || '').trim();
-  if (!name) return;
-  if (!state.knownProfiles.includes(name)) state.knownProfiles.push(name);
-  state.profile = name;
-  saveProfile();
+function saveAuth() {
+  try {
+    if (state.authUsername) {
+      localStorage.setItem('ielts-auth-username', state.authUsername);
+      if (state.authPassword) localStorage.setItem('ielts-auth-password', state.authPassword);
+    } else {
+      localStorage.removeItem('ielts-auth-username');
+      localStorage.removeItem('ielts-auth-password');
+    }
+  } catch {}
 }
 
 function cloudDocKey() {
-  return state.profile ? `vocab_data_${state.profile}` : 'vocab_data_default';
+  return state.authUsername ? `vocab_data_${state.authUsername}` : 'vocab_data_default';
+}
+
+// ============= AUTHENTICATION =============
+async function hashAuthPassword(password, username) {
+  // Hash password for sending to server (server doesn't see plaintext)
+  // Uses SHA-256 of "auth:{username}:{password}", truncated to 16 bytes
+  const enc = new TextEncoder();
+  const data = enc.encode('auth:' + username + ':' + password);
+  const hash = await crypto.subtle.digest('SHA-256', data);
+  return arrayToBase64(new Uint8Array(hash).slice(0, 16));
+}
+
+async function authRegister(username, password) {
+  const url = (state.settings.workerUrl || '').trim();
+  if (!url) throw new Error('请先设置 Worker URL');
+  const authHash = await hashAuthPassword(password, username);
+  const resp = await fetch(url.replace(/\/$/, '') + '/api/auth/register', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, authHash })
+  });
+  const data = await resp.json();
+  if (!resp.ok) {
+    const err = new Error(data.error || '注册失败');
+    err.code = data.error;
+    err.status = resp.status;
+    throw err;
+  }
+  return data;
+}
+
+async function authLogin(username, password) {
+  const url = (state.settings.workerUrl || '').trim();
+  if (!url) throw new Error('请先设置 Worker URL');
+  const authHash = await hashAuthPassword(password, username);
+  const resp = await fetch(url.replace(/\/$/, '') + '/api/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, authHash })
+  });
+  const data = await resp.json();
+  if (!resp.ok) {
+    const err = new Error(data.error || '登录失败');
+    err.code = data.error;
+    err.status = resp.status;
+    throw err;
+  }
+  return data;
+}
+
+async function loginAndEnter(username, password) {
+  state.authUsername = username;
+  state.authPassword = password;
+  saveAuth();
+  // Pull data from cloud for this user
+  await reloadForUser();
+}
+
+async function registerAndEnter(username, password) {
+  state.authUsername = username;
+  state.authPassword = password;
+  saveAuth();
+  // Initialize empty data, sync up
+  await reloadForUser();
+}
+
+async function logout() {
+  state.authUsername = '';
+  state.authPassword = '';
+  state.syncPassword = '';
+  saveAuth();
+  // Clear local data
+  try { await dbClear(); } catch {}
+  state.words = [];
+  try {
+    localStorage.removeItem(lsKey('streak'));
+    localStorage.removeItem(lsKey('last-day'));
+  } catch {}
+  // Push empty to cloud
+  if (state.settings.autoSync && state.settings.workerUrl) {
+    try { await pushToCloud(); } catch {}
+  }
+  render();
 }
 
 // ============= ENCRYPTION (for sensitive sync data) =============
@@ -1012,13 +1131,14 @@ async function deriveKey(password, salt) {
 }
 
 async function getCryptoKey(password) {
-  if (_cachedCryptoKey && _cachedCryptoKeyPwd === password) return _cachedCryptoKey;
-  // Use a stable salt derived from password (so we don't need to store salt)
-  // — OK for this use case (not high-security)
-  const salt = new TextEncoder().encode('ielts-vocab-stable-salt-v1');
+  const cacheKey = (state.authUsername || '') + ':' + password;
+  if (_cachedCryptoKey && _cachedCryptoKeyPwd === cacheKey) return _cachedCryptoKey;
+  // Salt includes username so different users have different keys
+  const saltStr = 'ielts-vocab-enc-salt-v2:' + (state.authUsername || 'default');
+  const salt = new TextEncoder().encode(saltStr);
   const key = await deriveKey(password, salt);
   _cachedCryptoKey = key;
-  _cachedCryptoKeyPwd = password;
+  _cachedCryptoKeyPwd = cacheKey;
   return key;
 }
 
@@ -1062,20 +1182,20 @@ async function decryptForSync(encrypted, password) {
 }
 
 function getSyncPassword() {
-  // Password is stored in localStorage (per-device, NOT synced)
-  // The cloud never sees the plain password — only the encrypted ciphertext
-  return state.syncPassword || '';
+  // Password = auth password now (same for login and encryption)
+  return state.authPassword || '';
 }
 function setSyncPassword(p) {
-  state.syncPassword = String(p || '');
-  try { localStorage.setItem(lsKey('sync-password'), state.syncPassword); } catch {}
+  // No-op: password is set via login flow, not here
+  state.authPassword = String(p || '');
+  try { localStorage.setItem('ielts-auth-password', state.authPassword); } catch {}
 }
 function clearSyncPassword() {
-  state.syncPassword = '';
-  try { localStorage.removeItem(lsKey('sync-password')); } catch {}
+  state.authPassword = '';
+  try { localStorage.removeItem('ielts-auth-password'); } catch {}
 }
 function loadSyncPassword() {
-  try { state.syncPassword = localStorage.getItem(lsKey('sync-password')) || ''; } catch {}
+  try { state.authPassword = localStorage.getItem('ielts-auth-password') || ''; } catch {}
 }
 
 // ============= TOAST =============
@@ -2651,11 +2771,11 @@ function render() {
   const root = document.getElementById('app-content');
   const nav = document.getElementById('bottom-nav');
 
-  // No profile selected yet — show profile picker first
-  if (!state.profile) {
+  // Not logged in yet — show login screen
+  if (!state.authUsername) {
     nav.style.display = 'none';
-    root.innerHTML = renderProfilePicker();
-    bindProfilePicker();
+    root.innerHTML = renderLoginScreen();
+    bindLoginScreen();
     return;
   }
 
@@ -2726,86 +2846,10 @@ function renderWelcome() {
   `;
 }
 
-function bindWelcome() {
-  document.getElementById('welcome-start').addEventListener('click', () => {
-    markWelcomeSeen();
-    state.view = 'settings';
-    render();
-  });
-}
-
-// --- Profile picker (first launch / switch) ---
-function renderProfilePicker() {
-  const known = state.knownProfiles || [];
-  return `
-    <div class="welcome">
-      <div class="welcome-icon">👤</div>
-      <h1>选择你的身份</h1>
-      <p>每个身份的数据（单词、API key、学习进度）完全分开</p>
-
-      <div class="card" style="text-align:left; margin-top: 20px;">
-        <h3 style="margin-bottom: 12px; font-size: 14px;">新身份</h3>
-        <div class="form-row">
-          <input type="text" id="profile-new-name" placeholder="输入你的名字，如：我、Alice" maxlength="32" style="font-size: 16px;">
-        </div>
-        <button class="btn btn-primary btn-block" id="profile-create-btn">创建 / 进入</button>
-        <p class="text-mute mt-2" style="font-size: 12px;">名字支持中文、英文、数字、下划线</p>
-      </div>
-
-      ${known.length > 0 ? `
-        <div class="card" style="text-align:left; margin-top: 16px;">
-          <h3 style="margin-bottom: 12px; font-size: 14px;">已有身份</h3>
-          <div id="profile-list" style="display: flex; flex-direction: column; gap: 8px;">
-            ${known.map(p => `
-              <button class="btn profile-known-btn" data-profile="${escapeHtml(p)}" style="justify-content: space-between; text-align: left;">
-                <span>👤 ${escapeHtml(p)}</span>
-                <span class="text-mute" style="font-size: 12px;">点击进入 →</span>
-              </button>
-            `).join('')}
-          </div>
-        </div>
-      ` : ''}
-    </div>
-  `;
-}
-
-function bindProfilePicker() {
-  const newInput = document.getElementById('profile-new-name');
-  if (newInput) {
-    newInput.focus();
-    newInput.addEventListener('keydown', e => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        createProfileFromInput();
-      }
-    });
-  }
-  document.getElementById('profile-create-btn')?.addEventListener('click', createProfileFromInput);
-  document.querySelectorAll('.profile-known-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      setProfile(btn.dataset.profile);
-      reloadForProfile();
-    });
-  });
-}
-
-function createProfileFromInput() {
-  const name = (document.getElementById('profile-new-name')?.value || '').trim();
-  if (!name) { toast('请输入名字'); return; }
-  if (!/^[\u4e00-\u9fa5a-zA-Z0-9_\-]+$/.test(name)) {
-    toast('名字只能用中文、英文、数字、下划线、连字符', 'error');
-    return;
-  }
-  setProfile(name);
-  reloadForProfile();
-  toast(`欢迎，${name}！`, 'success');
-}
-
-async function reloadForProfile() {
-  // Clear current words, load from cloud for this profile if possible
+async function reloadForUser() {
+  // Clear current words, load from cloud for this user
   await dbClear();
   state.words = [];
-  // Try to pull from cloud for this profile (silent)
   const url = (state.settings.workerUrl || '').trim();
   if (url) {
     try {
@@ -2822,8 +2866,170 @@ async function reloadForProfile() {
       }
     } catch (e) { /* silent */ }
   }
+  // Auto-push to ensure cloud has the new user data
+  if (state.settings.autoSync) {
+    setTimeout(() => pushToCloud().catch(() => {}), 1000);
+  }
   state.view = 'today';
   render();
+}
+
+function bindWelcome() {
+  document.getElementById('welcome-start').addEventListener('click', () => {
+    markWelcomeSeen();
+    state.view = 'settings';
+    render();
+  });
+}
+
+// --- Login screen ---
+function renderLoginScreen() {
+  const showWorker = !state.settings.workerUrl;
+  return `
+    <div class="welcome">
+      <div class="welcome-icon">🔐</div>
+      <h1>登录 / 注册</h1>
+      <p>使用用户名 + 密码登录，数据云端加密同步</p>
+
+      ${showWorker ? `
+        <div class="card" style="text-align:left; margin-top: 20px; border-color: var(--warning);">
+          <h3 style="margin-bottom: 8px; font-size: 14px;">⚙️ 首次使用：设置 Worker URL</h3>
+          <div class="form-row">
+            <input type="text" id="login-worker-url" value="${escapeHtml(state.settings.workerUrl || '')}" placeholder="https://xxx.app.tcloudbase.com/vocab-api" style="font-size: 13px;">
+            <div class="hint">腾讯云 CloudBase 函数地址，找我拷贝</div>
+          </div>
+        </div>
+      ` : ''}
+
+      <div class="card" style="text-align:left; margin-top: ${showWorker ? '12px' : '20px'};">
+        <div class="form-row">
+          <label>用户名</label>
+          <input type="text" id="login-username" placeholder="如：alice 或 我的名字" maxlength="32" autocomplete="username" style="font-size: 16px;">
+        </div>
+        <div class="form-row">
+          <label>密码</label>
+          <input type="password" id="login-password" placeholder="至少 4 位" autocomplete="current-password" style="font-size: 16px;">
+          <div class="hint">密码同时作为同步加密密钥，多设备要用同一密码</div>
+        </div>
+        <div id="login-error" class="text-light" style="font-size: 13px; color: var(--error); min-height: 20px; margin-bottom: 8px;"></div>
+        <button class="btn btn-primary btn-block" id="login-submit">登录</button>
+        <button class="btn btn-ghost btn-block mt-2" id="login-show-register" style="font-size: 13px;">没账号？注册新账号</button>
+      </div>
+
+      <div class="text-mute mt-3" style="font-size: 12px; line-height: 1.6;">
+        • 服务端只存密码哈希，原始密码永远在你设备<br>
+        • 同一个用户名 + 密码在不同设备能解密同一份数据
+      </div>
+    </div>
+  `;
+}
+
+function bindLoginScreen() {
+  const usernameInput = document.getElementById('login-username');
+  const passwordInput = document.getElementById('login-password');
+  if (usernameInput) usernameInput.focus();
+
+  const doLogin = () => handleLogin();
+  document.getElementById('login-submit')?.addEventListener('click', doLogin);
+  document.getElementById('login-show-register')?.addEventListener('click', () => handleRegister());
+  passwordInput?.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); doLogin(); }
+  });
+  usernameInput?.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); passwordInput?.focus(); }
+  });
+  // Persist worker URL change
+  const workerInput = document.getElementById('login-worker-url');
+  workerInput?.addEventListener('change', () => {
+    state.settings.workerUrl = workerInput.value.trim();
+    saveSettings();
+  });
+}
+
+function setLoginError(msg) {
+  const el = document.getElementById('login-error');
+  if (el) el.textContent = msg || '';
+}
+
+async function handleLogin() {
+  // Save worker URL if shown on login screen
+  const workerInput = document.getElementById('login-worker-url');
+  if (workerInput) {
+    state.settings.workerUrl = workerInput.value.trim();
+    saveSettings();
+  }
+
+  const username = (document.getElementById('login-username')?.value || '').trim();
+  const password = (document.getElementById('login-password')?.value || '');
+  if (!username) { setLoginError('请输入用户名'); return; }
+  if (!password) { setLoginError('请输入密码'); return; }
+  if (!/^[\u4e00-\u9fa5a-zA-Z0-9_\-]+$/.test(username)) {
+    setLoginError('用户名只能包含中文、英文、数字、下划线、连字符');
+    return;
+  }
+  if (!state.settings.workerUrl) {
+    setLoginError('请先填写 Worker URL');
+    return;
+  }
+
+  setLoginError('登录中…');
+  const btn = document.getElementById('login-submit');
+  if (btn) { btn.disabled = true; btn.textContent = '登录中…'; }
+  try {
+    await loginAndEnter(username, password);
+    toast(`欢迎回来，${username}！`, 'success');
+  } catch (e) {
+    console.error('Login error:', e);
+    if (e.status === 404) {
+      // User not found - ask to register
+      setLoginError('用户不存在');
+      if (confirm(`用户「${username}」不存在。\n\n要用这个密码注册新账号吗？`)) {
+        await handleRegister(username, password);
+      } else {
+        setLoginError('请换一个用户名或点"注册新账号"');
+      }
+    } else if (e.status === 401) {
+      setLoginError('❌ 密码错误');
+    } else {
+      setLoginError('登录失败：' + (e.message || '未知错误'));
+    }
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '登录'; }
+  }
+}
+
+async function handleRegister(prefilledUsername, prefilledPassword) {
+  const username = prefilledUsername || (document.getElementById('login-username')?.value || '').trim();
+  const password = prefilledPassword || (document.getElementById('login-password')?.value || '');
+  if (!username || !password) {
+    setLoginError('请填写用户名和密码');
+    return;
+  }
+  if (password.length < 4) {
+    setLoginError('密码至少 4 位');
+    return;
+  }
+  if (!/^[\u4e00-\u9fa5a-zA-Z0-9_\-]+$/.test(username)) {
+    setLoginError('用户名只能包含中文、英文、数字、下划线、连字符');
+    return;
+  }
+
+  setLoginError('注册中…');
+  const btn = document.getElementById('login-submit');
+  if (btn) { btn.disabled = true; btn.textContent = '注册中…'; }
+  try {
+    await authRegister(username, password);
+    await registerAndEnter(username, password);
+    toast(`账号「${username}」注册成功！`, 'success');
+  } catch (e) {
+    console.error('Register error:', e);
+    if (e.status === 409) {
+      setLoginError('用户名已被占用，请换一个');
+    } else {
+      setLoginError('注册失败：' + (e.message || '未知错误'));
+    }
+    if (btn) { btn.disabled = false; btn.textContent = '登录'; }
+  }
 }
 
 // --- Today ---
@@ -2836,7 +3042,7 @@ function renderToday() {
   return `
     <div class="app-header">
       <h1>IELTS 词汇训练</h1>
-      <p>${new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })} · 👤 ${escapeHtml(state.profile || '')}</p>
+      <p>${new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })} · 👤 ${escapeHtml(state.authUsername || '')}</p>
     </div>
 
     ${saved ? `
@@ -3307,109 +3513,137 @@ async function handleSave() {
 // --- Settings ---
 function renderSettings() {
   const s = state.settings;
+  const tab = state.settingsTab || 'ai';
   return `
     <div class="app-header">
       <h1>设置</h1>
-      <p>AI 配置和数据管理</p>
+      <p>选择标签查看不同设置</p>
+    </div>
+
+    <div class="settings-tabs">
+      <button class="settings-tab ${tab === 'ai' ? 'active' : ''}" data-tab="ai">🤖 AI</button>
+      <button class="settings-tab ${tab === 'data' ? 'active' : ''}" data-tab="data">📦 数据</button>
+      <button class="settings-tab ${tab === 'account' ? 'active' : ''}" data-tab="account">👤 账户</button>
     </div>
 
     <div class="card">
-      <div class="settings-section">
-        <h3>当前身份</h3>
-        <div class="flex-row" style="justify-content: space-between; align-items: center;">
-          <div>
-            <div style="font-size: 18px; font-weight: 600; color: var(--accent);">👤 ${escapeHtml(state.profile || '未选择')}</div>
-            <div class="text-light" style="font-size: 12px;">${(state.knownProfiles || []).length} 个已创建身份</div>
-          </div>
-          <button class="btn" id="switch-profile-btn">切换身份</button>
-        </div>
-      </div>
+      ${tab === 'ai' ? renderSettingsAI() : ''}
+      ${tab === 'data' ? renderSettingsData() : ''}
+      ${tab === 'account' ? renderSettingsAccount() : ''}
+    </div>
+  `;
+}
 
-      <div class="settings-section">
-        <h3>AI 服务商</h3>
-        <div class="provider-presets" id="provider-presets">
-          ${Object.entries(PROVIDERS).map(([key, p]) => `
-            <button class="provider-preset ${s.provider === key ? 'active' : ''}" data-provider="${key}">${p.name}</button>
-          `).join('')}
-        </div>
+function renderSettingsAI() {
+  const s = state.settings;
+  return `
+    <div class="settings-section">
+      <h3>AI 服务商</h3>
+      <div class="provider-presets" id="provider-presets">
+        ${Object.entries(PROVIDERS).map(([key, p]) => `
+          <button class="provider-preset ${s.provider === key ? 'active' : ''}" data-provider="${key}">${p.name}</button>
+        `).join('')}
       </div>
+    </div>
 
-      <div class="settings-section">
-        <h3>API 配置</h3>
-        <div class="form-row">
-          <label>API Key</label>
-          <input type="password" id="setting-key" value="${escapeHtml(s.apiKey)}" placeholder="sk-..." autocomplete="off">
-          <div class="hint">保存在你浏览器本地，不会上传</div>
-        </div>
-        <div class="form-row">
-          <label>API Base URL</label>
-          <input type="text" id="setting-base" value="${escapeHtml(s.apiBase)}" placeholder="https://api.openai.com/v1">
-        </div>
-        <div class="form-row">
-          <label>模型</label>
-          <input type="text" id="setting-model" value="${escapeHtml(s.model)}" placeholder="gpt-4o-mini">
-        </div>
-        <button class="btn btn-primary btn-block" id="test-api">测试连接</button>
-        <div id="test-result" class="mt-2"></div>
+    <div class="settings-section">
+      <h3>API 配置</h3>
+      <div class="form-row">
+        <label>API Key</label>
+        <input type="password" id="setting-key" value="${escapeHtml(s.apiKey)}" placeholder="sk-..." autocomplete="off">
+        <div class="hint">保存在你浏览器本地，不会上传</div>
       </div>
-
-      <div class="settings-section">
-        <h3>数据</h3>
-        <div class="flex-row" style="flex-wrap: wrap; gap: 8px;">
-          <button class="btn" id="export-data">📥 导出</button>
-          <button class="btn" id="import-data">📤 选择文件导入</button>
-          <input type="file" id="import-file" accept=".json,application/json" style="display:none;">
-          <button class="btn btn-danger" id="clear-data">🗑 清空词表</button>
-        </div>
-        <div class="mt-3">
-          <label style="font-size: 12px;">或者直接粘贴 JSON：</label>
-          <textarea id="import-paste" placeholder="把 JSON 内容粘贴到这里..." style="min-height: 100px; font-family: 'SF Mono', Consolas, monospace; font-size: 12px;"></textarea>
-          <button class="btn btn-primary btn-sm mt-2" id="import-paste-btn">从粘贴内容导入</button>
-        </div>
-        <p class="text-mute mt-2" style="font-size:12px;">数据存储在浏览器 IndexedDB，清缓存会丢失</p>
+      <div class="form-row">
+        <label>API Base URL</label>
+        <input type="text" id="setting-base" value="${escapeHtml(s.apiBase)}" placeholder="https://api.openai.com/v1">
       </div>
-
-      <div class="settings-section">
-        <h3>☁️ 云同步</h3>
-        <div class="form-row">
-          <label>Worker URL</label>
-          <input type="text" id="sync-url" value="${escapeHtml(s.workerUrl || '')}" placeholder="https://xxx.workers.dev">
-        </div>
-        <div class="form-row">
-          <label>同步 Token（可选）</label>
-          <input type="password" id="sync-token" value="${escapeHtml(s.syncToken || '')}" placeholder="如果 Worker 设置了 AUTH_TOKEN 就填">
-        </div>
-        <div class="form-row">
-          <label>同步密码 ${state.syncPassword ? '<span style="color: var(--success); font-size: 12px;">✓ 已设置</span>' : '<span style="color: var(--warning); font-size: 12px;">未设置</span>'}</label>
-          <input type="password" id="sync-password-input" value="${escapeHtml(state.syncPassword || '')}" placeholder="用于加密 API key 和练习进度">
-          <div class="hint">同一密码在多设备间要输入一致才能解密。这台设备存密码，其他设备用时要重新输入。</div>
-        </div>
-        <div class="form-row">
-          <label class="flex-row" style="cursor: pointer;">
-            <input type="checkbox" id="sync-auto" ${s.autoSync ? 'checked' : ''} style="width: auto; margin-right: 6px;">
-            <span>练习完后自动同步</span>
-          </label>
-        </div>
-        <div class="flex-row" style="gap: 8px;">
-          <button class="btn btn-primary" id="sync-push" style="flex: 1; white-space: nowrap;">📤 推送到云端</button>
-          <button class="btn" id="sync-pull" style="flex: 1; white-space: nowrap;">📥 从云端拉取</button>
-        </div>
-        <button class="btn btn-sm" id="sync-reset-pwd" style="margin-top: 8px; width: 100%; white-space: nowrap;">🔑 忘记密码 / 重置密码</button>
-        <p class="text-light mt-2" style="font-size: 12px;" id="sync-status">
-          ${s.lastSyncAt ? `上次同步：${new Date(s.lastSyncAt).toLocaleString('zh-CN')}` : '尚未同步'}
-        </p>
-        <p class="text-mute mt-2" style="font-size: 12px;">数据同步到腾讯云 CloudBase（国内访问快），多设备间共享</p>
+      <div class="form-row">
+        <label>模型</label>
+        <input type="text" id="setting-model" value="${escapeHtml(s.model)}" placeholder="gpt-4o-mini">
       </div>
+      <button class="btn btn-primary btn-block" id="test-api">测试连接</button>
+      <div id="test-result" class="mt-2"></div>
+    </div>
+  `;
+}
 
-      <div class="settings-section">
-        <h3>关于</h3>
-        <p class="text-light" style="font-size: 13px; line-height: 1.7;">
-          这是一个个人 IELTS 词汇学习工具，AI 驱动的智能出题和评判。
-          <br><br>
-          <b>支持的服务：</b>OpenAI / DeepSeek / Moonshot / 智谱 GLM / 任何 OpenAI 兼容 API
-          <br><br>
-          <b>推荐：</b>用 DeepSeek 或 GLM-4-Flash 这种便宜的模型，性价比高
-        </p>
+function renderSettingsData() {
+  const s = state.settings;
+  return `
+    <div class="settings-section">
+      <h3>本地数据</h3>
+      <div class="flex-row" style="flex-wrap: wrap; gap: 8px;">
+        <button class="btn" id="export-data">📥 导出</button>
+        <button class="btn" id="import-data">📤 选择文件导入</button>
+        <input type="file" id="import-file" accept=".json,application/json" style="display:none;">
+        <button class="btn btn-danger" id="clear-data">🗑 清空词表</button>
+      </div>
+      <div class="mt-3">
+        <label style="font-size: 12px;">或者直接粘贴 JSON：</label>
+        <textarea id="import-paste" placeholder="把 JSON 内容粘贴到这里..." style="min-height: 100px; font-family: 'SF Mono', Consolas, monospace; font-size: 12px;"></textarea>
+        <button class="btn btn-primary btn-sm mt-2" id="import-paste-btn">从粘贴内容导入</button>
+      </div>
+      <p class="text-mute mt-2" style="font-size:12px;">数据存储在浏览器 IndexedDB，清缓存会丢失</p>
+    </div>
+
+    <div class="settings-section">
+      <h3>☁️ 云同步</h3>
+      <div class="form-row">
+        <label>Worker URL</label>
+        <input type="text" id="sync-url" value="${escapeHtml(s.workerUrl || '')}" placeholder="https://xxx.workers.dev">
+      </div>
+      <div class="form-row">
+        <label>同步 Token（可选）</label>
+        <input type="password" id="sync-token" value="${escapeHtml(s.syncToken || '')}" placeholder="如果 Worker 设置了 AUTH_TOKEN 就填">
+      </div>
+      <div class="form-row">
+        <label class="flex-row" style="cursor: pointer;">
+          <input type="checkbox" id="sync-auto" ${s.autoSync ? 'checked' : ''} style="width: auto; margin-right: 6px;">
+          <span>练习完后自动同步</span>
+        </label>
+      </div>
+      <div class="flex-row" style="gap: 8px;">
+        <button class="btn btn-primary" id="sync-push" style="flex: 1; white-space: nowrap;">📤 推送到云端</button>
+        <button class="btn" id="sync-pull" style="flex: 1; white-space: nowrap;">📥 从云端拉取</button>
+      </div>
+      <p class="text-light mt-2" style="font-size: 12px;" id="sync-status">
+        ${s.lastSyncAt ? `上次同步：${new Date(s.lastSyncAt).toLocaleString('zh-CN')}` : '尚未同步'}
+      </p>
+      <p class="text-mute mt-2" style="font-size: 12px;">数据同步到腾讯云 CloudBase（国内访问快），多设备间共享</p>
+    </div>
+  `;
+}
+
+function renderSettingsAccount() {
+  return `
+    <div class="settings-section">
+      <h3>已登录账号</h3>
+      <div class="flex-row" style="justify-content: space-between; align-items: center;">
+        <div>
+          <div style="font-size: 18px; font-weight: 600; color: var(--accent);">👤 ${escapeHtml(state.authUsername || '未登录')}</div>
+          <div class="text-light" style="font-size: 12px;">数据已加密同步到云端</div>
+        </div>
+        <button class="btn btn-danger" id="logout-btn">退出登录</button>
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <h3>账号信息</h3>
+      <p class="text-light" style="font-size: 13px; line-height: 1.7;">
+        • 同一个用户名 + 密码在不同设备都能解密同一份云端数据<br>
+        • 忘了密码？只能重置账号（云端数据会丢失，需要重新创建）
+      </p>
+    </div>
+
+    <div class="settings-section">
+      <h3>关于</h3>
+      <p class="text-light" style="font-size: 13px; line-height: 1.7;">
+        这是一个个人 IELTS 词汇学习工具，AI 驱动的智能出题和评判。
+        <br><br>
+        <b>支持的服务：</b>OpenAI / DeepSeek / Moonshot / 智谱 GLM / 任何 OpenAI 兼容 API
+        <br><br>
+        <b>推荐：</b>用 DeepSeek 或 GLM-4-Flash 这种便宜的模型，性价比高
+      </p>
       </div>
     </div>
   `;
@@ -3469,13 +3703,18 @@ async function importWordsFromJSON(text) {
 }
 
 function bindSettings() {
-  document.getElementById('switch-profile-btn')?.addEventListener('click', () => {
-    if (confirm('切换身份会清空当前显示的数据（下次进入会从云端拉取）。继续？')) {
-      state.profile = '';
-      saveProfile();
-      // Clear local state so the new profile doesn't see old words
-      dbClear().then(() => { state.words = []; render(); });
-    }
+  // Tab navigation
+  document.querySelectorAll('.settings-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      state.settingsTab = btn.dataset.tab;
+      render();
+    });
+  });
+
+  document.getElementById('logout-btn')?.addEventListener('click', async () => {
+    if (!confirm('确定要退出登录？\n\n退出后会清除本地数据。如需重新登录，输入同样的用户名和密码即可。')) return;
+    await logout();
+    toast('已退出登录', 'success');
   });
   document.querySelectorAll('.provider-preset').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -3768,7 +4007,7 @@ async function applySyncPayload(data) {
 function syncHeaders() {
   const headers = { 'Content-Type': 'application/json' };
   if (state.settings.syncToken) headers['X-Auth-Token'] = state.settings.syncToken;
-  if (state.profile) headers['X-Profile'] = state.profile;
+  if (state.authUsername) headers['X-Profile'] = state.authUsername;
   return headers;
 }
 
