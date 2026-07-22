@@ -137,6 +137,7 @@ body {
   align-items: center;
   justify-content: center;
   gap: 6px;
+  white-space: nowrap;
 }
 
 .btn:hover { background: var(--accent-light); border-color: var(--accent); color: var(--accent); }
@@ -3330,12 +3331,6 @@ function renderSettings() {
           ${Object.entries(PROVIDERS).map(([key, p]) => `
             <button class="provider-preset ${s.provider === key ? 'active' : ''}" data-provider="${key}">${p.name}</button>
           `).join('')}
-      <div class="settings-section">
-        <h3>AI 服务商</h3>
-        <div class="provider-presets" id="provider-presets">
-          ${Object.entries(PROVIDERS).map(([key, p]) => `
-            <button class="provider-preset ${s.provider === key ? 'active' : ''}" data-provider="${key}">${p.name}</button>
-          `).join('')}
         </div>
       </div>
 
@@ -3396,10 +3391,10 @@ function renderSettings() {
           </label>
         </div>
         <div class="flex-row" style="gap: 8px;">
-          <button class="btn btn-primary" id="sync-push" style="flex: 1;">📤 推送到云端</button>
-          <button class="btn" id="sync-pull" style="flex: 1;">📥 从云端拉取</button>
-          <button class="btn btn-sm" id="sync-reset-pwd" style="margin-top: 8px; width: 100%;">🔑 忘记密码 / 重置密码</button>
+          <button class="btn btn-primary" id="sync-push" style="flex: 1; white-space: nowrap;">📤 推送到云端</button>
+          <button class="btn" id="sync-pull" style="flex: 1; white-space: nowrap;">📥 从云端拉取</button>
         </div>
+        <button class="btn btn-sm" id="sync-reset-pwd" style="margin-top: 8px; width: 100%; white-space: nowrap;">🔑 忘记密码 / 重置密码</button>
         <p class="text-light mt-2" style="font-size: 12px;" id="sync-status">
           ${s.lastSyncAt ? `上次同步：${new Date(s.lastSyncAt).toLocaleString('zh-CN')}` : '尚未同步'}
         </p>
