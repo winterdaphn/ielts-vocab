@@ -1,0 +1,235 @@
+@use './tokens' as *;
+
+/**
+ * Ant Design component overrides via SCSS.
+ * Requires ConfigProvider theme.cssVar + hashed:false so class names stay stable
+ * and CSS-in-JS doesn't fight external styles.
+ *
+ * Add new overrides below; keep specificity modest — prefer tokens over !important.
+ */
+
+// ---------- Card ----------
+.ant-card {
+  border-radius: $radius-lg !important;
+  border-color: var(--border, $border) !important;
+  box-shadow: var(--shadow-sm, $shadow-sm) !important;
+  background: var(--card, $card);
+
+  .ant-card-head {
+    border-bottom-color: var(--border, $border);
+    min-height: 48px;
+    padding: 0 20px;
+    font-weight: 600;
+  }
+
+  .ant-card-head-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text, $text);
+    padding: 14px 0;
+  }
+
+  .ant-card-body {
+    padding: 20px;
+  }
+
+  &.ant-card-bordered {
+    border-color: var(--border, $border);
+  }
+}
+
+// ---------- Button ----------
+.ant-btn {
+  font-weight: 500;
+  border-radius: $radius !important;
+  box-shadow: none !important;
+  transition: all 0.15s;
+
+  &:not(.ant-btn-primary):not(.ant-btn-dangerous):not(:disabled):hover {
+    color: var(--accent, $accent) !important;
+    border-color: var(--accent, $accent) !important;
+    background: var(--accent-light, $accent-light) !important;
+  }
+
+  &.ant-btn-primary {
+    background: var(--accent, $accent) !important;
+    border-color: var(--accent, $accent) !important;
+
+    &:not(:disabled):hover {
+      background: var(--accent-hover, $accent-hover) !important;
+      border-color: var(--accent-hover, $accent-hover) !important;
+      color: #fff !important;
+    }
+  }
+
+  &.ant-btn-text {
+    color: var(--text-light, $text-light);
+
+    &:not(:disabled):hover {
+      background: var(--accent-light, $accent-light) !important;
+      color: var(--accent, $accent) !important;
+    }
+  }
+
+  &.ant-btn-lg {
+    border-radius: $radius !important;
+    font-size: 15px;
+  }
+
+  &.ant-btn-sm {
+    border-radius: $radius-sm !important;
+  }
+}
+
+// ---------- Input / TextArea / Password ----------
+.ant-input,
+.ant-input-affix-wrapper,
+.ant-input-outlined,
+.ant-input-textarea textarea {
+  border-radius: $radius !important;
+  border-color: var(--border, $border) !important;
+  background: var(--card, $card) !important;
+  color: var(--text, $text);
+
+  &:hover {
+    border-color: var(--accent, $accent) !important;
+  }
+
+  &:focus,
+  &.ant-input-focused,
+  &.ant-input-affix-wrapper-focused {
+    border-color: var(--accent, $accent) !important;
+    box-shadow: 0 0 0 2px rgba($accent, 0.12) !important;
+  }
+}
+
+.ant-input-affix-wrapper {
+  .ant-input {
+    border: none !important;
+    box-shadow: none !important;
+    background: transparent !important;
+  }
+}
+
+.ant-input::placeholder,
+.ant-input-textarea textarea::placeholder {
+  color: var(--text-mute, $text-mute);
+}
+
+// ---------- Form ----------
+.ant-form-item {
+  margin-bottom: 14px;
+}
+
+.ant-form-item-label > label {
+  font-size: 12px !important;
+  color: var(--text-light, $text-light) !important;
+  font-weight: 500 !important;
+  height: auto !important;
+}
+
+.ant-form-item-explain,
+.ant-form-item-extra {
+  font-size: 12px;
+  color: var(--text-mute, $text-mute);
+}
+
+// ---------- Alert ----------
+.ant-alert {
+  border-radius: $radius !important;
+  border-color: var(--border, $border);
+
+  &.ant-alert-warning {
+    background: var(--warning-light, $warning-light);
+    border-color: rgba($warning, 0.35);
+  }
+
+  &.ant-alert-info {
+    background: var(--accent-light, $accent-light);
+    border-color: rgba($accent, 0.3);
+  }
+
+  &.ant-alert-error {
+    background: var(--error-light, $error-light);
+    border-color: rgba($error, 0.35);
+  }
+
+  &.ant-alert-success {
+    background: var(--success-light, $success-light);
+    border-color: rgba($success, 0.3);
+  }
+}
+
+// ---------- Divider ----------
+.ant-divider {
+  border-color: var(--border, $border);
+  margin: 16px 0;
+}
+
+// ---------- Tag ----------
+.ant-tag {
+  border-radius: 6px;
+  border-color: var(--border, $border);
+  font-size: 12px;
+}
+
+// ---------- Popconfirm / Popover ----------
+.ant-popover .ant-popover-inner,
+.ant-popconfirm .ant-popover-inner {
+  border-radius: $radius-lg !important;
+  box-shadow: var(--shadow-md, $shadow-md) !important;
+}
+
+// ---------- Modal ----------
+.ant-modal .ant-modal-content {
+  border-radius: $radius-lg !important;
+  box-shadow: var(--shadow-md, $shadow-md);
+  padding: 20px 24px;
+}
+
+.ant-modal .ant-modal-header {
+  margin-bottom: 12px;
+}
+
+// ---------- Spin ----------
+.ant-spin .ant-spin-dot-item {
+  background-color: var(--accent, $accent);
+}
+
+// ---------- Progress ----------
+.ant-progress .ant-progress-bg {
+  background: var(--accent, $accent) !important;
+}
+
+// ---------- Empty ----------
+.ant-empty-description {
+  color: var(--text-light, $text-light);
+  font-size: 13px;
+}
+
+// ---------- Result ----------
+.ant-result-title {
+  font-size: 20px !important;
+  font-weight: 600 !important;
+  color: var(--text, $text);
+}
+
+.ant-result-subtitle {
+  color: var(--text-light, $text-light) !important;
+  font-size: 13px !important;
+}
+
+// ---------- Space compact buttons (settings sync row) ----------
+.ant-space-compact {
+  .ant-btn {
+    border-radius: 0 !important;
+
+    &:first-child {
+      border-radius: $radius 0 0 $radius !important;
+    }
+
+    &:last-child {
+      border-radius: 0 $radius $radius 0 !important;
+    }
+  }
+}

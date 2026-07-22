@@ -1,0 +1,29 @@
+/* CSS variables — must load first via @import in global.css */
+/* Palette borrowed from example.html: warm cream + deep teal */
+:root {
+  --bg: #f7f5f0;
+  --card: #ffffff;
+  --text: #1f1f1f;
+  --text-light: #6b6b6b;
+  --text-mute: #9a9a9a;
+  --border: #e8e3da;
+  --border-light: #f0ebe2;
+  --accent: #2e6b5c;
+  --accent-light: #e8f0ed;
+  --accent-hover: #245951;
+  --accent-dark: #245951;
+  --error: #b54848;
+  --error-light: #fae9e9;
+  --success: #2e6b5c;
+  --success-light: #e6f3ee;
+  --warning: #b58c3e;
+  --warning-light: #faf2dd;
+  --highlight: #f7e9b0;
+  --chinese-bg: #f5f1e8;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
+  --shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-md: 0 4px 16px rgba(0,0,0,0.08);
+  --radius: 10px;
+  --radius-sm: 8px;
+  --radius-lg: 16px;
+}
