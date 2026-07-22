@@ -63,13 +63,25 @@ npm run preview      # 预览构建结果
 npm run lint         # tsc --noEmit 类型检查
 ```
 
-## 部署
+## 部署（GitHub Pages + Actions）
 
-`npm run build` 后把 `dist/` 内容上传到 GitHub Pages 即可。
+线上地址：https://winterdaphn.github.io/ielts-vocab/
 
-仓库设置：Settings → Pages → Source = `main` branch / root
+推送到 `main` 后，GitHub Actions 会自动 `npm run build` 并部署 `dist/`（见 [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)）。
 
-**首次部署：** 把 dist/ 里的 `index.html` 和 `assets/` 目录直接 commit 到 `main` 分支根目录。
+**首次启用（只需做一次）：**
+
+1. 打开仓库 [Settings → Pages](https://github.com/winterdaphn/ielts-vocab/settings/pages)
+2. **Build and deployment → Source** 选 **GitHub Actions**（不要选 Deploy from a branch）
+3. 若 workflow 被拦，到 Settings → Actions → General 允许运行
+
+之后：
+
+```bash
+git push origin main
+```
+
+到仓库 **Actions** 页看构建是否成功；约 1–2 分钟后刷新线上地址即可。也可在 Actions 里手动跑 **Deploy to GitHub Pages**。
 
 ## 安全模型
 
