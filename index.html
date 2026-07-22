@@ -3738,15 +3738,17 @@ function bindSettings() {
   const modelInput = document.getElementById('setting-model');
 
   [keyInput, baseInput, modelInput].forEach(input => {
+    if (!input) return;
     input.addEventListener('input', () => {
-      state.settings.apiKey = keyInput.value.trim();
-      state.settings.apiBase = baseInput.value.trim();
-      state.settings.model = modelInput.value.trim();
+      if (keyInput) state.settings.apiKey = keyInput.value.trim();
+      if (baseInput) state.settings.apiBase = baseInput.value.trim();
+      if (modelInput) state.settings.model = modelInput.value.trim();
       saveSettings();
     });
   });
 
-  document.getElementById('test-api').addEventListener('click', async () => {
+  const testApiBtn = document.getElementById('test-api');
+  if (testApiBtn) testApiBtn.addEventListener('click', async () => {
     const resultEl = document.getElementById('test-result');
     resultEl.innerHTML = '<div class="text-light"><span class="spinner"></span> 测试中…</div>';
     try {
@@ -3762,7 +3764,8 @@ function bindSettings() {
     }
   });
 
-  document.getElementById('export-data').addEventListener('click', () => {
+  const exportBtn = document.getElementById('export-data');
+  if (exportBtn) exportBtn.addEventListener('click', () => {
     const data = {
       version: 1,
       exportedAt: new Date().toISOString(),
@@ -3778,11 +3781,13 @@ function bindSettings() {
     toast('已导出', 'success');
   });
 
-  document.getElementById('import-data').addEventListener('click', () => {
+  const importBtn = document.getElementById('import-data');
+  if (importBtn) importBtn.addEventListener('click', () => {
     document.getElementById('import-file').click();
   });
 
-  document.getElementById('import-file').addEventListener('change', async (e) => {
+  const importFile = document.getElementById('import-file');
+  if (importFile) importFile.addEventListener('change', async (e) => {
     const file = e.target.files[0];
     if (!file) {
       toast('没选文件', 'error');
@@ -3797,7 +3802,8 @@ function bindSettings() {
     }
   });
 
-  document.getElementById('import-paste-btn').addEventListener('click', async () => {
+  const importPasteBtn = document.getElementById('import-paste-btn');
+  if (importPasteBtn) importPasteBtn.addEventListener('click', async () => {
     const text = document.getElementById('import-paste').value.trim();
     if (!text) {
       toast('粘贴框是空的', 'error');
@@ -3811,7 +3817,8 @@ function bindSettings() {
     }
   });
 
-  document.getElementById('clear-data').addEventListener('click', async () => {
+  const clearBtn = document.getElementById('clear-data');
+  if (clearBtn) clearBtn.addEventListener('click', async () => {
     if (!confirm('确定清空所有单词？此操作不可恢复！')) return;
     await dbClear();
     state.words = [];
