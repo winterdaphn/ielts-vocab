@@ -2976,6 +2976,9 @@ async function handleLogin() {
   const btn = document.getElementById('login-submit');
   if (btn) { btn.disabled = true; btn.textContent = '登录中…'; }
   try {
+    // 1) Verify password with server first
+    await authLogin(username, password);
+    // 2) Only on success, enter the app
     await loginAndEnter(username, password);
     toast(`欢迎回来，${username}！`, 'success');
   } catch (e) {
