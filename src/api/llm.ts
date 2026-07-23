@@ -141,6 +141,59 @@ export interface ClozeJudgeResult {
   grammarTip?: string;
 }
 
+export interface SentenceStructureAnalysis {
+  overview: string;
+  clauses: string;
+}
+
+/**
+ * AI sentence-structure breakdown for cloze / choice review.
+ * Helps learners parse long IELTS-style sentences.
+ */
+export async function analyzeSentenceStructure(
+  sentenceEn: string,
+  sentenceZh: string,
+  targetWord: string,
+  settings: Settings
+): Promise<SentenceStructureAnalysis | null> {
+  const en = String(sentenceEn || '').trim();
+  if (!en) return null;
+  if (!settings.apiKey) return null;
+
+  const prompt = `你是雅思英语老师。请用简洁中文拆解下面这句英语的句法结构，帮助学习者看懂长句。
+
+英文句子：${en}
+中文参考：${sentenceZh || '（无）'}
+本题相关词（仅作语境参考，不要单独做词义讲解）："${targetWord}"
+
+要求：
+1) 不要整句重译；重点讲句子怎么拆、成分怎么挂。
+2) 主干、层次里必须同时给出对应的英文片段 + 中文说明（英文可短引，中文解释角色）。
+3) 可点出关键语法点（定语从句、状语、被动、非谓语等），用语通俗。
+4) 不要单独写「本词释义 / 词性讲解」板块。
+
+Return JSON ONLY:
+{
+  "overview": "主干：英文核心结构 + 中文说明（例：The app received praise — 主语+谓语+宾语）",
+  "clauses": "层次拆解，用①②③分点；每点格式：英文片段 — 中文（成分/语法）。2-5点即可"
+}`;
+
+  try {
+    const text = await callLLM([{ role: 'user', content: prompt }], settings, {
+      temperature: 0.35,
+      jsonMode: true,
+    });
+    const parsed = JSON.parse(text);
+    const overview = String(parsed.overview || '').trim();
+    const clauses = String(parsed.clauses || '').trim();
+    if (!overview && !clauses) return null;
+    return { overview, clauses };
+  } catch (e) {
+    console.warn('[practice] structure analysis failed', e);
+    return null;
+  }
+}
+
 /** Extract the word form as it appears in the cloze sentence. */
 export function getClozeExpectedForm(targetWord: string, sentence: string): string {
   const w = targetWord.trim();
@@ -354,13 +407,51 @@ Return JSON ONLY:
 export interface PracticeSentence {
   en: string;
   zh: string;
+  /** Where this sentence came from — for debug UI */
+  source?: SentenceSource;
+}
+
+export type SentenceSource = 'llm' | 'fallback' | 'cache' | 'session';
+
+export function sentenceSourceLabel(source?: SentenceSource): string {
+  if (source === 'llm') return 'AI生成';
+  if (source === 'cache') return '词条缓存';
+  if (source === 'session') return '进度恢复';
+  if (source === 'fallback') return '备用句(旧)';
+  return '未知来源';
 }
 
 function glossSnippet(word: Word): string {
   let t = (word.translation || '').split(/[；;]/)[0].trim();
   t = t.replace(/^(n\.|v\.|vt\.|vi\.|adj\.|adv\.|prep\.|conj\.)\s*/i, '').trim();
+  // Prefer a single sense — avoid 「概念，观念」 style dumps in Chinese hints
+  t = t.split(/[，,、\/]/)[0].trim();
   t = t.replace(/\b[A-Za-z][A-Za-z'-]+\b/g, '').replace(/\s{2,}/g, ' ').trim();
   return t || '该词';
+}
+
+/** Chinese cloze hint must not leave blank underlines (____) instead of the gloss. */
+const CLOZE_ZH_BLANK_RE = /_{2,}|—{2,}|–{2,}|…{2,}|\.{3,}/g;
+
+function hasClozeZhBlank(text: string): boolean {
+  CLOZE_ZH_BLANK_RE.lastIndex = 0;
+  return CLOZE_ZH_BLANK_RE.test(text);
+}
+
+function fillClozeZhBlanks(text: string, gloss: string): string {
+  return text.replace(/_{2,}|—{2,}|–{2,}|…{2,}|\.{3,}/g, gloss);
+}
+
+/** Fill blank placeholders in Chinese hint with 词义 (no corner brackets). */
+export function resolveClozeChinese(zh: string, word: Word): { text: string; gloss: string } {
+  const gloss = glossSnippet(word);
+  let text = String(zh || '').trim();
+  if (hasClozeZhBlank(text)) {
+    text = fillClozeZhBlanks(text, gloss);
+  }
+  // Strip legacy 「词义」 wrappers from older cached / fallback sentences
+  text = text.replace(/「([^」]+)」/g, '$1');
+  return { text, gloss };
 }
 
 /** Reject meta / tutorial sentences that talk ABOUT using the word. */
@@ -381,6 +472,20 @@ export function isLazyMetaSentence(en: string, word: string): boolean {
   return false;
 }
 
+/** Overused IELTS-exam frames that make a practice session feel copy-pasted. */
+export function isStockTemplateSentence(en: string): boolean {
+  const s = String(en || '').toLowerCase();
+  if (!s) return true;
+  if (/in writing task\s*2/.test(s)) return true;
+  if (/opening paragraph/.test(s) && /candidat|essay|task/.test(s)) return true;
+  if (/from the survey (data|results)/.test(s)) return true;
+  if (/remote work (improved|improves|boosted)/.test(s)) return true;
+  if (/critics (argue|claim|say|suggest|warn)/.test(s) && /law|policy|gap|regions/.test(s)) return true;
+  if (/policymakers risk/.test(s)) return true;
+  if (/economic growth should come before equity/.test(s)) return true;
+  return false;
+}
+
 function escapeReg(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -393,101 +498,37 @@ function wordHintLine(word: Word): string {
   return bits.join(' · ');
 }
 
-function pickFallbackIndex(word: string, n: number): number {
-  let h = 0;
-  for (let i = 0; i < word.length; i++) h = (h * 31 + word.charCodeAt(i)) >>> 0;
-  return n ? h % n : 0;
+/** True only when two sentences are essentially the same (for regenerate avoid). */
+function nearlySameSentence(a: string, b: string): boolean {
+  const norm = (s: string) =>
+    s
+      .toLowerCase()
+      .replace(/[^a-z0-9\s']/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  const na = norm(a);
+  const nb = norm(b);
+  if (!na || !nb) return false;
+  if (na === nb) return true;
+
+  // Content-word Jaccard — do NOT collapse all words to "#", that falsely flags every pair
+  const content = (s: string) =>
+    s.split(' ').filter((t) => t.length > 2 && !STOP_FOR_SIM.has(t));
+  const ca = content(na);
+  const cb = content(nb);
+  if (!ca.length || !cb.length) return false;
+  const setA = new Set(ca);
+  let hit = 0;
+  for (const t of cb) if (setA.has(t)) hit++;
+  const union = new Set([...ca, ...cb]).size;
+  return hit / Math.max(union, 1) >= 0.85 && Math.abs(ca.length - cb.length) <= 2;
 }
 
-/**
- * Natural contextual fallbacks — never the old "use X accurately" template.
- * Prefer part-of-speech when known; otherwise use versatile verb-slot frames.
- */
-export function fallbackPracticeSentence(word: Word, mode: 'cloze' | 'translate'): PracticeSentence {
-  const w = word.word;
-  const gloss = glossSnippet(word);
-  const pos = String(word.partOfSpeech || '').toLowerCase();
-
-  type Pair = { en: string; zh: string };
-  let pool: Pair[];
-
-  if (/\bn\b|noun/.test(pos)) {
-    pool = [
-      {
-        en: `The debate centres on a single ${w}: whether economic growth should come before equity.`,
-        zh: `这场辩论围绕一个关键的「${gloss}」：经济增长是否应优先于公平。`,
-      },
-      {
-        en: `Without reliable ${w}, policymakers risk designing reforms that fail ordinary families.`,
-        zh: `若缺乏可靠的「${gloss}」，政策制定者可能推出让普通家庭受损的改革。`,
-      },
-      {
-        en: `Her essay opens with a clear ${w} and then supports it with local case studies.`,
-        zh: `她的文章以明确的「${gloss}」开头，再用地方案例加以支撑。`,
-      },
-    ];
-  } else if (/\badj\b|adjective/.test(pos)) {
-    pool = [
-      {
-        en: `A more ${w} approach may reduce conflict between local residents and developers.`,
-        zh: `更「${gloss}」的做法或许能减少居民与开发商之间的冲突。`,
-      },
-      {
-        en: `Critics argue that the proposal is too ${w} to work in crowded cities.`,
-        zh: `批评者认为该方案过于「${gloss}」，难以在拥挤城市奏效。`,
-      },
-      {
-        en: `Students need ${w} evidence rather than vague personal opinions in Task 2.`,
-        zh: `在写作任务二中，学生需要「${gloss}」的证据，而不是含糊的个人看法。`,
-      },
-    ];
-  } else if (/\badv\b|adverb/.test(pos)) {
-    pool = [
-      {
-        en: `The author ${w} links air pollution to higher hospital admissions in the final paragraph.`,
-        zh: `作者在末段「${gloss}」地把空气污染与更高的住院率联系起来。`,
-      },
-      {
-        en: `If cities plan housing ${w}, traffic and school places can keep pace with population growth.`,
-        zh: `若城市「${gloss}」地规划住房，交通与学位就能跟上人口增长。`,
-      },
-    ];
-  } else {
-    // verbs / unknown — frames where base form fits naturally
-    pool = [
-      {
-        en: `From the survey data, the team could ${w} that remote work improved focus for many staff.`,
-        zh: `根据调查数据，团队可以「${gloss}」远程办公提升了许多员工的专注度。`,
-      },
-      {
-        en: `Before the vote, several MPs tried to ${w} the discussion with fresh regional evidence.`,
-        zh: `投票前，几位议员试图用新的地方证据来「${gloss}」这场讨论。`,
-      },
-      {
-        en: `Critics ${w} that the new law may widen the gap between rich and poor regions.`,
-        zh: `批评者「${gloss}」新法可能拉大富裕与贫困地区之间的差距。`,
-      },
-      {
-        en: `In Writing Task 2, candidates often ${w} with a clear position in the opening paragraph.`,
-        zh: `在写作任务二中，考生常在开头段用明确立场来「${gloss}」。`,
-      },
-      {
-        en: `Researchers will ${w} the experiment only after reviewing ethical and safety concerns.`,
-        zh: `研究人员将在审阅伦理与安全问题后，才「${gloss}」该实验。`,
-      },
-      {
-        en: `Teachers ${w} that small group discussion helps quieter students contribute more.`,
-        zh: `教师「${gloss}」小组讨论有助于内向学生更多参与。`,
-      },
-    ];
-  }
-
-  const picked = pool[pickFallbackIndex(w, pool.length)] || pool[0];
-  if (mode === 'translate') {
-    return { zh: picked.zh, en: picked.en };
-  }
-  return picked;
-}
+const STOP_FOR_SIM = new Set([
+  'a','an','the','and','or','but','to','of','in','on','for','with','from','that','this','these','those',
+  'is','are','was','were','be','been','being','have','has','had','will','would','can','could','may','might',
+  'it','its','they','them','their','he','she','his','her','we','our','you','your',
+]);
 
 function sentenceHasWord(sentence: string, word: string): boolean {
   const w = word.trim();
@@ -499,12 +540,13 @@ function sentenceHasWord(sentence: string, word: string): boolean {
   ).test(sentence);
 }
 
-/** Chinese prompt must not contain English words (match example.html). */
+/** Chinese prompt must not contain English words or blank underlines (match example.html). */
 function chineseIsFullyChinese(text: string, targetWord: string): boolean {
   const s = String(text || '').trim();
   if (!s) return false;
   if (sentenceHasWord(s, targetWord)) return false;
   if (/\b[A-Za-z][A-Za-z'-]+\b/.test(s)) return false;
+  if (hasClozeZhBlank(s)) return false;
   return true;
 }
 
@@ -517,97 +559,137 @@ function sanitizeChinese(text: string, word: Word): string {
     const esc = escapeReg(w);
     s = s.replace(new RegExp('\\b' + esc + '(?:s|es|ed|ing|ies|ied)?\\b', 'gi'), gloss);
   }
+  // LLM sometimes leaves ____ for the cloze slot — fill with the word's Chinese gloss
+  if (hasClozeZhBlank(s)) {
+    s = fillClozeZhBlanks(s, gloss);
+  }
   s = s.replace(/\b[A-Za-z][A-Za-z'-]+\b/g, '').replace(/\s{2,}/g, ' ').trim();
   s = s.replace(/\s+([，。！？、；：])/g, '$1').trim();
-  return s || `这句话描述的情境与「${gloss}」有关。`;
+  // Drop corner brackets around gloss inserts
+  s = s.replace(/「([^」]+)」/g, '$1');
+  return s || `这句话描述的情境与${gloss}有关。`;
 }
 
 function practicePromptRules(mode: 'cloze' | 'translate'): string {
   return `Quality rules (strict):
-- Write ONE natural IELTS-style sentence in a concrete situation (research, policy, education, environment, work, health, culture, technology).
-- The target word must carry real meaning in that situation — the learner should feel a real exam sentence, not a vocabulary tutorial.
+- Write ONE natural English sentence in a concrete everyday or IELTS-relevant situation.
+- The target word must carry real meaning — a real scene, not a vocabulary tutorial.
 - B1–B2 level, clear and idiomatic.
-- Different words → different topics/contexts.
+- DIVERSITY (critical): each word must use a DIFFERENT topic and setting. Rotate among food, travel, sport, health, family, shopping, nature, media, workplace, city life, science labs, etc. Do NOT reuse the same frame across items.
 
 FORBIDDEN (these are automatic fails):
 - Meta / tutorial lines about learning or "using" the word itself
 - Patterns like "It is important to use X accurately", "In academic writing, use X appropriately", "X is a useful word", "This word means..."
 - Defining the word inside the sentence
 - Listing synonyms or giving usage advice instead of a real example
+- Overused exam templates: "In Writing Task 2...", "From the survey data/results...", "Critics argue/claim that...", "policymakers", "remote work improved productivity", "opening paragraph"
 
-Good: "From the survey results, the team concluded that remote work improved productivity."
-Bad: "In academic writing, it is important to use conclude accurately and appropriately."
+Good: "Museum guides explained the concept behind the city's postwar rebuilding plan."
+Bad: "In Writing Task 2, candidates often begin with a clear position in the opening paragraph."
+Also bad (too template-like): "From the survey results, the team concluded that remote work improved productivity."
 
 ${
   mode === 'translate'
     ? `- translateChinese MUST be fully Chinese (no English/Latin words; do not leave the target word in Chinese)
 - translateReference MUST contain the exact target word (or a common inflection) as a standalone word`
     : `- clozeEnglish MUST contain the exact target word (or a common inflection) as a standalone word
-- clozeChinese MUST be a full Chinese translation (no English/Latin words; do not leave the target word in Chinese)`
+- clozeChinese MUST be a full Chinese translation (no English/Latin words; do not leave the target word in Chinese)
+- clozeChinese MUST translate the blank/target word into Chinese naturally — never use ____ blanks, and do not wrap the Chinese gloss in corner brackets`
 }`;
 }
 
+export type PracticeGenOptions = {
+  /** Previous English sentences to avoid (e.g. when regenerating) */
+  avoidEn?: string[];
+  /** Higher creativity / stronger diversity reminder */
+  diverse?: boolean;
+};
+
 /**
  * One LLM request for multiple words (like example.html generateContentBatch).
- * Returns map wordId → { en, zh }.
+ * Returns map wordId → { en, zh }. Missing ids mean generation failed — no template fallback.
  */
 export async function generatePracticeBatch(
   words: Word[],
   mode: 'cloze' | 'translate',
-  settings: Settings
+  settings: Settings,
+  opts?: PracticeGenOptions
 ): Promise<Record<string, PracticeSentence>> {
   if (!words.length) return {};
+  const avoidEn = opts?.avoidEn?.filter(Boolean) || [];
+  const diverse = opts?.diverse ?? avoidEn.length > 0;
 
-  if (words.length === 1) {
-    const w = words[0];
-    try {
-      const map = await generatePracticeBatchMany(words, mode, settings);
-      if (map[w.id] && !isLazyMetaSentence(map[w.id].en, w.word)) return map;
-    } catch {
-      /* fallback below */
+  const accept = (en: string, word: string) => {
+    if (!en || isLazyMetaSentence(en, word) || isStockTemplateSentence(en)) return false;
+    if (avoidEn.some((a) => nearlySameSentence(en, a) || en.toLowerCase() === a.toLowerCase())) {
+      return false;
     }
-    // one extra single-item retry with stronger reminder
-    try {
-      const map = await generatePracticeBatchMany(words, mode, settings, true);
-      if (map[w.id] && !isLazyMetaSentence(map[w.id].en, w.word)) return map;
-    } catch {
-      /* fallback below */
+    return true;
+  };
+
+  const filterAccepted = (map: Record<string, PracticeSentence>, list: Word[]) => {
+    const out: Record<string, PracticeSentence> = {};
+    for (const w of list) {
+      const s = map[w.id];
+      if (s && accept(s.en, w.word)) out[w.id] = s;
+      else if (s) console.warn('[practice] LLM rejected', w.word, s.en.slice(0, 80));
     }
-    return { [w.id]: fallbackPracticeSentence(w, mode) };
+    return out;
+  };
+
+  async function generateFor(list: Word[], reinforce: boolean) {
+    if (!list.length) return {} as Record<string, PracticeSentence>;
+    try {
+      const raw = await generatePracticeBatchMany(list, mode, settings, {
+        reinforce,
+        avoidEn,
+      });
+      return filterAccepted(raw, list);
+    } catch (e) {
+      console.warn('[practice] LLM batch failed', e);
+      return {} as Record<string, PracticeSentence>;
+    }
   }
 
-  try {
-    const map = await generatePracticeBatchMany(words, mode, settings);
-    for (const w of words) {
-      if (!map[w.id] || isLazyMetaSentence(map[w.id].en, w.word)) {
-        map[w.id] = fallbackPracticeSentence(w, mode);
-      }
-    }
-    return map;
-  } catch {
-    const result: Record<string, PracticeSentence> = {};
-    for (const w of words) {
-      result[w.id] = fallbackPracticeSentence(w, mode);
-    }
-    return result;
+  // First pass
+  let result = await generateFor(words, diverse);
+  // Retry only missing / rejected words once with stronger diversity
+  const missing = words.filter((w) => !result[w.id]);
+  if (missing.length) {
+    const retry = await generateFor(missing, true);
+    result = { ...result, ...retry };
   }
+
+  const stillMissing = words.filter((w) => !result[w.id]);
+  if (stillMissing.length) {
+    console.warn(
+      '[practice] no sentence for',
+      stillMissing.map((w) => w.word).join(', ')
+    );
+  }
+  return result;
 }
 
 async function generatePracticeBatchMany(
   words: Word[],
   mode: 'cloze' | 'translate',
   settings: Settings,
-  reinforce = false
+  genOpts?: { reinforce?: boolean; avoidEn?: string[] }
 ): Promise<Record<string, PracticeSentence>> {
+  const reinforce = !!genOpts?.reinforce;
+  const avoidEn = genOpts?.avoidEn?.filter(Boolean) || [];
   const hints = words.map((w) => wordHintLine(w)).join('\n- ');
   const reinforceBlock = reinforce
-    ? `\nIMPORTANT RETRY: Previous output was rejected as lazy/meta. Do NOT write about "using the word". Write a real situational sentence.\n`
+    ? `\nIMPORTANT: Prefer fresh, non-repetitive scenes. Do NOT write about "using the word". Avoid Writing Task 2 / survey / critics / remote-work clichés.\n`
+    : '';
+  const avoidBlock = avoidEn.length
+    ? `\nDo NOT reuse or lightly paraphrase these previous sentences:\n${avoidEn.map((s) => `- ${s}`).join('\n')}\n`
     : '';
 
   const prompt =
     mode === 'translate'
       ? `You are an English vocabulary tutor for an IELTS test taker.
-${reinforceBlock}
+${reinforceBlock}${avoidBlock}
 Create a Chinese-to-English translation exercise for EACH target word below:
 - ${hints}
 
@@ -621,7 +703,7 @@ Return JSON EXACTLY:
 }
 Include exactly one item per word, using the same spelling as given.`
       : `You are an English vocabulary tutor for an IELTS test taker.
-${reinforceBlock}
+${reinforceBlock}${avoidBlock}
 Create a cloze (fill-in-the-blank) exercise for EACH target word below:
 - ${hints}
 
@@ -636,18 +718,22 @@ Return JSON EXACTLY:
 Include exactly one item per word, using the same spelling as given.`;
 
   const text = await callLLM([{ role: 'user', content: prompt }], settings, {
-    temperature: reinforce ? 0.9 : 0.85,
+    temperature: reinforce || avoidEn.length ? 0.95 : 0.9,
     jsonMode: true,
   });
 
   let parsed: { items?: Array<Record<string, string>> };
   try {
     parsed = JSON.parse(text);
-  } catch {
+  } catch (e) {
+    console.warn('[practice] LLM JSON parse failed', String(text).slice(0, 200), e);
     return {};
   }
 
   const items = Array.isArray(parsed?.items) ? parsed.items : [];
+  if (!items.length) {
+    console.warn('[practice] LLM returned empty items', String(text).slice(0, 200));
+  }
   const byWord: Record<string, Record<string, string>> = {};
   for (const it of items) {
     if (it?.word) byWord[String(it.word).toLowerCase()] = it;
@@ -661,16 +747,16 @@ Include exactly one item per word, using the same spelling as given.`;
       let zh = String(raw.translateChinese || '').trim();
       const en = String(raw.translateReference || '').trim();
       if (!zh || !en || !sentenceHasWord(en, w.word)) continue;
-      if (isLazyMetaSentence(en, w.word)) continue;
+      if (isLazyMetaSentence(en, w.word) || isStockTemplateSentence(en)) continue;
       if (!chineseIsFullyChinese(zh, w.word)) zh = sanitizeChinese(zh, w);
-      result[w.id] = { zh, en };
+      result[w.id] = { zh, en, source: 'llm' };
     } else {
       const en = String(raw.clozeEnglish || '').trim();
       let zh = String(raw.clozeChinese || '').trim();
       if (!zh || !en || !sentenceHasWord(en, w.word)) continue;
-      if (isLazyMetaSentence(en, w.word)) continue;
+      if (isLazyMetaSentence(en, w.word) || isStockTemplateSentence(en)) continue;
       if (!chineseIsFullyChinese(zh, w.word)) zh = sanitizeChinese(zh, w);
-      result[w.id] = { en, zh };
+      result[w.id] = { en, zh, source: 'llm' };
     }
   }
   return result;

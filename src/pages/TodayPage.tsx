@@ -9,7 +9,17 @@ import {
   clearPracticeSession,
   getSavedPracticeSummary,
   readSavedPracticeSession,
+  type StudyScope,
 } from '@/utils/practiceSession';
+import { countByScope } from '@/utils/practiceSelect';
+import { getLearningCurve } from '@/utils/learningLog';
+import LearningCurve from '@/components/LearningCurve';
+
+const SCOPES: { key: StudyScope; label: string; hint: string }[] = [
+  { key: 'new', label: '学新词', hint: '只练从未复习过的词' },
+  { key: 'review', label: '复习', hint: '到期与即将到期的词' },
+  { key: 'mixed', label: '混合', hint: '新词优先，再穿插复习' },
+];
 
 export default function TodayPage() {
   const { message, modal } = App.useApp();
@@ -17,13 +27,13 @@ export default function TodayPage() {
   const username = useAuth((s) => s.username);
   const navigate = useNavigate();
   const [savedTick, setSavedTick] = useState(0);
+  const [scope, setScope] = useState<StudyScope>('mixed');
 
   const saved = useMemo(() => getSavedPracticeSummary(), [savedTick, words.length]);
+  const curve = useMemo(() => getLearningCurve(14), [savedTick, words.length]);
+  const scopeCounts = useMemo(() => countByScope(words), [words]);
 
-  const newCount = useMemo(
-    () => words.filter((w) => !w.crossedOut && isNew(w)).length,
-    [words]
-  );
+  const newCount = scopeCounts.newCount;
   const dueCount = useMemo(
     () => words.filter((w) => !w.crossedOut && !isNew(w) && isDue(w)).length,
     [words]
@@ -47,13 +57,20 @@ export default function TodayPage() {
   );
 
   const total = words.length;
-  const taskCount = newCount + dueCount;
+  const taskCount =
+    scope === 'new'
+      ? scopeCounts.newCount
+      : scope === 'review'
+        ? scopeCounts.reviewCount
+        : scopeCounts.mixedCount;
   const hasTasks = taskCount > 0;
   const sessionCount = Math.min(50, taskCount);
   const streak = parseInt(getLS('streak') || '0', 10);
   const todayDone = getLS('done-' + new Date().toDateString()) === '1';
+  const activeScope = SCOPES.find((s) => s.key === scope)!;
 
   function startMode(mode: 'cloze' | 'choice' | 'translate') {
+    const go = () => navigate(`/practice?mode=${mode}&scope=${scope}`);
     if (readSavedPracticeSession()) {
       modal.confirm({
         title: '开始新练习？',
@@ -63,12 +80,12 @@ export default function TodayPage() {
         onOk: () => {
           clearPracticeSession();
           setSavedTick((n) => n + 1);
-          navigate(`/practice?mode=${mode}`);
+          go();
         },
       });
       return;
     }
-    navigate(`/practice?mode=${mode}`);
+    go();
   }
 
   function resumePractice() {
@@ -106,7 +123,9 @@ export default function TodayPage() {
         <div className="app-card resume-card">
           <h3 style={{ fontSize: 14, marginBottom: 6 }}>继续上次练习</h3>
           <p className="text-light" style={{ fontSize: 13, marginBottom: 12 }}>
-            {saved.modeLabel} · 第 {saved.current}/{saved.total} 题
+            {saved.modeLabel}
+            {saved.scopeLabel ? ` · ${saved.scopeLabel}` : ''}
+            {' · '}第 {saved.current}/{saved.total} 题
             {saved.when ? ` · 保存于 ${saved.when}` : ''}
           </p>
           <div className="flex-row" style={{ gap: 8, flexWrap: 'wrap' }}>
@@ -137,6 +156,30 @@ export default function TodayPage() {
             <div className="label">已学过</div>
           </div>
         </div>
+
+        <div className="scope-tabs" role="tablist" aria-label="学习范围">
+          {SCOPES.map((s) => (
+            <button
+              key={s.key}
+              type="button"
+              role="tab"
+              aria-selected={scope === s.key}
+              className={`scope-tab ${scope === s.key ? 'active' : ''}`}
+              onClick={() => setScope(s.key)}
+            >
+              {s.label}
+              <span className="scope-count">
+                {s.key === 'new'
+                  ? scopeCounts.newCount
+                  : s.key === 'review'
+                    ? scopeCounts.reviewCount
+                    : scopeCounts.mixedCount}
+              </span>
+            </button>
+          ))}
+        </div>
+        <p className="scope-hint">{activeScope.hint}</p>
+
         <div className="today-actions">
           <Button
             size="large"
@@ -169,6 +212,10 @@ export default function TodayPage() {
       </div>
 
       <div className="app-card">
+        <LearningCurve data={curve} />
+      </div>
+
+      <div className="app-card">
         <h3>快速统计</h3>
         <div className="stats-grid">
           <div className="stat-card">
@@ -193,8 +240,20 @@ export default function TodayPage() {
       {!hasTasks && (
         <div className="app-card empty">
           <div className="empty-icon">🎉</div>
-          <h3>今日无任务</h3>
-          <p>所有词都掌握了，去「添加」加几个新词吧</p>
+          <h3>
+            {scope === 'new'
+              ? '没有新词'
+              : scope === 'review'
+                ? '暂无复习任务'
+                : '今日无任务'}
+          </h3>
+          <p>
+            {scope === 'new'
+              ? '去「添加」加几个新词，或切换到「复习」'
+              : scope === 'review'
+                ? '没有到期词，可以去学新词'
+                : '所有词都掌握了，去「添加」加几个新词吧'}
+          </p>
         </div>
       )}
     </div>

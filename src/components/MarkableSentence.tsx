@@ -185,6 +185,9 @@ export default function MarkableSentence({
         const lower = part.toLowerCase();
         const related = findRelated(lower);
         const inList = !!(related && !related.entry.crossedOut);
+        // 完形答题前不常显「已在词表」，避免像在提示关键词；揭晓后或普通例句仍显示
+        const showInList =
+          inList && (blankMode === 'revealed' || !blankWord);
         const tip = related
           ? related.exact
             ? '已在词表'
@@ -194,7 +197,7 @@ export default function MarkableSentence({
         return (
           <span
             key={i}
-            className={`markable-word${inList ? ' in-list' : ''}${justMarked === lower ? ' just-marked' : ''}`}
+            className={`markable-word${showInList ? ' in-list' : ''}${justMarked === lower ? ' just-marked' : ''}`}
             title={tip}
             role="button"
             tabIndex={0}

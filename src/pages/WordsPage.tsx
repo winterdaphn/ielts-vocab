@@ -2,26 +2,30 @@ import { useState, useMemo } from 'react';
 import { Popconfirm, App } from 'antd';
 import { SoundOutlined } from '@ant-design/icons';
 import { useUserWords, useWordsStore } from '@/store/useWords';
-import { isDue, isNew, isMastered } from '@/utils/scheduler';
+import {
+  isDue,
+  isNew,
+  isMastered,
+  getWordStage,
+  wordStageLabel,
+  wordStageClass,
+} from '@/utils/scheduler';
 import type { Word } from '@/types/word';
 
 type Filter = 'all' | 'due' | 'new' | 'learning' | 'mastered' | 'crossed';
 
-function getWordStatus(w: Word): Filter {
-  if (w.crossedOut) return 'crossed';
-  if (isNew(w)) return 'new';
-  if (isDue(w)) return 'due';
-  if (isMastered(w)) return 'mastered';
-  return 'learning';
+function matchesFilter(w: Word, filter: Filter): boolean {
+  if (filter === 'all') return true;
+  if (filter === 'crossed') return !!w.crossedOut;
+  if (w.crossedOut) return false;
+  if (filter === 'new') return isNew(w);
+  if (filter === 'due') return !isNew(w) && isDue(w);
+  if (filter === 'mastered') return isMastered(w);
+  if (filter === 'learning') {
+    return !isNew(w) && !isDue(w) && !isMastered(w);
+  }
+  return true;
 }
-
-const TAG_MAP: Record<string, { className: string; label: string }> = {
-  new: { className: 'tag tag-new', label: '新词' },
-  due: { className: 'tag tag-due', label: '待复习' },
-  learning: { className: 'tag tag-due', label: '学习中' },
-  mastered: { className: 'tag tag-mastered', label: '已掌握' },
-  crossed: { className: 'tag tag-crossed', label: '已划掉' },
-};
 
 export default function WordsPage() {
   const { message } = App.useApp();
@@ -33,7 +37,7 @@ export default function WordsPage() {
   const counts = useMemo(() => ({
     all: words.length,
     new: words.filter((w) => !w.crossedOut && isNew(w)).length,
-    due: words.filter((w) => !w.crossedOut && isDue(w)).length,
+    due: words.filter((w) => !w.crossedOut && !isNew(w) && isDue(w)).length,
     learning: words.filter((w) => !w.crossedOut && !isNew(w) && !isDue(w) && !isMastered(w)).length,
     mastered: words.filter((w) => !w.crossedOut && isMastered(w)).length,
     crossed: words.filter((w) => w.crossedOut).length,
@@ -48,16 +52,10 @@ export default function WordsPage() {
     { key: 'crossed', label: `已划掉 (${counts.crossed})` },
   ];
 
-  const filtered = useMemo(() => {
-    if (filter === 'due') return words.filter((w) => !w.crossedOut && isDue(w));
-    if (filter === 'new') return words.filter((w) => !w.crossedOut && isNew(w));
-    if (filter === 'learning') {
-      return words.filter((w) => !w.crossedOut && !isNew(w) && !isDue(w) && !isMastered(w));
-    }
-    if (filter === 'mastered') return words.filter((w) => !w.crossedOut && isMastered(w));
-    if (filter === 'crossed') return words.filter((w) => w.crossedOut);
-    return words;
-  }, [words, filter]);
+  const filtered = useMemo(
+    () => words.filter((w) => matchesFilter(w, filter)),
+    [words, filter]
+  );
 
   async function toggleCrossed(w: Word) {
     const updated = { ...w, crossedOut: !w.crossedOut };
@@ -110,8 +108,7 @@ export default function WordsPage() {
         </div>
       ) : (
         filtered.map((w) => {
-          const status = getWordStatus(w);
-          const tag = TAG_MAP[status];
+          const stage = getWordStage(w);
           return (
             <div key={w.id} className={`word-list-item ${w.crossedOut ? 'crossed' : ''}`}>
               <div className="word-main">
@@ -133,7 +130,7 @@ export default function WordsPage() {
               </div>
               <div className="meta">
                 <div className="tags">
-                  {tag && <span className={tag.className}>{tag.label}</span>}
+                  <span className={wordStageClass(stage)}>{wordStageLabel(stage)}</span>
                 </div>
                 <div className="actions">
                   <button

@@ -584,8 +584,113 @@ input, textarea, select {
 
 .tag-new { background: var(--accent-light); color: var(--accent); }
 .tag-due { background: var(--warning-light); color: var(--warning); }
+.tag-young { background: #e8f1ff; color: #3b6ea5; }
+.tag-mature { background: #e7f6ef; color: #2a7a58; }
+.tag-learning { background: #f3f0ea; color: #6b5e4e; }
 .tag-mastered { background: var(--success-light); color: var(--success); }
 .tag-crossed { background: #ececec; color: var(--text-mute); }
+
+/* Today: new / review / mixed scope */
+.scope-tabs {
+  display: flex;
+  gap: 6px;
+  margin: 4px 0 8px;
+  flex-wrap: wrap;
+}
+
+.scope-tab {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.88);
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.scope-tab .scope-count {
+  font-size: 11px;
+  opacity: 0.8;
+  font-weight: 600;
+}
+
+.scope-tab.active {
+  background: rgba(255, 255, 255, 0.95);
+  color: #245951;
+  border-color: white;
+}
+
+.scope-hint {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.75);
+  margin: 0 0 12px;
+}
+
+/* Learning curve */
+.learning-curve-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.learning-curve-head h3 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.learning-curve-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.curve-line {
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.curve-line.curve-reviewed { stroke: var(--accent); }
+.curve-line.curve-new { stroke: var(--warning); }
+
+.curve-dot.curve-reviewed { fill: var(--accent); }
+.curve-dot.curve-new { fill: var(--warning); }
+
+.learning-curve-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  align-items: center;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-light);
+}
+
+.learning-curve-legend .swatch {
+  display: inline-block;
+  width: 10px;
+  height: 3px;
+  border-radius: 2px;
+  margin-right: 4px;
+  vertical-align: middle;
+}
+
+.learning-curve-legend .swatch.reviewed { background: var(--accent); }
+.learning-curve-legend .swatch.new { background: var(--warning); }
+
+.learning-curve-legend .curve-range {
+  margin-left: auto;
+  font-size: 11px;
+}
 
 /* Speak button — icon only */
 .speak-btn {
@@ -714,6 +819,42 @@ input, textarea, select {
 }
 
 .mode-tag.translate-mode { background: var(--chinese-bg); color: var(--text); }
+
+.sentence-source-tag {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 3px 8px;
+  border-radius: 999px;
+  letter-spacing: 0.3px;
+  border: 1px solid var(--border);
+  color: var(--text-light);
+  background: var(--bg);
+}
+
+.sentence-source-tag.source-llm {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-light);
+}
+
+.sentence-source-tag.source-fallback {
+  color: var(--warning);
+  border-color: var(--warning);
+  background: var(--warning-light);
+}
+
+.sentence-source-tag.source-cache {
+  color: var(--text);
+  border-color: var(--border);
+  background: var(--border-light);
+}
+
+.sentence-source-tag.source-session {
+  color: var(--text-mute);
+  border-color: var(--border);
+  background: transparent;
+}
 
 /* Practice card */
 .practice-card {
@@ -947,6 +1088,50 @@ input, textarea, select {
   color: var(--text-mute);
   margin-top: 4px;
   margin-bottom: 12px;
+}
+
+.sentence-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.sentence-row .practice-sentence {
+  flex: 1;
+  margin-bottom: 0;
+  min-width: 0;
+}
+
+.speak-sentence-btn {
+  flex-shrink: 0;
+  margin-top: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--text-mute);
+  font-family: inherit;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.speak-sentence-btn:hover {
+  background: var(--accent-light);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.speak-sentence-btn.speaking {
+  background: var(--accent) !important;
+  border-color: var(--accent) !important;
+  color: white !important;
+  animation: speakPulse 0.6s ease;
 }
 
 .practice-sentence {

@@ -11,11 +11,18 @@ import { getLS, setLS, delLS } from '@/utils/date';
 import type { Word, WordExample } from '@/types/word';
 
 export type PracticeMode = 'cloze' | 'choice' | 'translate';
+export type StudyScope = 'new' | 'review' | 'mixed';
 
 export function modeLabel(mode: PracticeMode): string {
   if (mode === 'choice') return '选词填空';
   if (mode === 'translate') return '句子翻译';
   return '输入填空';
+}
+
+export function scopeLabel(scope: StudyScope): string {
+  if (scope === 'new') return '学新词';
+  if (scope === 'review') return '复习';
+  return '混合';
 }
 
 export function parsePracticeMode(raw: string | null | undefined): PracticeMode {
@@ -24,10 +31,17 @@ export function parsePracticeMode(raw: string | null | undefined): PracticeMode 
   return 'cloze';
 }
 
+export function parseStudyScope(raw: string | null | undefined): StudyScope {
+  if (raw === 'new' || raw === 'review') return raw;
+  return 'mixed';
+}
+
 export interface SavedPracticeSession {
   version: 1;
   savedAt: number;
   mode: PracticeMode;
+  /** new | review | mixed — optional for old sessions */
+  scope?: StudyScope;
   wordIds: string[];
   idx: number;
   /** Pre-generated examples keyed by word id (local only; not synced) */
@@ -56,6 +70,7 @@ export interface PracticeSyncSnapshot {
   version: 1;
   savedAt: number;
   mode: PracticeMode;
+  scope?: StudyScope;
   wordIds: string[];
   idx: number;
   stats: { correct: number; total: number };
@@ -64,6 +79,8 @@ export interface PracticeSyncSnapshot {
 export interface PracticeSummary {
   mode: PracticeMode;
   modeLabel: string;
+  scope: StudyScope;
+  scopeLabel: string;
   current: number;
   total: number;
   when: string;
@@ -89,9 +106,12 @@ export function getSavedPracticeSummary(): PracticeSummary | null {
   const total = saved.wordIds.length;
   const idx = Math.min(saved.idx || 0, total);
   if (idx >= total) return null;
+  const scope = parseStudyScope(saved.scope);
   return {
     mode: parsePracticeMode(saved.mode),
     modeLabel: modeLabel(parsePracticeMode(saved.mode)),
+    scope,
+    scopeLabel: scopeLabel(scope),
     current: idx + 1,
     total,
     when: saved.savedAt
@@ -121,6 +141,7 @@ export function getPracticeSyncSnapshot(): PracticeSyncSnapshot | null {
     version: 1,
     savedAt: saved.savedAt || Date.now(),
     mode: parsePracticeMode(saved.mode),
+    scope: parseStudyScope(saved.scope),
     wordIds: saved.wordIds.filter(Boolean),
     idx,
     stats: {
@@ -170,6 +191,7 @@ export function normalizePracticeSyncPayload(
     version: 1,
     savedAt: typeof o.savedAt === 'number' ? o.savedAt : Date.now(),
     mode: parsePracticeMode(String(o.mode || 'cloze')),
+    scope: parseStudyScope(typeof o.scope === 'string' ? o.scope : 'mixed'),
     wordIds,
     idx,
     stats,
@@ -186,6 +208,7 @@ export function applyPracticeSyncSnapshot(snap: PracticeSyncSnapshot | null): vo
     version: 1,
     savedAt: snap.savedAt || Date.now(),
     mode: parsePracticeMode(snap.mode),
+    scope: parseStudyScope(snap.scope),
     wordIds: snap.wordIds,
     idx: snap.idx,
     examples: {},
@@ -205,9 +228,10 @@ export function applyPracticeSyncSnapshot(snap: PracticeSyncSnapshot | null): vo
 
 export function savePracticeSession(payload: {
   mode: PracticeMode;
+  scope?: StudyScope;
   sessionWords: Word[];
   idx: number;
-  queue: ({ word: Word; example: WordExample } | null)[];
+  queue: ({ word: Word; example: WordExample; wasNew?: boolean } | null)[];
   stats: { correct: number; total: number };
   showAnswer: boolean;
   hintShown?: boolean;
@@ -232,6 +256,7 @@ export function savePracticeSession(payload: {
     version: 1,
     savedAt: Date.now(),
     mode: payload.mode,
+    scope: payload.scope || 'mixed',
     wordIds: payload.sessionWords.map((w) => w.id),
     idx: payload.idx,
     examples,
@@ -256,8 +281,14 @@ export function hydratePracticeSession(
   allWords: Word[]
 ): {
   mode: PracticeMode;
+  scope: StudyScope;
   sessionWords: Word[];
-  queue: ({ word: Word; example: WordExample } | null)[];
+  queue: ({
+    word: Word;
+    example: WordExample;
+    source?: 'llm' | 'fallback' | 'cache' | 'session';
+    wasNew?: boolean;
+  } | null)[];
   idx: number;
   stats: { correct: number; total: number };
   showAnswer: boolean;
@@ -289,11 +320,19 @@ export function hydratePracticeSession(
 
   const queue = sessionWords.map((w) => {
     const ex = saved.examples?.[w.id];
-    return ex ? { word: w, example: ex } : null;
+    return ex
+      ? {
+          word: w,
+          example: ex,
+          source: 'session' as const,
+          wasNew: w.totalReviews === 0,
+        }
+      : null;
   });
 
   return {
     mode: parsePracticeMode(saved.mode),
+    scope: parseStudyScope(saved.scope),
     sessionWords,
     queue,
     idx: newIdx,
