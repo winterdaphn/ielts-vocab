@@ -10,6 +10,7 @@ import {
   getSavedPracticeSummary,
   readSavedPracticeSession,
   type StudyScope,
+  type SentenceDifficulty,
 } from '@/utils/practiceSession';
 import { countByScope } from '@/utils/practiceSelect';
 import { getLearningCurve } from '@/utils/learningLog';
@@ -21,6 +22,12 @@ const SCOPES: { key: StudyScope; label: string; hint: string }[] = [
   { key: 'mixed', label: '混合', hint: '新词优先，再穿插复习' },
 ];
 
+const DIFFICULTIES: { key: SentenceDifficulty; label: string; hint: string }[] = [
+  { key: 'easy', label: '简单', hint: '短句、单层结构，适合入门' },
+  { key: 'medium', label: '中等', hint: '与当前默认接近的自然句' },
+  { key: 'hard', label: '困难', hint: '长难句、从句嵌套，冲击写作' },
+];
+
 export default function TodayPage() {
   const { message, modal } = App.useApp();
   const words = useUserWords();
@@ -28,6 +35,7 @@ export default function TodayPage() {
   const navigate = useNavigate();
   const [savedTick, setSavedTick] = useState(0);
   const [scope, setScope] = useState<StudyScope>('mixed');
+  const [difficulty, setDifficulty] = useState<SentenceDifficulty>('medium');
 
   const saved = useMemo(() => getSavedPracticeSummary(), [savedTick, words.length]);
   const curve = useMemo(() => getLearningCurve(14), [savedTick, words.length]);
@@ -68,9 +76,11 @@ export default function TodayPage() {
   const streak = parseInt(getLS('streak') || '0', 10);
   const todayDone = getLS('done-' + new Date().toDateString()) === '1';
   const activeScope = SCOPES.find((s) => s.key === scope)!;
+  const activeDifficulty = DIFFICULTIES.find((d) => d.key === difficulty)!;
 
   function startMode(mode: 'cloze' | 'choice' | 'translate') {
-    const go = () => navigate(`/practice?mode=${mode}&scope=${scope}`);
+    const go = () =>
+      navigate(`/practice?mode=${mode}&scope=${scope}&difficulty=${difficulty}`);
     if (readSavedPracticeSession()) {
       modal.confirm({
         title: '开始新练习？',
@@ -125,6 +135,7 @@ export default function TodayPage() {
           <p className="text-light" style={{ fontSize: 13, marginBottom: 12 }}>
             {saved.modeLabel}
             {saved.scopeLabel ? ` · ${saved.scopeLabel}` : ''}
+            {saved.difficultyLabel ? ` · ${saved.difficultyLabel}` : ''}
             {' · '}第 {saved.current}/{saved.total} 题
             {saved.when ? ` · 保存于 ${saved.when}` : ''}
           </p>
@@ -179,6 +190,22 @@ export default function TodayPage() {
           ))}
         </div>
         <p className="scope-hint">{activeScope.hint}</p>
+
+        <div className="scope-tabs" role="tablist" aria-label="造句难度">
+          {DIFFICULTIES.map((d) => (
+            <button
+              key={d.key}
+              type="button"
+              role="tab"
+              aria-selected={difficulty === d.key}
+              className={`scope-tab ${difficulty === d.key ? 'active' : ''}`}
+              onClick={() => setDifficulty(d.key)}
+            >
+              {d.label}
+            </button>
+          ))}
+        </div>
+        <p className="scope-hint">{activeDifficulty.hint}</p>
 
         <div className="today-actions">
           <Button

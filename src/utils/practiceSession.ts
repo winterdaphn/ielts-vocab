@@ -12,6 +12,8 @@ import type { Word, WordExample } from '@/types/word';
 
 export type PracticeMode = 'cloze' | 'choice' | 'translate';
 export type StudyScope = 'new' | 'review' | 'mixed';
+/** Sentence generation difficulty for cloze / choice / translate */
+export type SentenceDifficulty = 'easy' | 'medium' | 'hard';
 
 export function modeLabel(mode: PracticeMode): string {
   if (mode === 'choice') return '选词填空';
@@ -25,6 +27,12 @@ export function scopeLabel(scope: StudyScope): string {
   return '混合';
 }
 
+export function difficultyLabel(d: SentenceDifficulty): string {
+  if (d === 'easy') return '简单';
+  if (d === 'hard') return '困难';
+  return '中等';
+}
+
 export function parsePracticeMode(raw: string | null | undefined): PracticeMode {
   if (raw === 'choice' || raw === 'cloze-choice') return 'choice';
   if (raw === 'translate') return 'translate';
@@ -36,12 +44,21 @@ export function parseStudyScope(raw: string | null | undefined): StudyScope {
   return 'mixed';
 }
 
+export function parseSentenceDifficulty(
+  raw: string | null | undefined
+): SentenceDifficulty {
+  if (raw === 'easy' || raw === 'hard' || raw === 'medium') return raw;
+  return 'medium';
+}
+
 export interface SavedPracticeSession {
   version: 1;
   savedAt: number;
   mode: PracticeMode;
   /** new | review | mixed — optional for old sessions */
   scope?: StudyScope;
+  /** easy | medium | hard — optional for old sessions */
+  difficulty?: SentenceDifficulty;
   wordIds: string[];
   idx: number;
   /** Pre-generated examples keyed by word id (local only; not synced) */
@@ -50,6 +67,9 @@ export interface SavedPracticeSession {
   showAnswer: boolean;
   /** 输入填空：是否已点「提示」看整句翻译 */
   hintShown?: boolean;
+  /** 句子翻译：AI 提示阶梯 0–3 */
+  translateHintLevel?: number;
+  translateHints?: { structure: string; keywords: string } | null;
   picked: string | null;
   userText: string;
   judgeResult: {
@@ -71,6 +91,7 @@ export interface PracticeSyncSnapshot {
   savedAt: number;
   mode: PracticeMode;
   scope?: StudyScope;
+  difficulty?: SentenceDifficulty;
   wordIds: string[];
   idx: number;
   stats: { correct: number; total: number };
@@ -81,6 +102,8 @@ export interface PracticeSummary {
   modeLabel: string;
   scope: StudyScope;
   scopeLabel: string;
+  difficulty: SentenceDifficulty;
+  difficultyLabel: string;
   current: number;
   total: number;
   when: string;
@@ -107,11 +130,14 @@ export function getSavedPracticeSummary(): PracticeSummary | null {
   const idx = Math.min(saved.idx || 0, total);
   if (idx >= total) return null;
   const scope = parseStudyScope(saved.scope);
+  const difficulty = parseSentenceDifficulty(saved.difficulty);
   return {
     mode: parsePracticeMode(saved.mode),
     modeLabel: modeLabel(parsePracticeMode(saved.mode)),
     scope,
     scopeLabel: scopeLabel(scope),
+    difficulty,
+    difficultyLabel: difficultyLabel(difficulty),
     current: idx + 1,
     total,
     when: saved.savedAt
@@ -142,6 +168,7 @@ export function getPracticeSyncSnapshot(): PracticeSyncSnapshot | null {
     savedAt: saved.savedAt || Date.now(),
     mode: parsePracticeMode(saved.mode),
     scope: parseStudyScope(saved.scope),
+    difficulty: parseSentenceDifficulty(saved.difficulty),
     wordIds: saved.wordIds.filter(Boolean),
     idx,
     stats: {
@@ -192,6 +219,9 @@ export function normalizePracticeSyncPayload(
     savedAt: typeof o.savedAt === 'number' ? o.savedAt : Date.now(),
     mode: parsePracticeMode(String(o.mode || 'cloze')),
     scope: parseStudyScope(typeof o.scope === 'string' ? o.scope : 'mixed'),
+    difficulty: parseSentenceDifficulty(
+      typeof o.difficulty === 'string' ? o.difficulty : 'medium'
+    ),
     wordIds,
     idx,
     stats,
@@ -209,6 +239,7 @@ export function applyPracticeSyncSnapshot(snap: PracticeSyncSnapshot | null): vo
     savedAt: snap.savedAt || Date.now(),
     mode: parsePracticeMode(snap.mode),
     scope: parseStudyScope(snap.scope),
+    difficulty: parseSentenceDifficulty(snap.difficulty),
     wordIds: snap.wordIds,
     idx: snap.idx,
     examples: {},
@@ -229,12 +260,15 @@ export function applyPracticeSyncSnapshot(snap: PracticeSyncSnapshot | null): vo
 export function savePracticeSession(payload: {
   mode: PracticeMode;
   scope?: StudyScope;
+  difficulty?: SentenceDifficulty;
   sessionWords: Word[];
   idx: number;
   queue: ({ word: Word; example: WordExample; wasNew?: boolean } | null)[];
   stats: { correct: number; total: number };
   showAnswer: boolean;
   hintShown?: boolean;
+  translateHintLevel?: number;
+  translateHints?: { structure: string; keywords: string } | null;
   picked: string | null;
   userText: string;
   judgeResult: SavedPracticeSession['judgeResult'];
@@ -257,12 +291,15 @@ export function savePracticeSession(payload: {
     savedAt: Date.now(),
     mode: payload.mode,
     scope: payload.scope || 'mixed',
+    difficulty: payload.difficulty || 'medium',
     wordIds: payload.sessionWords.map((w) => w.id),
     idx: payload.idx,
     examples,
     stats: payload.stats,
     showAnswer: payload.showAnswer,
     hintShown: !!payload.hintShown,
+    translateHintLevel: Math.max(0, Math.min(3, payload.translateHintLevel ?? 0)),
+    translateHints: payload.translateHints || null,
     picked: payload.picked,
     userText: payload.userText,
     judgeResult: payload.judgeResult,
@@ -282,6 +319,7 @@ export function hydratePracticeSession(
 ): {
   mode: PracticeMode;
   scope: StudyScope;
+  difficulty: SentenceDifficulty;
   sessionWords: Word[];
   queue: ({
     word: Word;
@@ -293,6 +331,8 @@ export function hydratePracticeSession(
   stats: { correct: number; total: number };
   showAnswer: boolean;
   hintShown: boolean;
+  translateHintLevel: number;
+  translateHints: { structure: string; keywords: string } | null;
   picked: string | null;
   userText: string;
   judgeResult: SavedPracticeSession['judgeResult'];
@@ -333,12 +373,15 @@ export function hydratePracticeSession(
   return {
     mode: parsePracticeMode(saved.mode),
     scope: parseStudyScope(saved.scope),
+    difficulty: parseSentenceDifficulty(saved.difficulty),
     sessionWords,
     queue,
     idx: newIdx,
     stats: saved.stats || { correct: 0, total: 0 },
     showAnswer: !!saved.showAnswer,
     hintShown: !!saved.hintShown,
+    translateHintLevel: Math.max(0, Math.min(3, saved.translateHintLevel ?? 0)),
+    translateHints: saved.translateHints || null,
     picked: saved.picked,
     userText: saved.userText || '',
     judgeResult: saved.judgeResult || null,

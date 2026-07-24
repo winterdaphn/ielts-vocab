@@ -2,7 +2,7 @@
 import { RightOutlined, ReloadOutlined } from '@ant-design/icons';
 import { usePracticeSession } from '@/hooks/usePracticeSession';
 import { isClozeFamily } from '@/utils/practiceSelect';
-import { modeLabel, scopeLabel } from '@/utils/practiceSession';
+import { modeLabel, scopeLabel, difficultyLabel } from '@/utils/practiceSession';
 import { sentenceSourceLabel } from '@/api/llm';
 import PracticeHeader from '@/components/practice/PracticeHeader';
 import PracticeModeSelect from '@/components/practice/PracticeModeSelect';
@@ -19,7 +19,7 @@ export default function PracticePage() {
   if (s.phase === 'selecting' && !s.hasModeParam) {
     return (
       <PracticeModeSelect
-        onStart={(m) => s.startPractice(m, s.scope)}
+        onStart={(m) => s.startPractice(m, s.scope, s.difficulty)}
         onBack={() => s.navigate('/today')}
       />
     );
@@ -48,7 +48,7 @@ export default function PracticePage() {
         correct={s.stats.correct}
         total={s.stats.total}
         remaining={s.remainingCount}
-        onContinue={() => s.startPractice(s.mode, s.scope)}
+        onContinue={() => s.startPractice(s.mode, s.scope, s.difficulty)}
         onHome={() => s.navigate('/today')}
       />
     );
@@ -94,6 +94,17 @@ export default function PracticePage() {
           {s.scope !== 'mixed' && (
             <span className="tag tag-learning">{scopeLabel(s.scope)}</span>
           )}
+          <span
+            className={`tag ${
+              s.difficulty === 'easy'
+                ? 'tag-diff-easy'
+                : s.difficulty === 'hard'
+                  ? 'tag-diff-hard'
+                  : 'tag-learning'
+            }`}
+          >
+            {difficultyLabel(s.difficulty)}
+          </span>
           <span
             className={`sentence-source-tag source-${current.source || 'unknown'}`}
             title="本题例句来源（调试）"
@@ -174,7 +185,11 @@ export default function PracticePage() {
             userText={s.userText}
             judgeResult={s.judgeResult}
             judging={judging}
+            hintLevel={s.translateHintLevel}
+            hints={s.translateHints}
+            hintLoading={s.translateHintLoading}
             onUserTextChange={s.setUserText}
+            onHint={s.requestTranslateHint}
             onSubmit={s.submitTranslate}
           />
         )}

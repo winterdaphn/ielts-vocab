@@ -10,8 +10,10 @@ import {
   getClozeExpectedForm,
   generateMnemonicTip,
   analyzeSentenceStructure,
+  generateTranslateHints,
   isLazyMetaSentence,
   type SentenceStructureAnalysis,
+  type TranslateHints,
 } from '@/api/llm';
 import { applyReview, isNew } from '@/utils/scheduler';
 import { setLS, getLS, todayKey } from '@/utils/date';
@@ -23,7 +25,9 @@ import {
   savePracticeSession,
   parsePracticeMode,
   parseStudyScope,
+  parseSentenceDifficulty,
   type StudyScope,
+  type SentenceDifficulty,
 } from '@/utils/practiceSession';
 import {
   exampleFromCache,
@@ -68,6 +72,9 @@ export function usePracticeSession() {
 
   const initialMode: Mode = parsePracticeMode(searchParams.get('mode'));
   const initialScope: StudyScope = parseStudyScope(searchParams.get('scope'));
+  const initialDifficulty: SentenceDifficulty = parseSentenceDifficulty(
+    searchParams.get('difficulty')
+  );
   const hasModeParam = searchParams.has('mode');
   const wantResume = searchParams.get('resume') === '1';
 
@@ -76,12 +83,16 @@ export function usePracticeSession() {
   );
   const [mode, setMode] = useState<Mode>(initialMode);
   const [scope, setScope] = useState<StudyScope>(initialScope);
+  const [difficulty, setDifficulty] = useState<SentenceDifficulty>(initialDifficulty);
   const [sessionWords, setSessionWords] = useState<Word[]>([]);
   const [queue, setQueue] = useState<(Question | null)[]>([]);
   const [idx, setIdx] = useState(0);
   const [picked, setPicked] = useState<string | null>(null);
   const [showAnswer, setShowAnswer] = useState(false);
   const [hintShown, setHintShown] = useState(false);
+  const [translateHintLevel, setTranslateHintLevel] = useState(0);
+  const [translateHints, setTranslateHints] = useState<TranslateHints | null>(null);
+  const [translateHintLoading, setTranslateHintLoading] = useState(false);
   const [mnemonicTip, setMnemonicTip] = useState('');
   const [mnemonicLoading, setMnemonicLoading] = useState(false);
   const [structureTip, setStructureTip] = useState<SentenceStructureAnalysis | null>(null);
@@ -99,6 +110,9 @@ export function usePracticeSession() {
   const startedRef = useRef(false);
   /** Snapshot: word was new when this session started */
   const wasNewRef = useRef<Map<string, boolean>>(new Map());
+  /** Sync copy for fillBatch / prefetch (avoids stale state after setDifficulty) */
+  const difficultyRef = useRef<SentenceDifficulty>(initialDifficulty);
+  difficultyRef.current = difficulty;
 
   const current = queue[idx] || null;
   const total = sessionWords.length;
@@ -126,9 +140,12 @@ export function usePracticeSession() {
     sessionWords: Word[];
     mode: Mode;
     scope: StudyScope;
+    difficulty: SentenceDifficulty;
     stats: { correct: number; total: number };
     showAnswer: boolean;
     hintShown: boolean;
+    translateHintLevel: number;
+    translateHints: TranslateHints | null;
     picked: string | null;
     userText: string;
     judgeResult: JudgeResult;
@@ -136,12 +153,18 @@ export function usePracticeSession() {
     savePracticeSession({
       mode: overrides.mode ?? mode,
       scope: overrides.scope ?? scope,
+      difficulty: overrides.difficulty ?? difficulty,
       sessionWords: overrides.sessionWords ?? sessionWords,
       idx: overrides.idx ?? idx,
       queue: overrides.queue ?? queueRef.current,
       stats: overrides.stats ?? stats,
       showAnswer: overrides.showAnswer ?? showAnswer,
       hintShown: overrides.hintShown ?? hintShown,
+      translateHintLevel: overrides.translateHintLevel ?? translateHintLevel,
+      translateHints:
+        overrides.translateHints !== undefined
+          ? overrides.translateHints
+          : translateHints,
       picked: overrides.picked !== undefined ? overrides.picked : picked,
       userText: overrides.userText ?? userText,
       judgeResult: overrides.judgeResult !== undefined ? overrides.judgeResult : judgeResult,
@@ -172,7 +195,7 @@ export function usePracticeSession() {
       clearPracticeSession();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase, idx, queue, showAnswer, hintShown, picked, userText, judgeResult, stats]);
+  }, [phase, idx, queue, showAnswer, hintShown, translateHintLevel, translateHints, picked, userText, judgeResult, stats]);
 
   // 输入填空：提交后加载 / 生成助记提示（同 example.html）
   useEffect(() => {
@@ -260,7 +283,7 @@ export function usePracticeSession() {
       onHide();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase, idx, queue, showAnswer, hintShown, picked, userText, judgeResult, stats, mode, sessionWords]);
+  }, [phase, idx, queue, showAnswer, hintShown, translateHintLevel, translateHints, picked, userText, judgeResult, stats, mode, sessionWords]);
 
   function toQuestion(
     word: Word,
@@ -281,31 +304,43 @@ export function usePracticeSession() {
     };
   }
 
-  async function fillBatch(sid: number, list: Word[], m: Mode, pool: Word[]) {
+  /** Returns error message if generation failed hard (API / parse). */
+  async function fillBatch(sid: number, list: Word[], m: Mode, pool: Word[]): Promise<string> {
     const todo = list.filter((w) => !inflightRef.current.has(w.id) && !queueRef.current[pool.findIndex((x) => x.id === w.id)]);
-    if (!todo.length) return;
+    if (!todo.length) return '';
     todo.forEach((w) => inflightRef.current.add(w.id));
 
     try {
-      const map = await generatePracticeBatch(todo, llmGenMode(m), settings);
-      if (sessionIdRef.current !== sid) return;
-
-      setQueueBoth((prev) => {
-        const next = [...prev];
-        for (const w of todo) {
-          const i = pool.findIndex((x) => x.id === w.id);
-          if (i < 0 || next[i] || !map[w.id]) continue;
-          next[i] = toQuestion(w, map[w.id], m, pool);
-        }
-        return next;
+      const map = await generatePracticeBatch(todo, llmGenMode(m), settings, {
+        difficulty: difficultyRef.current,
       });
+      if (sessionIdRef.current !== sid) return '';
+
+      const next = [...queueRef.current];
+      for (const w of todo) {
+        const i = pool.findIndex((x) => x.id === w.id);
+        if (i < 0 || next[i] || !map[w.id]) continue;
+        next[i] = toQuestion(w, map[w.id], m, pool);
+      }
+      queueRef.current = next;
+      setQueue(next);
 
       const failed = todo.filter((w) => !map[w.id]);
       if (failed.length) {
         console.warn('[practice] fillBatch missing', failed.map((w) => w.word).join(', '));
       }
+      if (failed.length === todo.length) {
+        return '模型返回的句子未通过校验（过短/过长或模板句），请重试';
+      }
+      return '';
     } catch (e) {
       console.warn('[practice] fillBatch error', e);
+      const msg =
+        e instanceof Error && e.message
+          ? e.message
+          : '出题失败，请检查 API Key / 网络后重试';
+      if (sessionIdRef.current === sid) setGenError(msg);
+      return msg;
     } finally {
       todo.forEach((w) => inflightRef.current.delete(w.id));
     }
@@ -332,6 +367,8 @@ export function usePracticeSession() {
 
     setMode(hydrated.mode);
     setScope(hydrated.scope);
+    setDifficulty(hydrated.difficulty);
+    difficultyRef.current = hydrated.difficulty;
     wasNewRef.current = new Map(
       hydrated.sessionWords.map((w) => [w.id, isNew(w)])
     );
@@ -342,6 +379,9 @@ export function usePracticeSession() {
     setStats(hydrated.stats);
     setShowAnswer(hydrated.showAnswer);
     setHintShown(hydrated.hintShown);
+    setTranslateHintLevel(hydrated.translateHintLevel);
+    setTranslateHints(hydrated.translateHints);
+    setTranslateHintLoading(false);
     setMnemonicTip(hydrated.showAnswer ? (hydrated.queue[hydrated.idx]?.word.mnemonic || '') : '');
     setMnemonicLoading(false);
     setStructureTip(null);
@@ -394,10 +434,17 @@ export function usePracticeSession() {
     })();
   }
 
-  async function startPractice(m: Mode, nextScope?: StudyScope) {
+  async function startPractice(
+    m: Mode,
+    nextScope?: StudyScope,
+    nextDifficulty?: SentenceDifficulty
+  ) {
     clearPracticeSession();
     const s = nextScope ?? scope ?? initialScope;
+    const d = nextDifficulty ?? difficulty ?? initialDifficulty;
     setScope(s);
+    setDifficulty(d);
+    difficultyRef.current = d;
     const pool = pickSessionWords(words, s);
     if (pool.length === 0) {
       message.info(
@@ -426,6 +473,9 @@ export function usePracticeSession() {
     setPicked(null);
     setShowAnswer(false);
     setHintShown(false);
+    setTranslateHintLevel(0);
+    setTranslateHints(null);
+    setTranslateHintLoading(false);
     setMnemonicTip('');
     setMnemonicLoading(false);
     setStructureTip(null);
@@ -440,14 +490,19 @@ export function usePracticeSession() {
     const needLlm: Word[] = [];
     const prefilled = pool.map(() => null as Question | null);
 
+    // easy/hard: skip cached sentences so length/complexity matches difficulty
+    const allowCache = d === 'medium';
+
     for (const w of initial) {
       const i = pool.findIndex((x) => x.id === w.id);
-      const cached = w.examples?.find((ex) => {
-        if (!ex?.en || !ex?.zh) return false;
-        if (isLazyMetaSentence(ex.en, w.word)) return false;
-        if (m === 'choice') return !!(ex.choiceA && ex.answer);
-        return true;
-      });
+      const cached =
+        allowCache &&
+        w.examples?.find((ex) => {
+          if (!ex?.en || !ex?.zh) return false;
+          if (isLazyMetaSentence(ex.en, w.word)) return false;
+          if (m === 'choice') return !!(ex.choiceA && ex.answer);
+          return true;
+        });
       if (cached && m === 'choice' && cached.choiceA) {
         prefilled[i] = {
           word: w,
@@ -480,14 +535,17 @@ export function usePracticeSession() {
     queueRef.current = prefilled;
     setQueue(prefilled);
 
+    let batchErr = '';
     if (needLlm.length) {
-      await fillBatch(sid, needLlm, m, pool);
+      batchErr = await fillBatch(sid, needLlm, m, pool);
     }
     if (sessionIdRef.current !== sid) return;
 
     if (!queueRef.current[0]) {
-      setGenError('出题失败，请检查 API Key / 网络后重试');
-      message.error('出题失败，请检查 API Key / 网络后重试');
+      const detail =
+        batchErr || '出题失败，请检查 API Key / 网络后重试';
+      setGenError(detail);
+      message.error(detail);
       setPhase('loading');
       return;
     }
@@ -595,6 +653,10 @@ export function usePracticeSession() {
 
   async function submitTranslate() {
     if (!current) return;
+    if (translateHintLevel >= 3) {
+      message.info('已显示答案，请点下一题');
+      return;
+    }
     if (!userText.trim()) {
       message.warning('请输入翻译');
       return;
@@ -655,6 +717,9 @@ export function usePracticeSession() {
       setPicked(null);
       setShowAnswer(false);
       setHintShown(false);
+      setTranslateHintLevel(0);
+      setTranslateHints(null);
+      setTranslateHintLoading(false);
       setMnemonicTip('');
       setMnemonicLoading(false);
       setStructureTip(null);
@@ -662,6 +727,51 @@ export function usePracticeSession() {
       setUserText('');
       setJudgeResult(null);
       kickPrefetch(sessionIdRef.current, sessionWords, mode, idx + 1);
+    }
+  }
+
+  async function requestTranslateHint() {
+    if (!current || mode !== 'translate' || judgeResult) return;
+    if (translateHintLoading) return;
+
+    // Level 0 → 1: fetch AI hints once, then show structure
+    if (translateHintLevel <= 0) {
+      setTranslateHintLoading(true);
+      try {
+        const hints =
+          translateHints ||
+          (await generateTranslateHints(
+            current.word.word,
+            current.example.zh,
+            current.example.en,
+            settings
+          ));
+        setTranslateHints(hints);
+        setTranslateHintLevel(1);
+      } catch (e) {
+        message.error('提示生成失败：' + (e instanceof Error ? e.message : '未知错误'));
+      } finally {
+        setTranslateHintLoading(false);
+      }
+      return;
+    }
+
+    // Level 1 → 2: keywords
+    if (translateHintLevel === 1) {
+      setTranslateHintLevel(2);
+      return;
+    }
+
+    // Level 2 → 3: reveal answer (counts as revealed / incorrect for scheduling)
+    if (translateHintLevel === 2) {
+      setTranslateHintLevel(3);
+      setJudgeResult({
+        correct: false,
+        score: 0,
+        feedback: '已显示参考译文',
+        revealed: true,
+      });
+      setStats((s) => ({ correct: s.correct, total: s.total + 1 }));
     }
   }
 
@@ -695,6 +805,9 @@ export function usePracticeSession() {
     setPicked(null);
     setShowAnswer(false);
     setHintShown(false);
+    setTranslateHintLevel(0);
+    setTranslateHints(null);
+    setTranslateHintLoading(false);
     setMnemonicTip('');
     setMnemonicLoading(false);
     setStructureTip(null);
@@ -716,6 +829,7 @@ export function usePracticeSession() {
       const map = await generatePracticeBatch([w], llmGenMode(m), settings, {
         avoidEn: prevEn ? [prevEn] : [],
         diverse: true,
+        difficulty: difficultyRef.current,
       });
       if (sessionIdRef.current !== sid) return;
       if (!map[w.id]) {
@@ -777,6 +891,7 @@ export function usePracticeSession() {
     phase,
     mode,
     scope,
+    difficulty,
     current,
     idx,
     total,
@@ -786,6 +901,9 @@ export function usePracticeSession() {
     picked,
     showAnswer,
     hintShown,
+    translateHintLevel,
+    translateHints,
+    translateHintLoading,
     userText,
     judgeResult,
     mnemonicTip,
@@ -802,6 +920,7 @@ export function usePracticeSession() {
     pickAnswer,
     submitClozeInput,
     submitTranslate,
+    requestTranslateHint,
     next,
     exitPractice,
     regenerateCurrent,

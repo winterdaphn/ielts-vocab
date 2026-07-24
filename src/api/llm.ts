@@ -21,6 +21,37 @@ export interface CallOptions {
 
 export class LLMError extends Error {}
 
+/** Strip markdown fences / leading junk so JSON.parse can succeed. */
+export function parseJsonLoose<T = unknown>(raw: string): T {
+  let s = String(raw || '').trim();
+  if (!s) throw new SyntaxError('empty LLM response');
+
+  const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fence) s = fence[1].trim();
+
+  const startObj = s.indexOf('{');
+  const startArr = s.indexOf('[');
+  let start = -1;
+  if (startObj < 0) start = startArr;
+  else if (startArr < 0) start = startObj;
+  else start = Math.min(startObj, startArr);
+  if (start > 0) s = s.slice(start);
+
+  const endObj = s.lastIndexOf('}');
+  const endArr = s.lastIndexOf(']');
+  const end = Math.max(endObj, endArr);
+  if (end >= 0) s = s.slice(0, end + 1);
+
+  return JSON.parse(s) as T;
+}
+
+function looksLikeJsonModeUnsupported(status: number, body: string): boolean {
+  if (status !== 400 && status !== 422) return false;
+  return /response_format|json_object|json mode|unsupported|unknown parameter|invalid.?param|not support/i.test(
+    body
+  );
+}
+
 export async function callLLM(
   messages: ChatMessage[],
   settings: Settings,
@@ -29,22 +60,43 @@ export async function callLLM(
   if (!settings.apiKey) throw new LLMError('未设置 API Key');
   if (!settings.apiBase) throw new LLMError('未设置 API Base URL');
 
-  const body: Record<string, unknown> = {
-    model: settings.model || PROVIDERS[settings.provider]?.model || 'gpt-4o-mini',
-    messages,
-    temperature: options.temperature ?? 0.7,
-  };
-  if (options.maxTokens) body.max_tokens = options.maxTokens;
-  if (options.jsonMode) body.response_format = { type: 'json_object' };
+  const model = settings.model || PROVIDERS[settings.provider]?.model || 'gpt-4o-mini';
+  const url = settings.apiBase.replace(/\/$/, '') + '/chat/completions';
 
-  const resp = await fetch(settings.apiBase.replace(/\/$/, '') + '/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: 'Bearer ' + settings.apiKey,
-    },
-    body: JSON.stringify(body),
-  });
+  async function post(useJsonMode: boolean): Promise<Response> {
+    const body: Record<string, unknown> = {
+      model,
+      messages,
+      temperature: options.temperature ?? 0.7,
+    };
+    if (options.maxTokens) body.max_tokens = options.maxTokens;
+    if (useJsonMode) body.response_format = { type: 'json_object' };
+
+    return fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer ' + settings.apiKey,
+      },
+      body: JSON.stringify(body),
+    });
+  }
+
+  let usedJson = !!options.jsonMode;
+  let resp = await post(usedJson);
+
+  if (!resp.ok && usedJson) {
+    const errText = await resp.text().catch(() => '');
+    if (looksLikeJsonModeUnsupported(resp.status, errText)) {
+      console.warn(
+        '[llm] response_format/json_object unsupported, retrying without it'
+      );
+      usedJson = false;
+      resp = await post(false);
+    } else {
+      throw new LLMError(`API ${resp.status}: ${errText.slice(0, 200)}`);
+    }
+  }
 
   if (!resp.ok) {
     const text = await resp.text().catch(() => '');
@@ -52,7 +104,15 @@ export async function callLLM(
   }
 
   const data = await resp.json();
-  return data.choices?.[0]?.message?.content ?? '';
+  const content = data.choices?.[0]?.message?.content ?? '';
+  const finish = data.choices?.[0]?.finish_reason;
+  if (finish === 'length') {
+    console.warn('[llm] response truncated (finish_reason=length); raise max_tokens');
+  }
+  if (!String(content).trim()) {
+    throw new LLMError('API 返回空内容，请换模型或检查额度');
+  }
+  return content;
 }
 
 export async function testConnection(settings: Settings): Promise<string> {
@@ -105,7 +165,7 @@ Part of speech: ${word.partOfSpeech || 'N/A'}`;
   );
 
   try {
-    const parsed = JSON.parse(text);
+    const parsed = parseJsonLoose<{ examples?: GeneratedExample[] }>(text);
     if (Array.isArray(parsed.examples)) {
       return parsed.examples.map((e: GeneratedExample) => ({
         en: e.en,
@@ -287,6 +347,71 @@ Return JSON ONLY:
       correct: false,
       expected,
       feedback: `不对，本题答案是「${expected}」`,
+    };
+  }
+}
+
+export type TranslateHints = {
+  /** 大致句型结构（中文，不含完整英文答案） */
+  structure: string;
+  /** 关键词 / 固定搭配（中文说明 + 少量英文词块，勿拼成整句） */
+  keywords: string;
+};
+
+/**
+ * Progressive hints for Chinese→English translation.
+ * Call once; UI reveals structure → keywords → full answer step by step.
+ */
+export async function generateTranslateHints(
+  targetWord: string,
+  chinese: string,
+  referenceEn: string,
+  settings: Settings
+): Promise<TranslateHints> {
+  if (!settings.apiKey) {
+    return {
+      structure: `可先搭出「主语 + 谓语 + 宾语」的骨架，并自然用上「${targetWord}」。`,
+      keywords: `必用词：${targetWord}；其余按中文意思选常用搭配即可。`,
+    };
+  }
+
+  const prompt = `You are an IELTS English tutor. Student must translate Chinese → English and use the target word.
+
+Target word: "${targetWord}"
+Chinese: "${chinese}"
+Reference English (for YOUR eyes only — NEVER copy it into the hints): "${referenceEn}"
+
+Produce TWO progressive hints in Chinese. Do NOT reveal the full English sentence. Do NOT paraphrase the whole reference into English.
+
+1) structure: a rough sentence frame / clause order (e.g. 「主语 + 时间状语 + 谓语 + that 宾语从句」). 1–2 short Chinese sentences. No full English clause.
+2) keywords: 3–6 useful English chunks / collocations (words or short phrases only) with brief Chinese glosses. May include "${targetWord}". Must NOT string them into a complete sentence that matches the answer.
+
+Return JSON ONLY:
+{
+  "structure": "...",
+  "keywords": "..."
+}`;
+
+  const text = await callLLM([{ role: 'user', content: prompt }], settings, {
+    temperature: 0.4,
+    jsonMode: true,
+  });
+
+  try {
+    const parsed = JSON.parse(text) as Partial<TranslateHints>;
+    const structure = String(parsed.structure || '').trim();
+    const keywords = String(parsed.keywords || '').trim();
+    if (!structure && !keywords) throw new Error('empty');
+    return {
+      structure:
+        structure ||
+        `可先搭出「主语 + 谓语 + 宾语」的骨架，并自然用上「${targetWord}」。`,
+      keywords: keywords || `必用词：${targetWord}`,
+    };
+  } catch {
+    return {
+      structure: `可先搭出「主语 + 谓语 + 宾语」的骨架，并自然用上「${targetWord}」。`,
+      keywords: `必用词：${targetWord}；注意时态和常见搭配。`,
     };
   }
 }
@@ -570,11 +695,38 @@ function sanitizeChinese(text: string, word: Word): string {
   return s || `这句话描述的情境与${gloss}有关。`;
 }
 
-function practicePromptRules(mode: 'cloze' | 'translate'): string {
+function practiceDifficultyRules(difficulty: 'easy' | 'medium' | 'hard'): string {
+  if (difficulty === 'easy') {
+    return `LENGTH / DIFFICULTY — EASY (strict):
+- Prefer a SHORT sentence: about 6–12 English words (hard cap ~14).
+- One simple clause only. No commas introducing extra clauses if possible.
+- Everyday vocabulary; A2–B1 feel. No relative clauses, no "although/whereas/despite".
+- Good: "The nurse checked her fever every hour."
+- Bad (too long): "Although the nurse had already checked her fever twice that morning, she returned..."`;
+  }
+  if (difficulty === 'hard') {
+    return `LENGTH / DIFFICULTY — HARD (strict):
+- Write a LONG, complex IELTS-style sentence: aim 22–35 English words (minimum ~18).
+- Use subordination / embedding: relative clauses, participles, or connectors (although, while, which, whose, having...).
+- Keep it natural and concrete — not a definition, not a meta "how to use the word" line.
+- C1 feel: denser syntax, but still one grammatical sentence (or one main + clearly linked subordinate).
+- Good: "Having reviewed the lab samples overnight, the technician flagged a subtle anomaly which the earlier report had overlooked."
+- Bad (too short/simple): "The technician found an anomaly."`;
+  }
+  return `LENGTH / DIFFICULTY — MEDIUM:
+- One clear sentence of roughly 12–20 English words.
+- B1–B2 level, natural and idiomatic (current default style).
+- May include a light modifier or short relative clause, but avoid heavy nesting.`;
+}
+
+function practicePromptRules(
+  mode: 'cloze' | 'translate',
+  difficulty: 'easy' | 'medium' | 'hard' = 'medium'
+): string {
   return `Quality rules (strict):
 - Write ONE natural English sentence in a concrete everyday or IELTS-relevant situation.
 - The target word must carry real meaning — a real scene, not a vocabulary tutorial.
-- B1–B2 level, clear and idiomatic.
+${practiceDifficultyRules(difficulty)}
 - DIVERSITY (critical): each word must use a DIFFERENT topic and setting. Rotate among food, travel, sport, health, family, shopping, nature, media, workplace, city life, science labs, etc. Do NOT reuse the same frame across items.
 
 FORBIDDEN (these are automatic fails):
@@ -603,7 +755,29 @@ export type PracticeGenOptions = {
   avoidEn?: string[];
   /** Higher creativity / stronger diversity reminder */
   diverse?: boolean;
+  /** Sentence length / complexity */
+  difficulty?: 'easy' | 'medium' | 'hard';
 };
+
+function englishWordCount(en: string): number {
+  return en
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean).length;
+}
+
+/** Soft length gate so easy/hard are not ignored by the model.
+ *  Returns false only for extreme mismatches — borderline sentences are kept. */
+function matchesDifficultyLength(
+  en: string,
+  difficulty: 'easy' | 'medium' | 'hard'
+): boolean {
+  const n = englishWordCount(en);
+  // Extreme only — prompt already steers style; rejecting borderline caused "API ok but app fails"
+  if (difficulty === 'easy') return n <= 28;
+  if (difficulty === 'hard') return n >= 10;
+  return true;
+}
 
 /**
  * One LLM request for multiple words (like example.html generateContentBatch).
@@ -618,10 +792,20 @@ export async function generatePracticeBatch(
   if (!words.length) return {};
   const avoidEn = opts?.avoidEn?.filter(Boolean) || [];
   const diverse = opts?.diverse ?? avoidEn.length > 0;
+  const difficulty = opts?.difficulty || 'medium';
 
   const accept = (en: string, word: string) => {
     if (!en || isLazyMetaSentence(en, word) || isStockTemplateSentence(en)) return false;
     if (avoidEn.some((a) => nearlySameSentence(en, a) || en.toLowerCase() === a.toLowerCase())) {
+      return false;
+    }
+    if (!matchesDifficultyLength(en, difficulty)) {
+      console.warn(
+        '[practice] length mismatch',
+        difficulty,
+        englishWordCount(en),
+        en.slice(0, 80)
+      );
       return false;
     }
     return true;
@@ -639,25 +823,34 @@ export async function generatePracticeBatch(
 
   async function generateFor(list: Word[], reinforce: boolean) {
     if (!list.length) return {} as Record<string, PracticeSentence>;
-    try {
-      const raw = await generatePracticeBatchMany(list, mode, settings, {
-        reinforce,
-        avoidEn,
-      });
-      return filterAccepted(raw, list);
-    } catch (e) {
-      console.warn('[practice] LLM batch failed', e);
-      return {} as Record<string, PracticeSentence>;
-    }
+    const raw = await generatePracticeBatchMany(list, mode, settings, {
+      reinforce,
+      avoidEn,
+      difficulty,
+    });
+    return filterAccepted(raw, list);
   }
 
-  // First pass
-  let result = await generateFor(words, diverse);
+  let lastErr: unknown = null;
+  let result: Record<string, PracticeSentence> = {};
+
+  try {
+    result = await generateFor(words, diverse);
+  } catch (e) {
+    lastErr = e;
+    console.warn('[practice] LLM batch failed', e);
+  }
+
   // Retry only missing / rejected words once with stronger diversity
   const missing = words.filter((w) => !result[w.id]);
   if (missing.length) {
-    const retry = await generateFor(missing, true);
-    result = { ...result, ...retry };
+    try {
+      const retry = await generateFor(missing, true);
+      result = { ...result, ...retry };
+    } catch (e) {
+      lastErr = e;
+      console.warn('[practice] LLM retry failed', e);
+    }
   }
 
   const stillMissing = words.filter((w) => !result[w.id]);
@@ -667,6 +860,11 @@ export async function generatePracticeBatch(
       stillMissing.map((w) => w.word).join(', ')
     );
   }
+
+  // If nothing usable and API errored, surface the real reason to the UI
+  if (!Object.keys(result).length && lastErr) {
+    throw lastErr instanceof Error ? lastErr : new LLMError(String(lastErr));
+  }
   return result;
 }
 
@@ -674,10 +872,15 @@ async function generatePracticeBatchMany(
   words: Word[],
   mode: 'cloze' | 'translate',
   settings: Settings,
-  genOpts?: { reinforce?: boolean; avoidEn?: string[] }
+  genOpts?: {
+    reinforce?: boolean;
+    avoidEn?: string[];
+    difficulty?: 'easy' | 'medium' | 'hard';
+  }
 ): Promise<Record<string, PracticeSentence>> {
   const reinforce = !!genOpts?.reinforce;
   const avoidEn = genOpts?.avoidEn?.filter(Boolean) || [];
+  const difficulty = genOpts?.difficulty || 'medium';
   const hints = words.map((w) => wordHintLine(w)).join('\n- ');
   const reinforceBlock = reinforce
     ? `\nIMPORTANT: Prefer fresh, non-repetitive scenes. Do NOT write about "using the word". Avoid Writing Task 2 / survey / critics / remote-work clichés.\n`
@@ -685,15 +888,21 @@ async function generatePracticeBatchMany(
   const avoidBlock = avoidEn.length
     ? `\nDo NOT reuse or lightly paraphrase these previous sentences:\n${avoidEn.map((s) => `- ${s}`).join('\n')}\n`
     : '';
+  const difficultyNudge =
+    difficulty === 'easy'
+      ? `\nREMINDER: Keep each English sentence SHORT (≈6–12 words).\n`
+      : difficulty === 'hard'
+        ? `\nREMINDER: Each English sentence must be LONG and complex (≈22–35 words) with clear subordination.\n`
+        : '';
 
   const prompt =
     mode === 'translate'
       ? `You are an English vocabulary tutor for an IELTS test taker.
-${reinforceBlock}${avoidBlock}
+${reinforceBlock}${avoidBlock}${difficultyNudge}
 Create a Chinese-to-English translation exercise for EACH target word below:
 - ${hints}
 
-${practicePromptRules('translate')}
+${practicePromptRules('translate', difficulty)}
 
 Return JSON EXACTLY:
 {
@@ -701,13 +910,14 @@ Return JSON EXACTLY:
     {"word": "example", "translateChinese": "...", "translateReference": "..."}
   ]
 }
-Include exactly one item per word, using the same spelling as given.`
+Include exactly one item per word, using the same spelling as given.
+CRITICAL: the "items" array length MUST equal the number of target words. Do NOT output multiple items for the same word.`
       : `You are an English vocabulary tutor for an IELTS test taker.
-${reinforceBlock}${avoidBlock}
+${reinforceBlock}${avoidBlock}${difficultyNudge}
 Create a cloze (fill-in-the-blank) exercise for EACH target word below:
 - ${hints}
 
-${practicePromptRules('cloze')}
+${practicePromptRules('cloze', difficulty)}
 
 Return JSON EXACTLY:
 {
@@ -715,33 +925,66 @@ Return JSON EXACTLY:
     {"word": "example", "clozeEnglish": "...", "clozeChinese": "..."}
   ]
 }
-Include exactly one item per word, using the same spelling as given.`;
+Include exactly one item per word, using the same spelling as given.
+CRITICAL: the "items" array length MUST equal the number of target words (${words.length}). Do NOT output multiple items for the same word.`;
+
+  // glm-4-flash 等模型默认 completion 常卡在 500，多词/多句时 JSON 会被截断
+  const maxTokens = Math.max(2048, 600 + words.length * 280);
 
   const text = await callLLM([{ role: 'user', content: prompt }], settings, {
     temperature: reinforce || avoidEn.length ? 0.95 : 0.9,
     jsonMode: true,
+    maxTokens,
   });
 
   let parsed: { items?: Array<Record<string, string>> };
   try {
-    parsed = JSON.parse(text);
+    parsed = parseJsonLoose(text);
   } catch (e) {
-    console.warn('[practice] LLM JSON parse failed', String(text).slice(0, 200), e);
-    return {};
+    console.warn('[practice] LLM JSON parse failed', String(text).slice(0, 280), e);
+    throw new LLMError('出题返回不是合法 JSON（可能被截断），请重试');
   }
 
   const items = Array.isArray(parsed?.items) ? parsed.items : [];
   if (!items.length) {
-    console.warn('[practice] LLM returned empty items', String(text).slice(0, 200));
+    console.warn('[practice] LLM returned empty items', String(text).slice(0, 280));
+    throw new LLMError('出题返回空题目，请重试或换模型');
   }
+
+  // First item wins per word key (model sometimes dumps many variants of one word)
   const byWord: Record<string, Record<string, string>> = {};
   for (const it of items) {
-    if (it?.word) byWord[String(it.word).toLowerCase()] = it;
+    const key = String(it?.word || '')
+      .toLowerCase()
+      .trim();
+    if (!key || byWord[key]) continue;
+    byWord[key] = it;
+  }
+
+  function pickRaw(w: Word): Record<string, string> | null {
+    const key = w.word.toLowerCase().trim();
+    if (byWord[key]) return byWord[key];
+    // fuzzy word field (inflection / extra spaces)
+    for (const [k, it] of Object.entries(byWord)) {
+      if (k === key || k.startsWith(key) || key.startsWith(k)) return it;
+    }
+    // single-word request: take first item whose English contains the target
+    if (words.length === 1) {
+      for (const it of items) {
+        const en =
+          mode === 'translate'
+            ? String(it.translateReference || '')
+            : String(it.clozeEnglish || '');
+        if (en && sentenceHasWord(en, w.word)) return it;
+      }
+      return items[0] || null;
+    }
+    return null;
   }
 
   const result: Record<string, PracticeSentence> = {};
   for (const w of words) {
-    const raw = byWord[w.word.toLowerCase()];
+    const raw = pickRaw(w);
     if (!raw) continue;
     if (mode === 'translate') {
       let zh = String(raw.translateChinese || '').trim();
@@ -759,6 +1002,28 @@ Include exactly one item per word, using the same spelling as given.`;
       result[w.id] = { en, zh, source: 'llm' };
     }
   }
+
+  // Still empty but items exist → last-resort: bind first usable sentence to each missing word
+  if (Object.keys(result).length === 0 && items.length && words.length === 1) {
+    const w = words[0];
+    for (const it of items) {
+      const en =
+        mode === 'translate'
+          ? String(it.translateReference || '').trim()
+          : String(it.clozeEnglish || '').trim();
+      let zh =
+        mode === 'translate'
+          ? String(it.translateChinese || '').trim()
+          : String(it.clozeChinese || '').trim();
+      if (!en || !zh) continue;
+      if (!sentenceHasWord(en, w.word)) continue;
+      if (isLazyMetaSentence(en, w.word) || isStockTemplateSentence(en)) continue;
+      if (!chineseIsFullyChinese(zh, w.word)) zh = sanitizeChinese(zh, w);
+      result[w.id] = { en, zh, source: 'llm' };
+      break;
+    }
+  }
+
   return result;
 }
 
