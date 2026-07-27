@@ -50,7 +50,7 @@ export default function PracticePage() {
         total={s.stats.total}
         remaining={s.remainingCount}
         onContinue={() => s.startPractice(s.mode, s.scope, s.difficulty)}
-        onHome={() => s.navigate('/today')}
+        onHome={s.exitPractice}
       />
     );
   }
@@ -59,7 +59,7 @@ export default function PracticePage() {
     return (
       <div className="app-card empty">
         <h3>没有题目</h3>
-        <Button type="primary" className="mt-3" onClick={() => s.navigate('/today')}>
+        <Button type="primary" className="mt-3" onClick={s.exitPractice}>
           返回
         </Button>
       </div>

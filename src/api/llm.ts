@@ -6,7 +6,7 @@
 import type { Settings } from '@/types/settings';
 import type { Word } from '@/types/word';
 import { PROVIDERS } from '@/config/providers';
-import { areInflectionVariants } from '@/utils/inflections';
+import { areInflectionVariants, findInflectedFormInSentence } from '@/utils/inflections';
 
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
@@ -17,6 +17,7 @@ export interface CallOptions {
   temperature?: number;
   maxTokens?: number;
   jsonMode?: boolean;
+  signal?: AbortSignal;
 }
 
 export class LLMError extends Error {}
@@ -79,7 +80,12 @@ export async function callLLM(
         Authorization: 'Bearer ' + settings.apiKey,
       },
       body: JSON.stringify(body),
+      signal: options.signal,
     });
+  }
+
+  if (options.signal?.aborted) {
+    throw new DOMException('Aborted', 'AbortError');
   }
 
   let usedJson = !!options.jsonMode;
@@ -258,6 +264,9 @@ Return JSON ONLY:
 export function getClozeExpectedForm(targetWord: string, sentence: string): string {
   const w = targetWord.trim();
   if (!w || !sentence) return w;
+  // Prefer the actual token in the sentence (embracing → embraced)
+  const found = findInflectedFormInSentence(sentence, w);
+  if (found) return found;
   const esc = w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const re = new RegExp(
     '\\b' + esc + '(?:s|es|ed|ing|ings|er|ers|est|ly|ies|ied)?\\b',
@@ -557,8 +566,8 @@ function glossSnippet(word: Word): string {
   return t || '该词';
 }
 
-/** Chinese cloze hint must not leave blank underlines (____) instead of the gloss. */
-const CLOZE_ZH_BLANK_RE = /_{2,}|—{2,}|–{2,}|…{2,}|\.{3,}/g;
+/** Chinese cloze hint must not leave blank underlines (_ / ____) instead of the gloss. */
+const CLOZE_ZH_BLANK_RE = /_{1,}|—{2,}|–{2,}|…{2,}|\.{3,}/g;
 
 function hasClozeZhBlank(text: string): boolean {
   CLOZE_ZH_BLANK_RE.lastIndex = 0;
@@ -566,7 +575,7 @@ function hasClozeZhBlank(text: string): boolean {
 }
 
 function fillClozeZhBlanks(text: string, gloss: string): string {
-  return text.replace(/_{2,}|—{2,}|–{2,}|…{2,}|\.{3,}/g, gloss);
+  return text.replace(/_{1,}|—{2,}|–{2,}|…{2,}|\.{3,}/g, gloss);
 }
 
 /** Fill blank placeholders in Chinese hint with 词义 (no corner brackets). */
@@ -660,11 +669,37 @@ const STOP_FOR_SIM = new Set([
 function sentenceHasWord(sentence: string, word: string): boolean {
   const w = word.trim();
   if (!w || !sentence) return false;
+  // embracing ↔ embraced ↔ embraces ↔ embrace
+  if (findInflectedFormInSentence(sentence, w)) return true;
+  // Fallback: target + common suffixes still glued on (rare)
   const esc = escapeReg(w);
   return new RegExp(
     '\\b' + esc + '(?:s|es|ed|ing|ings|er|ers|est|ly|ies|ied)?\\b',
     'i'
   ).test(sentence);
+}
+
+/**
+ * English blank tokens LLMs often emit instead of the target word:
+ * `_` / `____` / `_______` / `...` / `[blank]`
+ */
+const CLOZE_EN_BLANK_RE =
+  /(?:(?<=\s)|^)(?:_{1,}|…{2,}|\.{3,}|—{2,}|–{2,}|\[\s*blank\s*\]|\[\s*\])(?=\s|[.,!?;:'"”)\]}]|$)/i;
+
+function hasEnglishClozeBlank(text: string): boolean {
+  CLOZE_EN_BLANK_RE.lastIndex = 0;
+  return CLOZE_EN_BLANK_RE.test(text);
+}
+
+/** If model blanked the target word, put `word` back so downstream blanking/judging works. */
+export function restoreClozeEnglishWord(en: string, word: string): string {
+  const sentence = String(en || '').trim();
+  const w = String(word || '').trim();
+  if (!sentence || !w) return sentence;
+  if (sentenceHasWord(sentence, w)) return sentence;
+  if (!hasEnglishClozeBlank(sentence)) return sentence;
+  CLOZE_EN_BLANK_RE.lastIndex = 0;
+  return sentence.replace(CLOZE_EN_BLANK_RE, w);
 }
 
 /** Chinese prompt must not contain English words or blank underlines (match example.html). */
@@ -746,9 +781,9 @@ ${
   mode === 'translate'
     ? `- translateChinese MUST be fully Chinese (no English/Latin words; do not leave the target word in Chinese)
 - translateReference MUST contain the exact target word (or a common inflection) as a standalone word`
-    : `- clozeEnglish MUST contain the exact target word (or a common inflection) as a standalone word
+    : `- clozeEnglish MUST contain the exact target word (or a common inflection) as a standalone word — write the REAL WORD, never replace it with _ / ____ / _______ / [blank]
 - clozeChinese MUST be a full Chinese translation (no English/Latin words; do not leave the target word in Chinese)
-- clozeChinese MUST translate the blank/target word into Chinese naturally — never use ____ blanks, and do not wrap the Chinese gloss in corner brackets`
+- clozeChinese MUST translate the blank/target word into Chinese naturally — never use _ / ____ blanks, and do not wrap the Chinese gloss in corner brackets`
 }`;
 }
 
@@ -759,6 +794,10 @@ export type PracticeGenOptions = {
   diverse?: boolean;
   /** Sentence length / complexity */
   difficulty?: 'easy' | 'medium' | 'hard';
+  /** Abort in-flight LLM requests (e.g. leave practice page) */
+  signal?: AbortSignal;
+  /** Skip the automatic one-shot retry for missing words */
+  noRetry?: boolean;
 };
 
 function englishWordCount(en: string): number {
@@ -825,10 +864,14 @@ export async function generatePracticeBatch(
 
   async function generateFor(list: Word[], reinforce: boolean) {
     if (!list.length) return {} as Record<string, PracticeSentence>;
+    if (opts?.signal?.aborted) {
+      throw new DOMException('Aborted', 'AbortError');
+    }
     const raw = await generatePracticeBatchMany(list, mode, settings, {
       reinforce,
       avoidEn,
       difficulty,
+      signal: opts?.signal,
     });
     return filterAccepted(raw, list);
   }
@@ -840,17 +883,19 @@ export async function generatePracticeBatch(
     result = await generateFor(words, diverse);
   } catch (e) {
     lastErr = e;
+    if ((e as { name?: string })?.name === 'AbortError') throw e;
     console.warn('[practice] LLM batch failed', e);
   }
 
   // Retry only missing / rejected words once with stronger diversity
   const missing = words.filter((w) => !result[w.id]);
-  if (missing.length) {
+  if (missing.length && !opts?.noRetry && !opts?.signal?.aborted) {
     try {
       const retry = await generateFor(missing, true);
       result = { ...result, ...retry };
     } catch (e) {
       lastErr = e;
+      if ((e as { name?: string })?.name === 'AbortError') throw e;
       console.warn('[practice] LLM retry failed', e);
     }
   }
@@ -878,6 +923,7 @@ async function generatePracticeBatchMany(
     reinforce?: boolean;
     avoidEn?: string[];
     difficulty?: 'easy' | 'medium' | 'hard';
+    signal?: AbortSignal;
   }
 ): Promise<Record<string, PracticeSentence>> {
   const reinforce = !!genOpts?.reinforce;
@@ -937,6 +983,7 @@ CRITICAL: the "items" array length MUST equal the number of target words (${word
     temperature: reinforce || avoidEn.length ? 0.95 : 0.9,
     jsonMode: true,
     maxTokens,
+    signal: genOpts?.signal,
   });
 
   let parsed: { items?: Array<Record<string, string>> };
@@ -970,14 +1017,15 @@ CRITICAL: the "items" array length MUST equal the number of target words (${word
     for (const [k, it] of Object.entries(byWord)) {
       if (k === key || k.startsWith(key) || key.startsWith(k)) return it;
     }
-    // single-word request: take first item whose English contains the target
+    // single-word request: take first item whose English contains the target (or a blank slot)
     if (words.length === 1) {
       for (const it of items) {
         const en =
           mode === 'translate'
             ? String(it.translateReference || '')
-            : String(it.clozeEnglish || '');
+            : restoreClozeEnglishWord(String(it.clozeEnglish || ''), w.word);
         if (en && sentenceHasWord(en, w.word)) return it;
+        if (mode === 'cloze' && hasEnglishClozeBlank(String(it.clozeEnglish || ''))) return it;
       }
       return items[0] || null;
     }
@@ -996,7 +1044,7 @@ CRITICAL: the "items" array length MUST equal the number of target words (${word
       if (!chineseIsFullyChinese(zh, w.word)) zh = sanitizeChinese(zh, w);
       result[w.id] = { zh, en, source: 'llm' };
     } else {
-      const en = String(raw.clozeEnglish || '').trim();
+      let en = restoreClozeEnglishWord(String(raw.clozeEnglish || '').trim(), w.word);
       let zh = String(raw.clozeChinese || '').trim();
       if (!zh || !en || !sentenceHasWord(en, w.word)) continue;
       if (isLazyMetaSentence(en, w.word) || isStockTemplateSentence(en)) continue;
@@ -1009,10 +1057,10 @@ CRITICAL: the "items" array length MUST equal the number of target words (${word
   if (Object.keys(result).length === 0 && items.length && words.length === 1) {
     const w = words[0];
     for (const it of items) {
-      const en =
+      let en =
         mode === 'translate'
           ? String(it.translateReference || '').trim()
-          : String(it.clozeEnglish || '').trim();
+          : restoreClozeEnglishWord(String(it.clozeEnglish || '').trim(), w.word);
       let zh =
         mode === 'translate'
           ? String(it.translateChinese || '').trim()
