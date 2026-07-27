@@ -476,6 +476,8 @@ Output ONLY valid JSON.`;
 
 export async function lookupWordInfo(word: string, settings: Settings): Promise<{
   phonetic?: string;
+  phoneticUs?: string;
+  phoneticUk?: string;
   partOfSpeech?: string;
   translation?: string;
   mnemonic?: string;
@@ -485,8 +487,8 @@ export async function lookupWordInfo(word: string, settings: Settings): Promise<
       {
         role: 'system',
         content: `You are an IELTS vocabulary assistant. Given an English word, output JSON:
-{ "phonetic": "IPA in /.../", "partOfSpeech": "n./v./adj./adv.", "translation": "最常见的中文释义", "mnemonic": "a short Chinese memory aid (≤20字)" }
-Output ONLY valid JSON.`,
+{ "phoneticUs": "General American IPA in /.../", "phoneticUk": "British IPA in /.../", "phonetic": "prefer British IPA in /.../", "partOfSpeech": "n./v./adj./adv.", "translation": "最常见的中文释义", "mnemonic": "a short Chinese memory aid (≤20字)" }
+If US and UK are the same, still fill both. Output ONLY valid JSON.`,
       },
       { role: 'user', content: word },
     ],

@@ -13,6 +13,8 @@ interface WordsState {
   loaded: boolean;
   setWords: (w: Word[]) => void;
   addWord: (w: Word) => Promise<void>;
+  /** Bulk insert without clearing existing rows. */
+  addWords: (words: Word[]) => Promise<void>;
   updateWord: (w: Word) => Promise<void>;
   removeWord: (id: string) => Promise<void>;
   clearForUser: (userId: string) => Promise<void>;
@@ -28,6 +30,12 @@ export const useWordsStore = create<WordsState>((set) => ({
   addWord: async (w) => {
     const row: WordRow = { ...w, userId: useAuth.getState().username };
     await dbPut(row);
+  },
+  addWords: async (words) => {
+    const userId = useAuth.getState().username;
+    if (!userId || words.length === 0) return;
+    const rows: WordRow[] = words.map((w) => ({ ...w, userId }));
+    await db.words.bulkPut(rows);
   },
   updateWord: async (w) => {
     const row: WordRow = { ...w, userId: useAuth.getState().username };
@@ -72,6 +80,8 @@ export function makeNewWord(input: Partial<Word> & { word: string; translation?:
     word: input.word.trim(),
     translation: (input.translation || '').trim(),
     phonetic: input.phonetic || '',
+    phoneticUs: input.phoneticUs || '',
+    phoneticUk: input.phoneticUk || '',
     partOfSpeech: input.partOfSpeech || '',
     mnemonic: input.mnemonic || '',
     examples: input.examples || [],

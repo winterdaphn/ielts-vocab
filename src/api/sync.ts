@@ -39,6 +39,8 @@ function normalizeCloudWord(raw: Partial<Word> & { word?: string }): Word | null
     word: String(raw.word),
     translation: String(raw.translation || ''),
     phonetic: raw.phonetic || '',
+    phoneticUs: raw.phoneticUs || '',
+    phoneticUk: raw.phoneticUk || '',
     partOfSpeech: raw.partOfSpeech || '',
     mnemonic: raw.mnemonic || '',
     examples: Array.isArray(raw.examples) ? raw.examples : [],

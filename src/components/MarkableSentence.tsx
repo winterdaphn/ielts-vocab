@@ -75,6 +75,8 @@ export default function MarkableSentence({
     try {
       let translation = '';
       let phonetic = '';
+      let phoneticUs = '';
+      let phoneticUk = '';
       let partOfSpeech = '';
 
       // Free dictionary API (same as example.html)
@@ -86,6 +88,12 @@ export default function MarkableSentence({
           const data = await resp.json();
           if (Array.isArray(data) && data[0]) {
             phonetic = data[0].phonetic || data[0].phonetics?.find((p: { text?: string }) => p.text)?.text || '';
+            for (const p of data[0].phonetics || []) {
+              const t = p?.text || '';
+              const a = p?.audio || '';
+              if (t && /-us\b|_us_|en-us|us\.mp3/i.test(a) && !phoneticUs) phoneticUs = t;
+              if (t && /-uk\b|_uk_|en-uk|uk\.mp3/i.test(a) && !phoneticUk) phoneticUk = t;
+            }
             partOfSpeech = data[0].meanings?.[0]?.partOfSpeech || '';
             const def = data[0].meanings?.[0]?.definitions?.[0]?.definition;
             if (def) translation = def;
@@ -99,6 +107,8 @@ export default function MarkableSentence({
         try {
           const info = await lookupWordInfo(word, settings);
           if (info.translation) translation = info.translation;
+          if (info.phoneticUs) phoneticUs = phoneticUs || info.phoneticUs;
+          if (info.phoneticUk) phoneticUk = phoneticUk || info.phoneticUk;
           if (info.phonetic) phonetic = phonetic || info.phonetic;
           if (info.partOfSpeech) partOfSpeech = partOfSpeech || info.partOfSpeech;
         } catch {
@@ -107,6 +117,7 @@ export default function MarkableSentence({
       }
 
       if (!translation) translation = '（待补充释义）';
+      phonetic = phonetic || phoneticUk || phoneticUs;
 
       if (related?.entry?.crossedOut) {
         await updateWord({
@@ -114,6 +125,8 @@ export default function MarkableSentence({
           crossedOut: false,
           translation,
           phonetic: phonetic || related.entry.phonetic,
+          phoneticUs: phoneticUs || related.entry.phoneticUs,
+          phoneticUk: phoneticUk || related.entry.phoneticUk,
           partOfSpeech: partOfSpeech || related.entry.partOfSpeech,
           nextReview: Date.now(),
         });
@@ -123,6 +136,8 @@ export default function MarkableSentence({
             word,
             translation,
             phonetic,
+            phoneticUs,
+            phoneticUk,
             partOfSpeech,
           })
         );

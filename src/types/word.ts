@@ -3,6 +3,10 @@ export interface Word {
   word: string;
   translation: string;
   phonetic?: string;
+  /** US IPA, e.g. /ˈdætə/ */
+  phoneticUs?: string;
+  /** UK IPA, e.g. /ˈdeɪtə/ */
+  phoneticUk?: string;
   partOfSpeech?: string;
   mnemonic?: string;
   examples: WordExample[];

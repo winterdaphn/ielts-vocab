@@ -4,6 +4,7 @@ import { useSettings } from '@/store/useSettings';
 import { useWordsStore, makeNewWord, useUserWords } from '@/store/useWords';
 import { areInflectionVariants } from '@/utils/inflections';
 import { lookupWordInfo } from '@/api/llm';
+import PhoneticDisplay from '@/components/PhoneticDisplay';
 
 export default function AddPage() {
   const { message } = App.useApp();
@@ -13,16 +14,20 @@ export default function AddPage() {
   const [word, setWord] = useState('');
   const [translation, setTranslation] = useState('');
   const [phonetic, setPhonetic] = useState('');
+  const [phoneticUs, setPhoneticUs] = useState('');
+  const [phoneticUk, setPhoneticUk] = useState('');
   const [partOfSpeech, setPartOfSpeech] = useState('');
   const [mnemonic, setMnemonic] = useState('');
   const [generating, setGenerating] = useState(false);
 
-  const hasPreview = !!(translation || phonetic);
+  const hasPreview = !!(translation || phonetic || phoneticUs || phoneticUk);
 
   function clearAll() {
     setWord('');
     setTranslation('');
     setPhonetic('');
+    setPhoneticUs('');
+    setPhoneticUk('');
     setPartOfSpeech('');
     setMnemonic('');
   }
@@ -40,7 +45,11 @@ export default function AddPage() {
     try {
       const info = await lookupWordInfo(word.trim(), settings);
       if (info.translation) setTranslation(info.translation);
+      if (info.phoneticUs) setPhoneticUs(info.phoneticUs);
+      if (info.phoneticUk) setPhoneticUk(info.phoneticUk);
       if (info.phonetic) setPhonetic(info.phonetic);
+      else if (info.phoneticUk) setPhonetic(info.phoneticUk);
+      else if (info.phoneticUs) setPhonetic(info.phoneticUs);
       if (info.partOfSpeech) setPartOfSpeech(info.partOfSpeech);
       if (info.mnemonic) setMnemonic(info.mnemonic);
       message.success('已自动填充');
@@ -64,7 +73,9 @@ export default function AddPage() {
     const w = makeNewWord({
       word: word.trim(),
       translation: translation.trim(),
-      phonetic: phonetic.trim(),
+      phonetic: phonetic.trim() || phoneticUk.trim() || phoneticUs.trim(),
+      phoneticUs: phoneticUs.trim(),
+      phoneticUk: phoneticUk.trim(),
       partOfSpeech: partOfSpeech.trim(),
       mnemonic: mnemonic.trim(),
     });
@@ -120,7 +131,10 @@ export default function AddPage() {
             <div className="word-main">
               <div className="word-row">
                 <span className="word">{word}</span>
-                {phonetic && <span className="phonetic">{phonetic}</span>}
+                <PhoneticDisplay
+                  word={{ word, phonetic, phoneticUs, phoneticUk }}
+                  withSpeak
+                />
               </div>
               <span className="translation">{translation}</span>
             </div>
