@@ -139,7 +139,7 @@ export default function PracticePage() {
                 </>
               )}
             </div>
-            {(current.word.phonetic || current.word.phoneticUs || current.word.phoneticUk) && (
+            {(current.word.phoneticUs || current.word.phoneticUk || current.word.phonetic) && (
               <div style={{ color: 'var(--text-light)', fontSize: 13, marginBottom: 4 }}>
                 <PhoneticDisplay word={current.word} withSpeak />
                 {current.word.partOfSpeech ? (

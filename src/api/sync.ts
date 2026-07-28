@@ -14,7 +14,7 @@
 import type { Settings } from '@/types/settings';
 import type { Word } from '@/types/word';
 import { decryptJSON, encryptJSON, type EncryptedPayload } from '@/api/crypto';
-import { fetchAll, pushAll, type SyncPayload } from '@/api/cloud';
+import { downloadAll, uploadAll, type SyncPayload } from '@/api/cloud';
 import { useWordsStore, makeNewWord } from '@/store/useWords';
 import { useSettings } from '@/store/useSettings';
 import { getLS, setLS, lsKey } from '@/utils/date';
@@ -38,10 +38,16 @@ function normalizeCloudWord(raw: Partial<Word> & { word?: string }): Word | null
     id: raw.id,
     word: String(raw.word),
     translation: String(raw.translation || ''),
-    phonetic: raw.phonetic || '',
     phoneticUs: raw.phoneticUs || '',
     phoneticUk: raw.phoneticUk || '',
+    // legacy single IPA → makeNewWord migrates into Us/Uk
+    phonetic: raw.phonetic || '',
     partOfSpeech: raw.partOfSpeech || '',
+    category: Array.isArray(raw.category)
+      ? raw.category
+      : raw.category
+        ? [String(raw.category)]
+        : [],
     mnemonic: raw.mnemonic || '',
     synonyms: Array.isArray(raw.synonyms) ? raw.synonyms : [],
     similars: Array.isArray(raw.similars) ? raw.similars : [],
@@ -247,7 +253,7 @@ export async function pullFromCloud(
   username: string,
   password: string
 ): Promise<ApplySyncResult> {
-  const data = await fetchAll(settings, username);
+  const data = await downloadAll(settings, username);
   if (!data) {
     return {
       added: 0,
@@ -272,7 +278,7 @@ export async function pushToCloud(
   password: string
 ): Promise<SyncPayload> {
   const payload = await buildSyncPayload(words, settings, password, username);
-  await pushAll(settings, username, payload);
+  await uploadAll(settings, username, payload);
   useSettings.getState().update({ lastSyncAt: Date.now() });
   return payload;
 }

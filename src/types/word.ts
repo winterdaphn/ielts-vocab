@@ -19,6 +19,7 @@ export interface Word {
   id: string;
   word: string;
   translation: string;
+  /** @deprecated legacy single IPA; prefer phoneticUs / phoneticUk. Kept for old sync data. */
   phonetic?: string;
   /** US IPA, e.g. /ˈdætə/ */
   phoneticUs?: string;
@@ -26,6 +27,8 @@ export interface Word {
   phoneticUk?: string;
   partOfSpeech?: string;
   mnemonic?: string;
+  /** 主题分组（真经预置 + 自定义），如 ["01_自然地理"] */
+  category?: string[];
   /** Near-synonyms for richer expression */
   synonyms?: RelatedWord[];
   /** Orthographic look-alikes only (形近词), not sound-alikes or semantic near-misses */

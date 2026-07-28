@@ -44,11 +44,24 @@ export default function RelatedWordsList({
 }
 
 export function relatedSummaryLine(
-  synonyms?: RelatedWord[] | null,
-  similars?: RelatedWord[] | null
+  synonyms?: RelatedWord[] | null | unknown,
+  similars?: RelatedWord[] | null | unknown
 ): string {
-  const syn = (synonyms || []).map((s) => s.word).filter(Boolean);
-  const sim = (similars || []).map((s) => s.word).filter(Boolean);
+  const toWords = (list: unknown): string[] => {
+    if (!Array.isArray(list)) return [];
+    return list
+      .map((s) => {
+        if (!s) return '';
+        if (typeof s === 'string') return s.trim();
+        if (typeof s === 'object' && s !== null && 'word' in s) {
+          return String((s as RelatedWord).word || '').trim();
+        }
+        return '';
+      })
+      .filter(Boolean);
+  };
+  const syn = toWords(synonyms);
+  const sim = toWords(similars);
   const parts: string[] = [];
   if (syn.length) parts.push(`近: ${syn.slice(0, 3).join(' / ')}`);
   if (sim.length) parts.push(`形近: ${sim.slice(0, 3).join(' / ')}`);

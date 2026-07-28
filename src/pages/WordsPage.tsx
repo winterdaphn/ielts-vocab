@@ -1,7 +1,10 @@
-import { useState, useMemo } from 'react';
-import { Popconfirm, App } from 'antd';
+import { useState, useMemo, useRef, memo, useCallback, useEffect } from 'react';
+import { Popconfirm, App, Select, Input } from 'antd';
+import { SearchOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { useUserWords, useWordsStore } from '@/store/useWords';
+import { useCategories } from '@/store/useCategories';
 import {
   isDue,
   isNew,
@@ -10,11 +13,16 @@ import {
   wordStageLabel,
   wordStageClass,
 } from '@/utils/scheduler';
-import { relatedSummaryLine } from '@/components/RelatedWordsList';
 import type { Word } from '@/types/word';
 import PhoneticDisplay from '@/components/PhoneticDisplay';
+import LetterIndexBar from '@/components/LetterIndexBar';
+import { categoryLabel, normalizeCategories, TOPIC_CATEGORIES, FUNCTION_CATEGORIES } from '@/config/categories';
 
 type Filter = 'all' | 'due' | 'new' | 'learning' | 'mastered' | 'crossed';
+
+type ListRow =
+  | { type: 'header'; letter: string; key: string }
+  | { type: 'word'; word: Word; key: string };
 
 function matchesFilter(w: Word, filter: Filter): boolean {
   if (filter === 'all') return true;
@@ -29,22 +37,119 @@ function matchesFilter(w: Word, filter: Filter): boolean {
   return true;
 }
 
+function wordInCategory(w: Word, cat: string | null): boolean {
+  if (!cat) return true;
+  if (cat === '__none__') return normalizeCategories(w.category).length === 0;
+  return normalizeCategories(w.category).includes(cat);
+}
+
+function wordInitial(word: string): string {
+  const ch = word.trim().charAt(0).toUpperCase();
+  return ch >= 'A' && ch <= 'Z' ? ch : '#';
+}
+
+const WordListRow = memo(function WordListRow({
+  w,
+  onOpen,
+  onToggleCrossed,
+  onDelete,
+}: {
+  w: Word;
+  onOpen: (id: string) => void;
+  onToggleCrossed: (w: Word, e: React.MouseEvent) => void;
+  onDelete: (id: string) => void;
+}) {
+  const stage = getWordStage(w);
+
+  return (
+    <div
+      className={`word-list-item ${w.crossedOut ? 'crossed' : ''}`}
+      role="button"
+      tabIndex={0}
+      onClick={() => onOpen(w.id)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onOpen(w.id);
+        }
+      }}
+    >
+      <div className="word-main">
+        <div className="word-row">
+          <span className="word">{w.word}</span>
+          <PhoneticDisplay word={w} withSpeak />
+        </div>
+        <div className={`translation ${w.translation ? '' : 'mute'}`}>
+          {w.translation || '暂无翻译'}
+        </div>
+      </div>
+      <div className="meta">
+        <div className="tags">
+          <span className={wordStageClass(stage)}>{wordStageLabel(stage)}</span>
+        </div>
+        <div className="actions" onClick={(e) => e.stopPropagation()}>
+          <button
+            type="button"
+            title={w.crossedOut ? '恢复' : '划掉'}
+            onClick={(e) => onToggleCrossed(w, e)}
+          >
+            {w.crossedOut ? '↩' : '−'}
+          </button>
+          <Popconfirm
+            title="确定删除？"
+            onConfirm={() => onDelete(w.id)}
+            okText="确定"
+            cancelText="取消"
+          >
+            <button type="button" className="delete" title="删除">
+              ✕
+            </button>
+          </Popconfirm>
+        </div>
+      </div>
+    </div>
+  );
+});
+
 export default function WordsPage() {
   const { message } = App.useApp();
   const navigate = useNavigate();
   const words = useUserWords();
+  const allCategories = useCategories((s) => s.all);
   const [filter, setFilter] = useState<Filter>('all');
+  const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
   const removeWord = useWordsStore((s) => s.removeWord);
   const updateWord = useWordsStore((s) => s.updateWord);
+  const parentRef = useRef<HTMLDivElement>(null);
+  const scrollHideTimer = useRef<number | null>(null);
+  const [scrolling, setScrolling] = useState(false);
 
-  const counts = useMemo(() => ({
-    all: words.length,
-    new: words.filter((w) => !w.crossedOut && isNew(w)).length,
-    due: words.filter((w) => !w.crossedOut && !isNew(w) && isDue(w)).length,
-    learning: words.filter((w) => !w.crossedOut && !isNew(w) && !isDue(w) && !isMastered(w)).length,
-    mastered: words.filter((w) => !w.crossedOut && isMastered(w)).length,
-    crossed: words.filter((w) => w.crossedOut).length,
-  }), [words]);
+  const counts = useMemo(() => {
+    let neu = 0;
+    let due = 0;
+    let learning = 0;
+    let mastered = 0;
+    let crossed = 0;
+    for (const w of words) {
+      if (w.crossedOut) {
+        crossed++;
+        continue;
+      }
+      if (isNew(w)) neu++;
+      else if (isDue(w)) due++;
+      else if (isMastered(w)) mastered++;
+      else learning++;
+    }
+    return {
+      all: words.length,
+      new: neu,
+      due,
+      learning,
+      mastered,
+      crossed,
+    };
+  }, [words]);
 
   const FILTERS: { key: Filter; label: string }[] = [
     { key: 'all', label: `全部 (${counts.all})` },
@@ -55,28 +160,162 @@ export default function WordsPage() {
     { key: 'crossed', label: `已划掉 (${counts.crossed})` },
   ];
 
-  const filtered = useMemo(
-    () => words.filter((w) => matchesFilter(w, filter)),
-    [words, filter]
+  const categoryOptions = useMemo(() => {
+    const cats = allCategories();
+    const catCount = new Map<string, number>();
+    let noneCount = 0;
+    for (const w of words) {
+      const cs = normalizeCategories(w.category);
+      if (!cs.length) {
+        noneCount++;
+        continue;
+      }
+      for (const c of cs) catCount.set(c, (catCount.get(c) || 0) + 1);
+    }
+    const custom = cats.filter(
+      (c) =>
+        !(TOPIC_CATEGORIES as readonly string[]).includes(c) &&
+        !(FUNCTION_CATEGORIES as readonly string[]).includes(c)
+    );
+    return [
+      { value: '', label: `全部分组 (${words.length})` },
+      { value: '__none__', label: `未分组 (${noneCount})` },
+      {
+        label: '话题',
+        options: TOPIC_CATEGORIES.map((c) => ({
+          value: c,
+          label: `${categoryLabel(c)} (${catCount.get(c) || 0})`,
+        })),
+      },
+      {
+        label: '功能',
+        options: FUNCTION_CATEGORIES.map((c) => ({
+          value: c,
+          label: `${categoryLabel(c)} (${catCount.get(c) || 0})`,
+        })),
+      },
+      ...(custom.length
+        ? [
+            {
+              label: '自定义',
+              options: custom.map((c) => ({
+                value: c,
+                label: `${categoryLabel(c)} (${catCount.get(c) || 0})`,
+              })),
+            },
+          ]
+        : []),
+    ];
+  }, [words, allCategories]);
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const list = words.filter((w) => {
+      if (!matchesFilter(w, filter) || !wordInCategory(w, categoryFilter)) return false;
+      if (!q) return true;
+      return (
+        w.word.toLowerCase().includes(q) ||
+        (w.translation || '').toLowerCase().includes(q)
+      );
+    });
+    list.sort((a, b) =>
+      a.word.localeCompare(b.word, 'en', { sensitivity: 'base' })
+    );
+    return list;
+  }, [words, filter, categoryFilter, search]);
+
+  const { rows, letters, letterIndex } = useMemo(() => {
+    const rows: ListRow[] = [];
+    const letters: string[] = [];
+    const letterIndex = new Map<string, number>();
+    let prev = '';
+    for (const w of filtered) {
+      const letter = wordInitial(w.word);
+      if (letter !== prev) {
+        letterIndex.set(letter, rows.length);
+        letters.push(letter);
+        rows.push({ type: 'header', letter, key: `h-${letter}` });
+        prev = letter;
+      }
+      rows.push({ type: 'word', word: w, key: w.id });
+    }
+    return { rows, letters, letterIndex };
+  }, [filtered]);
+
+  useEffect(() => {
+    const el = parentRef.current;
+    if (!el) return;
+    const onScroll = () => {
+      setScrolling(true);
+      if (scrollHideTimer.current) window.clearTimeout(scrollHideTimer.current);
+      scrollHideTimer.current = window.setTimeout(() => setScrolling(false), 700);
+    };
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      el.removeEventListener('scroll', onScroll);
+      if (scrollHideTimer.current) window.clearTimeout(scrollHideTimer.current);
+    };
+  }, [rows.length]);
+
+  const virtualizer = useVirtualizer({
+    count: rows.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: (index) => (rows[index]?.type === 'header' ? 28 : 72),
+    overscan: 8,
+    getItemKey: (index) => rows[index]?.key ?? index,
+  });
+
+  const activeLetter = (() => {
+    const items = virtualizer.getVirtualItems();
+    if (!items.length) return '';
+    const row = rows[items[0].index];
+    if (!row) return '';
+    return row.type === 'header' ? row.letter : wordInitial(row.word.word);
+  })();
+
+  const onSelectLetter = useCallback(
+    (letter: string) => {
+      const index = letterIndex.get(letter);
+      if (index == null) return;
+      virtualizer.scrollToIndex(index, { align: 'start' });
+    },
+    [letterIndex, virtualizer]
   );
 
-  async function toggleCrossed(w: Word, e: React.MouseEvent) {
-    e.stopPropagation();
-    const updated = { ...w, crossedOut: !w.crossedOut };
-    await updateWord(updated);
-    message.success(updated.crossedOut ? '已划掉' : '已恢复');
-  }
+  const onOpen = useCallback(
+    (id: string) => {
+      navigate(`/words/${id}`);
+    },
+    [navigate]
+  );
 
-  async function deleteWord(id: string) {
-    await removeWord(id);
-    message.success('已删除');
-  }
+  const onToggleCrossed = useCallback(
+    async (w: Word, e: React.MouseEvent) => {
+      e.stopPropagation();
+      const updated = { ...w, crossedOut: !w.crossedOut };
+      await updateWord(updated);
+      message.success(updated.crossedOut ? '已划掉' : '已恢复');
+    },
+    [updateWord, message]
+  );
+
+  const onDelete = useCallback(
+    async (id: string) => {
+      await removeWord(id);
+      message.success('已删除');
+    },
+    [removeWord, message]
+  );
 
   return (
-    <div>
+    <div className="words-page">
       <div className="app-header">
         <h1>词表</h1>
-        <p>共 {words.length} 个单词 · 点词条查看详情</p>
+        <p>
+          共 {words.length} 个单词
+          {filtered.length !== words.length ? ` · 筛选后 ${filtered.length}` : ''}
+          {' · '}按字母排序 · 点词条查看详情
+        </p>
       </div>
 
       <div className="filter-tabs">
@@ -91,6 +330,26 @@ export default function WordsPage() {
         ))}
       </div>
 
+      <div className="words-toolbar">
+        <Input
+          allowClear
+          className="words-search"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="搜索单词或释义"
+          prefix={<SearchOutlined style={{ color: 'var(--text-mute)' }} />}
+        />
+        <Select
+          className="words-category-filter"
+          value={categoryFilter ?? ''}
+          onChange={(v) => setCategoryFilter(v ? v : null)}
+          options={categoryOptions}
+          showSearch
+          optionFilterProp="label"
+          placeholder="按主题分组筛选"
+        />
+      </div>
+
       {filtered.length === 0 ? (
         <div className="app-card empty">
           <div className="empty-icon">📭</div>
@@ -98,58 +357,60 @@ export default function WordsPage() {
           <p>{words.length === 0 ? '去「添加」加几个新词吧' : '切换其他分类看看'}</p>
         </div>
       ) : (
-        filtered.map((w) => {
-          const stage = getWordStage(w);
-          const summary = relatedSummaryLine(w.synonyms, w.similars);
-          return (
+        <div className="word-list-wrap">
+          <div
+            ref={parentRef}
+            className={`word-virtual-list${scrolling ? ' is-scrolling' : ''}`}
+          >
             <div
-              key={w.id}
-              className={`word-list-item ${w.crossedOut ? 'crossed' : ''}`}
-              role="button"
-              tabIndex={0}
-              onClick={() => navigate(`/words/${w.id}`)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
-                  navigate(`/words/${w.id}`);
-                }
+              style={{
+                height: virtualizer.getTotalSize(),
+                width: '100%',
+                position: 'relative',
               }}
             >
-              <div className="word-main">
-                <div className="word-row">
-                  <span className="word">{w.word}</span>
-                  <PhoneticDisplay word={w} withSpeak />
-                </div>
-                <div className={`translation ${w.translation ? '' : 'mute'}`}>
-                  {w.translation || '暂无翻译'}
-                </div>
-                {summary && <div className="word-related-summary">{summary}</div>}
-              </div>
-              <div className="meta">
-                <div className="tags">
-                  <span className={wordStageClass(stage)}>{wordStageLabel(stage)}</span>
-                </div>
-                <div className="actions" onClick={(e) => e.stopPropagation()}>
-                  <button
-                    type="button"
-                    title={w.crossedOut ? '恢复' : '划掉'}
-                    onClick={(e) => toggleCrossed(w, e)}
+              {virtualizer.getVirtualItems().map((vi) => {
+                const row = rows[vi.index];
+                if (!row) return null;
+                return (
+                  <div
+                    key={row.key}
+                    data-index={vi.index}
+                    ref={virtualizer.measureElement}
+                    className={
+                      row.type === 'header'
+                        ? 'word-virtual-row word-letter-header-row'
+                        : 'word-virtual-row'
+                    }
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      width: '100%',
+                      transform: `translateY(${vi.start}px)`,
+                    }}
                   >
-                    {w.crossedOut ? '↩' : '−'}
-                  </button>
-                  <Popconfirm
-                    title="确定删除？"
-                    onConfirm={() => deleteWord(w.id)}
-                    okText="确定"
-                    cancelText="取消"
-                  >
-                    <button type="button" className="delete" title="删除">✕</button>
-                  </Popconfirm>
-                </div>
-              </div>
+                    {row.type === 'header' ? (
+                      <div className="word-letter-header">{row.letter}</div>
+                    ) : (
+                      <WordListRow
+                        w={row.word}
+                        onOpen={onOpen}
+                        onToggleCrossed={onToggleCrossed}
+                        onDelete={onDelete}
+                      />
+                    )}
+                  </div>
+                );
+              })}
             </div>
-          );
-        })
+          </div>
+          <LetterIndexBar
+            letters={letters}
+            activeLetter={activeLetter}
+            onSelect={onSelectLetter}
+          />
+        </div>
       )}
     </div>
   );

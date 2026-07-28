@@ -7,6 +7,7 @@ import { lookupWordInfo } from '@/api/llm';
 import RelatedWordsList from '@/components/RelatedWordsList';
 import PhoneticDisplay from '@/components/PhoneticDisplay';
 import type { RelatedWord } from '@/types/word';
+import CategoryManager from '@/components/CategoryManager';
 
 export default function AddPage() {
   const { message } = App.useApp();
@@ -17,7 +18,6 @@ export default function AddPage() {
   const [inputRaw, setInputRaw] = useState('');
   const [formNote, setFormNote] = useState('');
   const [translation, setTranslation] = useState('');
-  const [phonetic, setPhonetic] = useState('');
   const [phoneticUs, setPhoneticUs] = useState('');
   const [phoneticUk, setPhoneticUk] = useState('');
   const [partOfSpeech, setPartOfSpeech] = useState('');
@@ -26,7 +26,7 @@ export default function AddPage() {
   const [similars, setSimilars] = useState<RelatedWord[]>([]);
   const [generating, setGenerating] = useState(false);
 
-  const hasPreview = !!(translation || phonetic || phoneticUs || phoneticUk);
+  const hasPreview = !!(translation || phoneticUs || phoneticUk);
   const showedLemmaHint =
     !!inputRaw && !!word && inputRaw.toLowerCase() !== word.toLowerCase();
 
@@ -35,7 +35,6 @@ export default function AddPage() {
     setInputRaw('');
     setFormNote('');
     setTranslation('');
-    setPhonetic('');
     setPhoneticUs('');
     setPhoneticUk('');
     setPartOfSpeech('');
@@ -64,9 +63,6 @@ export default function AddPage() {
       if (info.translation) setTranslation(info.translation);
       if (info.phoneticUs) setPhoneticUs(info.phoneticUs);
       if (info.phoneticUk) setPhoneticUk(info.phoneticUk);
-      if (info.phonetic) setPhonetic(info.phonetic);
-      else if (info.phoneticUk) setPhonetic(info.phoneticUk);
-      else if (info.phoneticUs) setPhonetic(info.phoneticUs);
       if (info.partOfSpeech) setPartOfSpeech(info.partOfSpeech);
       if (info.mnemonic) setMnemonic(info.mnemonic);
       setSynonyms(info.synonyms || []);
@@ -97,7 +93,6 @@ export default function AddPage() {
     const w = makeNewWord({
       word: saveAs,
       translation: translation.trim(),
-      phonetic: phonetic.trim() || phoneticUk.trim() || phoneticUs.trim(),
       phoneticUs: phoneticUs.trim(),
       phoneticUk: phoneticUk.trim(),
       partOfSpeech: partOfSpeech.trim(),
@@ -177,7 +172,7 @@ export default function AddPage() {
               <div className="word-row">
                 <span className="word">{word}</span>
                 <PhoneticDisplay
-                  word={{ word, phonetic, phoneticUs, phoneticUk }}
+                  word={{ word, phoneticUs, phoneticUk }}
                   withSpeak
                 />
               </div>
@@ -216,6 +211,8 @@ export default function AddPage() {
           </div>
         </div>
       )}
+
+      <CategoryManager />
 
       <div className="app-card">
         <h3 style={{ fontSize: 14, marginBottom: 8 }}>提示</h3>

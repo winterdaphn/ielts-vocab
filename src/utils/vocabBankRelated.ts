@@ -3,18 +3,12 @@
  * (prefer precomputed fields; otherwise compute in-bank matches).
  * Synonyms can be merged with AI results by callers.
  */
-import ieltsVocabBank from '@/json/ielts-vocab.json';
+import { allVocabBank, type VocabBankEntry } from '@/json/vocab';
 import type { RelatedWord } from '@/types/word';
 
-export interface VocabBankEntry {
-  word: string;
-  translation?: string;
-  synonyms?: RelatedWord[];
-  similars?: RelatedWord[];
-  source?: string;
-}
+export type { VocabBankEntry };
 
-const bank = ieltsVocabBank as VocabBankEntry[];
+const bank = allVocabBank;
 
 function lettersOnly(s: string): string {
   return String(s || '')

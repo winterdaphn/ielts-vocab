@@ -1,8 +1,9 @@
 /**
- * Cloud sync — read/write vocab data to CloudBase.
- * Per-user: X-Profile header routes to vocab_data_<username> doc.
+ * Cloud sync — read/write vocab data via Worker cloud storage (gzip + base64).
+ * Per-user: X-Profile header routes to that user's backup file.
  */
 
+import { gzip, ungzip } from 'pako';
 import type { Settings } from '@/types/settings';
 import type { Word } from '@/types/word';
 
@@ -17,8 +18,8 @@ function getBaseUrl(workerUrl: string): string {
   return workerUrl.replace(/\/$/, '');
 }
 
-function buildHeaders(settings: Settings, username: string): HeadersInit {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+function authHeaders(settings: Settings, username: string): Record<string, string> {
+  const headers: Record<string, string> = {};
   if (settings.syncToken) headers['X-Auth-Token'] = settings.syncToken;
   if (username) headers['X-Profile'] = username;
   return headers;
@@ -32,33 +33,74 @@ export class CloudError extends Error {
   }
 }
 
-export async function fetchAll(settings: Settings, username: string): Promise<SyncPayload | null> {
-  if (!settings.workerUrl) return null;
-  try {
-    const resp = await fetch(getBaseUrl(settings.workerUrl) + '/api/all', {
-      method: 'GET',
-      headers: buildHeaders(settings, username),
-    });
-    if (!resp.ok) return null;
-    return await resp.json();
-  } catch {
-    return null;
+/** Avoid stack overflow on large Uint8Array (1–5MB payloads). */
+function uint8ToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
   }
+  return btoa(binary);
 }
 
-export async function pushAll(
+function base64ToUint8(base64: string): Uint8Array {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+export async function uploadAll(
   settings: Settings,
   username: string,
   payload: SyncPayload
 ): Promise<void> {
   if (!settings.workerUrl) throw new CloudError('未设置 Worker URL', 0);
-  const resp = await fetch(getBaseUrl(settings.workerUrl) + '/api/all', {
+  const json = JSON.stringify({
+    words: payload.words,
+    state: payload.state,
+    meta: payload.meta,
+    encrypted: payload.encrypted,
+  });
+  const compressed = gzip(json);
+  const base64 = uint8ToBase64(compressed);
+  const resp = await fetch(getBaseUrl(settings.workerUrl) + '/api/upload', {
     method: 'POST',
-    headers: buildHeaders(settings, username),
-    body: JSON.stringify(payload),
+    headers: {
+      'Content-Type': 'application/json',
+      ...authHeaders(settings, username),
+    },
+    body: JSON.stringify({ data: base64 }),
   });
   if (!resp.ok) {
     const data = await resp.json().catch(() => ({}));
-    throw new CloudError(data.error || '推送失败', resp.status);
+    throw new CloudError(data.error || '上传失败', resp.status);
   }
 }
+
+export async function downloadAll(
+  settings: Settings,
+  username: string
+): Promise<SyncPayload | null> {
+  if (!settings.workerUrl) return null;
+  try {
+    const resp = await fetch(getBaseUrl(settings.workerUrl) + '/api/download', {
+      method: 'GET',
+      headers: authHeaders(settings, username),
+    });
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    if (!data.hasBackup) return null;
+    const compressed = base64ToUint8(data.data);
+    const json = ungzip(compressed, { toText: true });
+    return JSON.parse(json) as SyncPayload;
+  } catch {
+    return null;
+  }
+}
+
+/** Alias for compatibility — new code prefers downloadAll / uploadAll */
+export const fetchAll = downloadAll;
+export const pushAll = uploadAll;

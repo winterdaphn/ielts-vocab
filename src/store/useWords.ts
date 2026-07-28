@@ -7,6 +7,8 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db, dbClearForUser, dbPut, dbDelete, newId, type WordRow } from '@/db/ieltsDb';
 import type { Word } from '@/types/word';
 import { useAuth } from './useAuth';
+import { normalizeCategories } from '@/config/categories';
+import { migratePhoneticFields } from '@/utils/phonetic';
 
 interface WordsState {
   words: Word[];
@@ -15,6 +17,8 @@ interface WordsState {
   addWord: (w: Word) => Promise<void>;
   /** Bulk insert without clearing existing rows. */
   addWords: (words: Word[]) => Promise<void>;
+  /** Bulk update existing rows by id. */
+  updateWords: (words: Word[]) => Promise<void>;
   updateWord: (w: Word) => Promise<void>;
   removeWord: (id: string) => Promise<void>;
   clearForUser: (userId: string) => Promise<void>;
@@ -32,6 +36,13 @@ export const useWordsStore = create<WordsState>((set) => ({
     await dbPut(row);
   },
   addWords: async (words) => {
+    const userId = useAuth.getState().username;
+    if (!userId || words.length === 0) return;
+    const rows: WordRow[] = words.map((w) => ({ ...w, userId }));
+    await db.words.bulkPut(rows);
+  },
+  /** Bulk overwrite existing rows (same ids). */
+  updateWords: async (words) => {
     const userId = useAuth.getState().username;
     if (!userId || words.length === 0) return;
     const rows: WordRow[] = words.map((w) => ({ ...w, userId }));
@@ -75,15 +86,16 @@ export function useUserWords(): Word[] {
 }
 
 export function makeNewWord(input: Partial<Word> & { word: string; translation?: string }): Word {
+  const { phoneticUs, phoneticUk } = migratePhoneticFields(input);
   return {
     id: input.id || newId(),
     word: input.word.trim(),
     translation: (input.translation || '').trim(),
-    phonetic: input.phonetic || '',
-    phoneticUs: input.phoneticUs || '',
-    phoneticUk: input.phoneticUk || '',
+    phoneticUs,
+    phoneticUk,
     partOfSpeech: input.partOfSpeech || '',
     mnemonic: input.mnemonic || '',
+    category: normalizeCategories(input.category),
     synonyms: Array.isArray(input.synonyms) ? input.synonyms : [],
     similars: Array.isArray(input.similars) ? input.similars : [],
     collocations: Array.isArray(input.collocations) ? input.collocations : [],

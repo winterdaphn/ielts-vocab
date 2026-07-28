@@ -27,6 +27,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
   const words = useUserWords();
   const isPractice = location.pathname === '/practice';
   const isWordDetail = /^\/words\/[^/]+$/.test(location.pathname);
+  const isWordsList = location.pathname === '/words';
   const hideMainNav = isPractice || isWordDetail;
 
   // Auto-sync after word list change
@@ -52,7 +53,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
     <div
       className={`app-container${isPractice ? ' practice-mode' : ''}${
         isWordDetail ? ' word-detail-mode' : ''
-      }`}
+      }${isWordsList ? ' words-mode' : ''}`}
     >
       <main className="app-content">{children}</main>
       {!hideMainNav && (

@@ -158,7 +158,8 @@ Constraints:
 
 export async function generateExamples(word: Word, settings: Settings): Promise<GeneratedExample[]> {
   const content = `Generate examples for the word: "${word.word}" (${word.translation})
-Phonetic: ${word.phonetic || 'N/A'}
+Phonetic UK: ${word.phoneticUk || word.phonetic || 'N/A'}
+Phonetic US: ${word.phoneticUs || 'N/A'}
 Part of speech: ${word.partOfSpeech || 'N/A'}`;
 
   const text = await callLLM(
@@ -488,7 +489,6 @@ export async function lookupWordInfo(word: string, settings: Settings): Promise<
   lemma?: string;
   /** How the input relates to lemma, e.g. 「复数」「现在分词」「第三人称单数」 */
   formNote?: string;
-  phonetic?: string;
   phoneticUs?: string;
   phoneticUk?: string;
   partOfSpeech?: string;
@@ -519,7 +519,6 @@ Output JSON ONLY:
   "formNote": "中文说明词形，如「复数」「现在分词」「过去式」「第三人称单数」；若输入已是原形则空字符串",
   "phoneticUs": "General American IPA of the LEMMA in /.../",
   "phoneticUk": "British IPA of the LEMMA in /.../",
-  "phonetic": "prefer British IPA in /.../ (same as phoneticUk when possible)",
   "partOfSpeech": "n./v./adj./adv. of the LEMMA",
   "translation": "LEMMA 最常见的中文释义（不要只写「xxx的复数」）",
   "mnemonic": "short Chinese memory aid for the LEMMA (≤20字)",
@@ -548,12 +547,16 @@ If US and UK phonetics are the same, still fill both. Output ONLY valid JSON.`,
       similars?: unknown;
     }>(text);
     const lemma = parsed.lemma ? String(parsed.lemma).trim() : word;
+    const phoneticUk =
+      (parsed.phoneticUk ? String(parsed.phoneticUk).trim() : '') ||
+      (parsed.phonetic ? String(parsed.phonetic).trim() : '') ||
+      undefined;
+    const phoneticUs = parsed.phoneticUs ? String(parsed.phoneticUs).trim() : undefined;
     return {
       lemma: parsed.lemma ? String(parsed.lemma).trim() : undefined,
       formNote: parsed.formNote ? String(parsed.formNote).trim() : undefined,
-      phonetic: parsed.phonetic ? String(parsed.phonetic).trim() : undefined,
-      phoneticUs: parsed.phoneticUs ? String(parsed.phoneticUs).trim() : undefined,
-      phoneticUk: parsed.phoneticUk ? String(parsed.phoneticUk).trim() : undefined,
+      phoneticUs,
+      phoneticUk,
       partOfSpeech: parsed.partOfSpeech ? String(parsed.partOfSpeech).trim() : undefined,
       translation: parsed.translation ? String(parsed.translation).trim() : undefined,
       mnemonic: parsed.mnemonic ? String(parsed.mnemonic).trim() : undefined,

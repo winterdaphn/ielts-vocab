@@ -13,6 +13,7 @@ import {
   DatabaseOutlined,
   RobotOutlined,
   BookOutlined,
+  SyncOutlined,
 } from '@ant-design/icons';
 import { useSettings } from '@/store/useSettings';
 import { useAuth } from '@/store/useAuth';
@@ -26,22 +27,10 @@ import { makeNewWord } from '@/store/useWords';
 import type { Word } from '@/types/word';
 import { useNavigate } from 'react-router-dom';
 import { modeLabel, parsePracticeMode } from '@/utils/practiceSession';
-import ieltsVocabBank from '@/json/ielts-vocab.json';
+import { loadVocabBySource, type VocabBankSource, type VocabBankEntry } from '@/json/vocab';
+import { normalizeCategories } from '@/config/categories';
 
 type Tab = 'ai' | 'data' | 'account';
-
-interface VocabBankEntry {
-  word: string;
-  phonetic?: string;
-  phoneticUk?: string;
-  phoneticUs?: string;
-  pos?: string;
-  translation?: string;
-  source?: string;
-  synonyms?: { word: string; gloss: string; note: string }[];
-  similars?: { word: string; gloss: string; note: string }[];
-  collocations?: { phrase: string; gloss: string }[];
-}
 
 function modeLabelSafe(mode: unknown): string {
   return modeLabel(parsePracticeMode(typeof mode === 'string' ? mode : undefined));
@@ -178,6 +167,64 @@ function DataSettings() {
   const [pushing, setPushing] = useState(false);
   const [pulling, setPulling] = useState(false);
   const [importingSource, setImportingSource] = useState<'ielts' | 'kaoyan' | null>(null);
+  const [syncingCats, setSyncingCats] = useState(false);
+  const updateWords = useWordsStore((s) => s.updateWords);
+
+  function bankCategoryMap(entries: VocabBankEntry[]): Map<string, string[]> {
+    const map = new Map<string, string[]>();
+    for (const e of entries) {
+      if (!e.word) continue;
+      const cats = normalizeCategories(e.category);
+      if (!cats.length) continue;
+      const key = e.word.toLowerCase();
+      const prev = map.get(key);
+      if (!prev || prev.length === 0) map.set(key, cats);
+    }
+    return map;
+  }
+
+  /** Fill empty local categories from bank; migrate legacy category names. */
+  function patchWordsFromBankMap(
+    local: Word[],
+    catMap: Map<string, string[]>
+  ): Word[] {
+    const out: Word[] = [];
+    for (const w of local) {
+      const raw = Array.isArray(w.category) ? w.category : [];
+      const localCats = normalizeCategories(w.category);
+      const bankCats = catMap.get(w.word.toLowerCase());
+      if (localCats.length === 0 && bankCats?.length) {
+        out.push({ ...w, category: bankCats });
+        continue;
+      }
+      if (localCats.length > 0 && localCats.join('\0') !== raw.join('\0')) {
+        out.push({ ...w, category: localCats });
+      }
+    }
+    return out;
+  }
+
+  async function handleSyncCategoriesFromBank() {
+    setSyncingCats(true);
+    try {
+      const [ielts, kaoyan] = await Promise.all([
+        loadVocabBySource('ielts'),
+        loadVocabBySource('kaoyan'),
+      ]);
+      const catMap = bankCategoryMap([...ielts, ...kaoyan]);
+      const patched = patchWordsFromBankMap(words, catMap);
+      if (patched.length === 0) {
+        message.info('没有需要补全的分组（本地已有分组或词库无对应词）');
+        return;
+      }
+      await updateWords(patched);
+      message.success(`已为 ${patched.length} 个词补全/迁移分组`);
+    } catch (e) {
+      message.error('补全失败：' + (e instanceof Error ? e.message : '未知错误'));
+    } finally {
+      setSyncingCats(false);
+    }
+  }
 
   async function handleExport() {
     const data = { version: 1, exportedAt: new Date().toISOString(), words };
@@ -210,58 +257,72 @@ function DataSettings() {
     message.success(`已导入 ${added} 个单词${skipped ? `（${skipped} 个跳过）` : ''}`);
   }
 
-  async function handleImportBankVocab(source: 'ielts' | 'kaoyan') {
+  async function handleImportBankVocab(source: VocabBankSource) {
     const label = source === 'ielts' ? '雅思' : '考研';
-    const bank = ieltsVocabBank as VocabBankEntry[];
-    const entries = bank.filter((w) => w.source === source && w.word);
-    const existing = new Set(words.map((w) => w.word.toLowerCase()));
-    const toAdd: Word[] = [];
-    let skipped = 0;
-
-    for (const entry of entries) {
-      if (existing.has(entry.word.toLowerCase())) {
-        skipped++;
-        continue;
-      }
-      toAdd.push(
-        makeNewWord({
-          word: entry.word,
-          translation: entry.translation || '',
-          phonetic: entry.phonetic || entry.phoneticUk || entry.phoneticUs || '',
-          phoneticUk: entry.phoneticUk || '',
-          phoneticUs: entry.phoneticUs || '',
-          partOfSpeech: entry.pos || '',
-          synonyms: entry.synonyms || [],
-          similars: entry.similars || [],
-          collocations: entry.collocations || [],
-        })
-      );
-      existing.add(entry.word.toLowerCase());
-    }
-
-    if (toAdd.length === 0) {
-      message.info(`${label}词库里没有新词可导入（已跳过 ${skipped} 个）`);
-      return;
-    }
-
-    const confirmed = await new Promise<boolean>((resolve) => {
-      modal.confirm({
-        title: `导入${label}词汇？`,
-        content: `将从内置词库导入 ${toAdd.length} 个${label}单词${
-          skipped ? `（已有 ${skipped} 个会跳过）` : ''
-        }。不会覆盖你现有的词。`,
-        okText: '导入',
-        cancelText: '取消',
-        onOk: () => resolve(true),
-        onCancel: () => resolve(false),
-      });
-    });
-    if (!confirmed) return;
-
     setImportingSource(source);
     try {
-      await useWordsStore.getState().addWords(toAdd);
-      message.success(`已导入 ${toAdd.length} 个${label}单词${skipped ? `（跳过 ${skipped} 个）` : ''}`);
+      const bank = await loadVocabBySource(source);
+      const entries = bank.filter((w) => w.word);
+      const existing = new Set(words.map((w) => w.word.toLowerCase()));
+      const toAdd: Word[] = [];
+      const catMap = bankCategoryMap(entries);
+      const toPatch = patchWordsFromBankMap(words, catMap);
+      let skipped = 0;
+
+      for (const entry of entries) {
+        if (existing.has(entry.word.toLowerCase())) {
+          skipped++;
+          continue;
+        }
+        toAdd.push(
+          makeNewWord({
+            word: entry.word,
+            translation: entry.translation || '',
+            phoneticUk: entry.phoneticUk || '',
+            phoneticUs: entry.phoneticUs || '',
+            partOfSpeech: entry.pos || '',
+            category: Array.isArray(entry.category)
+              ? entry.category
+              : entry.category
+                ? [entry.category]
+                : [],
+            synonyms: entry.synonyms || [],
+            similars: entry.similars || [],
+            collocations: entry.collocations || [],
+          })
+        );
+        existing.add(entry.word.toLowerCase());
+      }
+
+      if (toAdd.length === 0 && toPatch.length === 0) {
+        message.info(`${label}词库里没有新词可导入（已跳过 ${skipped} 个）`);
+        return;
+      }
+
+      const confirmed = await new Promise<boolean>((resolve) => {
+        modal.confirm({
+          title: `导入${label}词汇？`,
+          content: [
+            toAdd.length ? `新增 ${toAdd.length} 个词` : null,
+            toPatch.length ? `为已有 ${toPatch.length} 个词补全/迁移分组` : null,
+            skipped && !toPatch.length ? `已有 ${skipped} 个会跳过` : null,
+          ]
+            .filter(Boolean)
+            .join('；') || '没有变更',
+          okText: '确定',
+          cancelText: '取消',
+          onOk: () => resolve(true),
+          onCancel: () => resolve(false),
+        });
+      });
+      if (!confirmed) return;
+
+      if (toPatch.length) await updateWords(toPatch);
+      if (toAdd.length) await useWordsStore.getState().addWords(toAdd);
+      const bits: string[] = [];
+      if (toAdd.length) bits.push(`新增 ${toAdd.length}`);
+      if (toPatch.length) bits.push(`补全分组 ${toPatch.length}`);
+      message.success(bits.join(' · ') || '完成');
     } catch (e) {
       message.error('导入失败：' + (e instanceof Error ? e.message : '未知错误'));
     } finally {
@@ -331,7 +392,7 @@ function DataSettings() {
             type="primary"
             icon={<BookOutlined />}
             loading={importingSource === 'ielts'}
-            disabled={importingSource !== null}
+            disabled={importingSource !== null || syncingCats}
             onClick={() => handleImportBankVocab('ielts')}
           >
             导入雅思词汇
@@ -339,10 +400,18 @@ function DataSettings() {
           <Button
             icon={<BookOutlined />}
             loading={importingSource === 'kaoyan'}
-            disabled={importingSource !== null}
+            disabled={importingSource !== null || syncingCats}
             onClick={() => handleImportBankVocab('kaoyan')}
           >
             导入考研词汇
+          </Button>
+          <Button
+            icon={<SyncOutlined />}
+            loading={syncingCats}
+            disabled={importingSource !== null}
+            onClick={handleSyncCategoriesFromBank}
+          >
+            从词库补全分组
           </Button>
           <input
             ref={fileInputRef}
@@ -447,6 +516,8 @@ function DataSettings() {
               : '尚未同步'}
             <br />
             手动推送会上传：词表与复习进度、连续学习天数、今日完成标记、未完成练习（题号/模式，不含已填答案）。换电脑拉取后可继续上次练习，题目现出。
+            <br />
+            升级后请手动「推送到云端」一次，把本地数据写入新的云存储；旧库数据不会自动迁移。
           </p>
         </Form>
       </Card>

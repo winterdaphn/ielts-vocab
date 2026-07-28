@@ -14,18 +14,32 @@ export function normalizePhonetic(ph?: string | null): string {
 }
 
 export interface PhoneticFields {
+  /** @deprecated legacy single IPA */
   phonetic?: string;
   phoneticUs?: string;
   phoneticUk?: string;
 }
 
-/** Resolve US / UK IPA with fallback to legacy `phonetic`. */
+/** Resolve US / UK IPA; falls back to legacy `phonetic` for old records. */
 export function resolvePhonetics(w?: PhoneticFields | null): { us: string; uk: string } {
   if (!w) return { us: '', uk: '' };
-  const main = normalizePhonetic(w.phonetic);
-  const us = normalizePhonetic(w.phoneticUs) || main;
-  const uk = normalizePhonetic(w.phoneticUk) || main;
+  const legacy = normalizePhonetic(w.phonetic);
+  const us = normalizePhonetic(w.phoneticUs) || legacy;
+  const uk = normalizePhonetic(w.phoneticUk) || legacy;
   return { us, uk };
+}
+
+/** Fill missing Us/Uk from legacy `phonetic`; drop writing the redundant key. */
+export function migratePhoneticFields(w?: PhoneticFields | null): {
+  phoneticUs: string;
+  phoneticUk: string;
+} {
+  if (!w) return { phoneticUs: '', phoneticUk: '' };
+  const legacy = (w.phonetic || '').trim();
+  return {
+    phoneticUs: (w.phoneticUs || '').trim() || legacy,
+    phoneticUk: (w.phoneticUk || '').trim() || legacy,
+  };
 }
 
 /** Plain-text display: 美 /…/ · 英 /…/ when they differ. */

@@ -34,6 +34,8 @@ import MarkableSentence from '@/components/MarkableSentence';
 import PhoneticDisplay from '@/components/PhoneticDisplay';
 import CollapsibleTip from '@/components/practice/CollapsibleTip';
 import type { Collocation, RelatedWord } from '@/types/word';
+import WordCategoryEditor from '@/components/WordCategoryEditor';
+import { normalizeCategories } from '@/config/categories';
 
 type TipTab = 'mnemonic' | 'synonyms' | 'similars';
 
@@ -351,23 +353,25 @@ export default function WordDetailPage() {
 
   return (
     <div className="word-detail-page">
-      <header className={`wd-hero${word.crossedOut ? ' crossed' : ''}`}>
-        <Button
-          type="text"
-          size="small"
-          icon={<LeftOutlined />}
+      <nav className="wd-navbar">
+        <button
+          type="button"
+          className="wd-navbar-back"
+          aria-label="返回词表"
           onClick={() => navigate('/words')}
-          className="word-detail-back"
         >
-          词表
-        </Button>
-        <div className="wd-hero-top">
-          <h1>{word.word}</h1>
-          <span className={wordStageClass(stage)}>{wordStageLabel(stage)}</span>
-        </div>
+          <LeftOutlined />
+        </button>
+        <h1 className={`wd-navbar-title${word.crossedOut ? ' crossed' : ''}`}>{word.word}</h1>
+        <span className={`wd-navbar-stage ${wordStageClass(stage)}`}>
+          {wordStageLabel(stage)}
+        </span>
+      </nav>
+
+      <header className={`wd-hero${word.crossedOut ? ' crossed' : ''}`}>
         <div className="wd-hero-phonetic">
           <PhoneticDisplay word={word} withSpeak />
-          {!word.phonetic && !word.phoneticUs && !word.phoneticUk && (
+          {!word.phoneticUs && !word.phoneticUk && !word.phonetic && (
             <span className="text-light" style={{ fontSize: 12 }}>
               暂无音标
             </span>
@@ -378,6 +382,16 @@ export default function WordDetailPage() {
           {word.translation || '暂无释义'}
         </p>
       </header>
+
+      <div className="app-card">
+        <WordCategoryEditor
+          value={normalizeCategories(word.category)}
+          onChange={async (next) => {
+            await updateWord({ ...word, category: next });
+            message.success(next.length ? '已更新分组' : '已清空分组');
+          }}
+        />
+      </div>
 
       <div className="app-card wd-tab-card">
         <div className="wd-tabs" role="tablist">
