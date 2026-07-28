@@ -153,7 +153,7 @@ export default function WordDetailPage() {
   }
 
   function startEditMnemonic() {
-    setMnemonicDraft(word.mnemonic || '');
+    setMnemonicDraft(word!.mnemonic || '');
     setEditingMnemonic(true);
   }
 
@@ -161,7 +161,7 @@ export default function WordDetailPage() {
     setBusySaveMnemonic(true);
     try {
       const text = mnemonicDraft.trim();
-      await updateWord({ ...word, mnemonic: text });
+      await updateWord({ ...word!, mnemonic: text });
       setEditingMnemonic(false);
       message.success(text ? '已保存笔记' : '已清空助记');
     } finally {
