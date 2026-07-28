@@ -47,7 +47,7 @@
 
   &:not(.ant-btn-primary):not(.ant-btn-dangerous):not(:disabled):hover {
     color: var(--accent, $accent) !important;
-    border-color: var(--accent, $accent) !important;
+    border-color: transparent !important;
     background: var(--accent-light, $accent-light) !important;
   }
 
@@ -219,17 +219,66 @@
   font-size: 13px !important;
 }
 
-// ---------- Space compact buttons (settings sync row) ----------
+// ---------- Space.Compact: join input + button (override global radius !important) ----------
 .ant-space-compact {
-  .ant-btn {
+  display: inline-flex;
+  width: 100%;
+
+  > .ant-space-compact-item,
+  > .ant-btn,
+  > .ant-input,
+  > .ant-input-affix-wrapper,
+  > .ant-input-outlined,
+  > .ant-picker,
+  > .ant-select,
+  > .ant-select-selector {
     border-radius: 0 !important;
+  }
 
-    &:first-child {
-      border-radius: $radius 0 0 $radius !important;
-    }
+  // antd 5/6 may wrap children
+  > .ant-space-compact-item > .ant-btn,
+  > .ant-space-compact-item > .ant-input,
+  > .ant-space-compact-item > .ant-input-affix-wrapper,
+  > .ant-space-compact-item > .ant-input-outlined {
+    border-radius: 0 !important;
+  }
 
-    &:last-child {
-      border-radius: 0 $radius $radius 0 !important;
-    }
+  > .ant-btn.ant-btn-sm {
+    border-radius: 0 !important;
+  }
+
+  > *:not(:first-child) {
+    margin-inline-start: -1px;
+  }
+
+  > *:first-child,
+  > .ant-space-compact-item:first-child > .ant-btn,
+  > .ant-space-compact-item:first-child > .ant-input,
+  > .ant-space-compact-item:first-child > .ant-input-affix-wrapper,
+  > .ant-space-compact-item:first-child > .ant-input-outlined {
+    border-start-start-radius: #{$radius} !important;
+    border-end-start-radius: #{$radius} !important;
+    border-start-end-radius: 0 !important;
+    border-end-end-radius: 0 !important;
+  }
+
+  > *:last-child,
+  > .ant-space-compact-item:last-child > .ant-btn,
+  > .ant-space-compact-item:last-child > .ant-btn.ant-btn-sm,
+  > .ant-space-compact-item:last-child > .ant-input,
+  > .ant-space-compact-item:last-child > .ant-input-affix-wrapper,
+  > .ant-space-compact-item:last-child > .ant-input-outlined {
+    border-start-start-radius: 0 !important;
+    border-end-start-radius: 0 !important;
+    border-start-end-radius: #{$radius} !important;
+    border-end-end-radius: #{$radius} !important;
+  }
+
+  // Focus should sit above the neighbor border
+  > .ant-input-affix-wrapper-focused,
+  > .ant-input:focus,
+  > .ant-btn:focus,
+  > .ant-space-compact-item:focus-within {
+    z-index: 2;
   }
 }

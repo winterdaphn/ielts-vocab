@@ -60,6 +60,10 @@ input, textarea, select {
   padding-bottom: 24px;
 }
 
+.app-container.word-detail-mode {
+  padding-bottom: 88px;
+}
+
 .app-content {
   flex: 1;
 }
@@ -1058,6 +1062,19 @@ input, textarea, select {
   min-height: 24px;
 }
 
+.wd-section-title-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.wd-mnemonic-body {
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .tip-section-title {
   font-size: 12px;
   color: var(--text-light);
@@ -1097,6 +1114,35 @@ input, textarea, select {
   font-size: 13.5px;
 }
 
+.related-words-list li.related-word-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.related-word-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.related-word-remove {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-light);
+  font-size: 18px;
+  line-height: 1;
+  padding: 0 4px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.related-word-remove:hover {
+  color: var(--danger, #e04b4b);
+  background: rgba(224, 75, 75, 0.08);
+}
+
 .related-words-list li:last-child {
   margin-bottom: 0;
 }
@@ -1110,9 +1156,56 @@ input, textarea, select {
   color: var(--text);
 }
 
-.related-word-note {
+.collocations-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.collocations-list li {
+  margin: 0 0 8px;
+  line-height: 1.55;
+  font-size: 14px;
+}
+
+.collocations-list li.collocation-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.collocation-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.collocations-list li:last-child {
+  margin-bottom: 0;
+}
+
+.collocation-phrase {
+  font-family: Georgia, 'Times New Roman', serif;
+  font-weight: 600;
+}
+
+.collocation-gloss {
   color: var(--text-light);
-  font-size: 12.5px;
+  font-size: 13px;
+  margin-left: 4px;
+}
+
+.colo-add-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+  align-items: center;
+}
+
+.colo-add-form .ant-input {
+  flex: 1 1 120px;
+  min-width: 100px;
 }
 
 .word-related-summary {
@@ -1127,6 +1220,206 @@ input, textarea, select {
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 12px;
+}
+
+.word-detail-header {
+  text-align: left;
+  margin-bottom: 12px;
+  padding-top: 0;
+}
+
+.word-detail-back {
+  padding-left: 0 !important;
+  height: auto !important;
+  margin-bottom: 2px;
+  color: var(--text-light);
+}
+
+.word-detail-title-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+}
+
+.word-detail-title-row h1 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+  font-family: Georgia, 'Times New Roman', serif;
+  letter-spacing: -0.2px;
+  line-height: 1.25;
+}
+
+.word-detail-meta {
+  margin: 2px 0 0;
+  color: var(--text-light);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+/* —— Word detail (Baicizhan-inspired) —— */
+.word-detail-page {
+  padding-bottom: 8px;
+}
+
+.wd-hero {
+  margin-bottom: 12px;
+}
+
+.wd-hero.crossed .wd-hero-top h1,
+.wd-hero.crossed .wd-hero-meaning {
+  text-decoration: line-through;
+  opacity: 0.55;
+}
+
+.wd-hero-top {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.wd-hero-top h1 {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+  line-height: 1.2;
+  font-family: Georgia, 'Times New Roman', serif;
+}
+
+.wd-hero-phonetic {
+  margin-bottom: 8px;
+}
+
+.wd-hero-meaning {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--text);
+}
+
+.wd-pos {
+  display: inline-block;
+  margin-right: 6px;
+  color: var(--text-light);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.wd-tab-card {
+  padding-top: 12px;
+}
+
+.wd-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+  margin: 0 -4px 12px;
+  padding: 0 4px;
+}
+
+.wd-tab {
+  flex: 1;
+  border: none;
+  background: transparent;
+  padding: 8px 4px 10px;
+  font-size: 13px;
+  color: var(--text-light);
+  cursor: pointer;
+  position: relative;
+  font-weight: 500;
+}
+
+.wd-tab.active {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.wd-tab.active::after {
+  content: '';
+  position: absolute;
+  left: 18%;
+  right: 18%;
+  bottom: 0;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+.wd-tab-body {
+  min-height: 72px;
+}
+
+.wd-bottom-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 8px 10px;
+  padding-bottom: max(8px, env(safe-area-inset-bottom));
+  background: var(--card);
+  border-top: 1px solid var(--border);
+  box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.04);
+}
+
+.wd-bar-btn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 11px;
+  padding: 6px 2px;
+  cursor: pointer;
+  min-width: 0;
+  line-height: 1.2;
+}
+
+.wd-bar-btn .anticon {
+  font-size: 18px;
+}
+
+.wd-bar-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.wd-bar-btn.danger {
+  color: var(--danger, #e04b4b);
+}
+
+.wd-bar-primary {
+  flex: 1.35;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: none;
+  border-radius: 22px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 12px 14px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.wd-bar-primary:active {
+  opacity: 0.9;
 }
 
 /* Examples (practice) */

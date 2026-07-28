@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Words store — wraps Dexie + provides imperative helpers.
  * Words are scoped to current user; switching users clears the in-memory list.
  */
@@ -86,6 +86,7 @@ export function makeNewWord(input: Partial<Word> & { word: string; translation?:
     mnemonic: input.mnemonic || '',
     synonyms: Array.isArray(input.synonyms) ? input.synonyms : [],
     similars: Array.isArray(input.similars) ? input.similars : [],
+    collocations: Array.isArray(input.collocations) ? input.collocations : [],
     examples: input.examples || [],
     crossedOut: input.crossedOut ?? false,
     ease: input.ease ?? 2.5,

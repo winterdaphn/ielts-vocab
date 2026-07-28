@@ -36,14 +36,8 @@ export function selectNewWords(all: Word[]): Word[] {
 }
 
 export function selectReviewWords(all: Word[]): Word[] {
-  const active = all.filter((w) => !w.crossedOut && !isNew(w));
-  const due = active.filter((w) => isDue(w));
-  const soon = active.filter((w) => {
-    if (isDue(w)) return false;
-    return w.nextReview <= Date.now() + 3 * 86400000;
-  });
-  // Due first, then soon — keep priority (no full reshuffle)
-  return [...shuffle(due), ...shuffle(soon)];
+  const due = all.filter((w) => !w.crossedOut && !isNew(w) && isDue(w));
+  return shuffle(due);
 }
 
 export function selectDailyWords(all: Word[]): Word[] {

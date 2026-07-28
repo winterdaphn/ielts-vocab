@@ -45,6 +45,7 @@ function normalizeCloudWord(raw: Partial<Word> & { word?: string }): Word | null
     mnemonic: raw.mnemonic || '',
     synonyms: Array.isArray(raw.synonyms) ? raw.synonyms : [],
     similars: Array.isArray(raw.similars) ? raw.similars : [],
+    collocations: Array.isArray(raw.collocations) ? raw.collocations : [],
     examples: Array.isArray(raw.examples) ? raw.examples : [],
     crossedOut: raw.crossedOut ?? false,
     ease: raw.ease ?? 2.5,

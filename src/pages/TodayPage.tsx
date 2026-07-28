@@ -18,8 +18,12 @@ import LearningCurve from '@/components/LearningCurve';
 
 const SCOPES: { key: StudyScope; label: string; hint: string }[] = [
   { key: 'new', label: '学新词', hint: '只练从未复习过的词' },
-  { key: 'review', label: '复习', hint: '到期与即将到期的词' },
-  { key: 'mixed', label: '混合', hint: '新词优先，再穿插复习' },
+  {
+    key: 'review',
+    label: '复习',
+    hint: '按艾宾浩斯到期复习：5分钟 → 30分钟 → 12小时 → 1/2/4/7/15/30天',
+  },
+  { key: 'mixed', label: '混合', hint: '新词优先，再穿插到期复习' },
 ];
 
 const DIFFICULTIES: { key: SentenceDifficulty; label: string; hint: string }[] = [
@@ -167,6 +171,9 @@ export default function TodayPage() {
             <div className="label">已学过</div>
           </div>
         </div>
+        <p className="text-light" style={{ fontSize: 12, marginTop: 4, marginBottom: 0 }}>
+          复习按艾宾浩斯阶梯出题，仅包含已到期的词
+        </p>
 
         <div className="scope-tabs" role="tablist" aria-label="学习范围">
           {SCOPES.map((s) => (

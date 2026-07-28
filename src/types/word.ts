@@ -3,8 +3,16 @@ export interface RelatedWord {
   word: string;
   /** Short Chinese gloss */
   gloss: string;
-  /** Contrast / usage note in Chinese (≤30 chars preferred) */
+  /** Optional contrast note (legacy; UI no longer shows by default) */
   note: string;
+}
+
+/** Fixed collocation / chunk, e.g. "feel elated" */
+export interface Collocation {
+  /** English phrase containing the headword */
+  phrase: string;
+  /** Short Chinese gloss */
+  gloss: string;
 }
 
 export interface Word {
@@ -22,6 +30,8 @@ export interface Word {
   synonyms?: RelatedWord[];
   /** Orthographic look-alikes only (形近词), not sound-alikes or semantic near-misses */
   similars?: RelatedWord[];
+  /** Common fixed collocations / chunks */
+  collocations?: Collocation[];
   examples: WordExample[];
   crossedOut: boolean;
   ease: number;

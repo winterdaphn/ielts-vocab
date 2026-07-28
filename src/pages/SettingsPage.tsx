@@ -38,6 +38,9 @@ interface VocabBankEntry {
   pos?: string;
   translation?: string;
   source?: string;
+  synonyms?: { word: string; gloss: string; note: string }[];
+  similars?: { word: string; gloss: string; note: string }[];
+  collocations?: { phrase: string; gloss: string }[];
 }
 
 function modeLabelSafe(mode: unknown): string {
@@ -228,6 +231,9 @@ function DataSettings() {
           phoneticUk: entry.phoneticUk || '',
           phoneticUs: entry.phoneticUs || '',
           partOfSpeech: entry.pos || '',
+          synonyms: entry.synonyms || [],
+          similars: entry.similars || [],
+          collocations: entry.collocations || [],
         })
       );
       existing.add(entry.word.toLowerCase());

@@ -16,7 +16,8 @@ import {
   type SentenceStructureAnalysis,
   type TranslateHints,
 } from '@/api/llm';
-import { applyReview, isNew } from '@/utils/scheduler';
+import { applyReview, isNew, formatNextReview } from '@/utils/scheduler';
+import { getRelatedFromBank, mergeRelatedLists } from '@/utils/vocabBankRelated';
 import { setLS, getLS, todayKey } from '@/utils/date';
 import type { RelatedWord, Word } from '@/types/word';
 import {
@@ -286,7 +287,7 @@ export function usePracticeSession() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, showAnswer, current?.word.id, idx]);
 
-  // 揭晓后：近义词 / 形近词（有缓存用缓存，否则 AI 生成写回）
+  // 揭晓后：近义（词库+AI）/ 形近（仅词库）；有缓存用缓存
   useEffect(() => {
     if ((mode !== 'cloze' && mode !== 'choice') || !showAnswer || !current) {
       return;
@@ -300,12 +301,6 @@ export function usePracticeSession() {
       setRelatedLoading(false);
       return;
     }
-    if (!settings.apiKey) {
-      setSynonymsTip([]);
-      setSimilarsTip([]);
-      setRelatedLoading(false);
-      return;
-    }
 
     let cancelled = false;
     setRelatedLoading(true);
@@ -313,19 +308,29 @@ export function usePracticeSession() {
     setSimilarsTip([]);
     (async () => {
       try {
-        const related = await generateRelatedWords(
-          word.word,
-          word.translation || '',
-          settings
-        );
+        const fromBank = getRelatedFromBank(word.word, word.translation || '');
+        let synonyms = fromBank.synonyms;
+        const similars = fromBank.similars;
+        if (settings.apiKey) {
+          try {
+            const fromAi = await generateRelatedWords(
+              word.word,
+              word.translation || '',
+              settings
+            );
+            synonyms = mergeRelatedLists(fromBank.synonyms, fromAi.synonyms, 6);
+          } catch {
+            /* keep bank */
+          }
+        }
         if (cancelled) return;
-        setSynonymsTip(related.synonyms);
-        setSimilarsTip(related.similars);
-        if (related.synonyms.length || related.similars.length) {
+        setSynonymsTip(synonyms);
+        setSimilarsTip(similars);
+        if (synonyms.length || similars.length) {
           await updateWord({
             ...word,
-            synonyms: related.synonyms,
-            similars: related.similars,
+            synonyms,
+            similars,
           });
         }
       } catch {
@@ -815,6 +820,10 @@ export function usePracticeSession() {
         wasNew: !!current.wasNew,
         correct: !!wasCorrect,
       });
+      const when = formatNextReview(updated.nextReview);
+      message.info(
+        wasCorrect ? `答对 · 下次复习：${when}` : `答错 · 已回退，${when}再练`
+      );
     }
     if (idx + 1 >= total) {
       setPhase('done');

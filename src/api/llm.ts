@@ -4,7 +4,7 @@
  */
 
 import type { Settings } from '@/types/settings';
-import type { RelatedWord, Word } from '@/types/word';
+import type { Collocation, RelatedWord, Word } from '@/types/word';
 import { PROVIDERS } from '@/config/providers';
 import { areInflectionVariants, findInflectedFormInSentence } from '@/utils/inflections';
 
@@ -655,11 +655,7 @@ function normalizeSimilarsList(raw: unknown, selfWord: string): RelatedWord[] {
     .slice(0, 2)
     .map((item) => ({
       ...item,
-      note: item.note.startsWith('形近')
-        ? item.note
-        : item.note
-          ? `形近，${item.note}`
-          : '形近易混',
+      note: '',
     }));
 }
 
@@ -714,6 +710,82 @@ Rules:
     };
   } catch {
     return { synonyms: [], similars: [] };
+  }
+}
+
+function normalizeCollocationList(raw: unknown, headword: string): Collocation[] {
+  if (!Array.isArray(raw)) return [];
+  const head = headword.toLowerCase().trim();
+  const out: Collocation[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const o = item as Record<string, unknown>;
+    const phrase = String(o.phrase || o.word || '')
+      .trim()
+      .replace(/\s+/g, ' ')
+      .slice(0, 60);
+    if (!phrase || phrase.length < 3) continue;
+    // Must mention the headword (or a clear inflection)
+    const low = phrase.toLowerCase();
+    const tokens = low.split(/[^a-z']+/).filter(Boolean);
+    const hit = tokens.some(
+      (t) =>
+        t === head ||
+        (head.length >= 4 && (t.startsWith(head) || head.startsWith(t))) ||
+        (t.length >= 4 && head.length >= 4 && (t.includes(head) || head.includes(t)))
+    );
+    if (!hit && !low.includes(head)) continue;
+    if (out.some((x) => x.phrase.toLowerCase() === low)) continue;
+    out.push({
+      phrase,
+      gloss: String(o.gloss || '').trim().slice(0, 40),
+    });
+    if (out.length >= 5) break;
+  }
+  return out;
+}
+
+/**
+ * Generate common fixed collocations / chunks for a headword (IELTS-useful).
+ */
+export async function generateCollocations(
+  word: string,
+  translation: string,
+  settings: Settings
+): Promise<Collocation[]> {
+  if (!word.trim() || !settings.apiKey) return [];
+  const gloss = (translation || '').trim().slice(0, 80);
+  const prompt = `You are an IELTS vocabulary coach. Give common FIXED COLLOCATIONS / chunks for the headword.
+
+Headword: "${word}"
+Chinese gloss (hint): "${gloss || 'N/A'}"
+
+Return JSON ONLY:
+{
+  "collocations": [
+    {"phrase":"feel elated","gloss":"感到振奋/得意"},
+    {"phrase":"elated at the news","gloss":"听到消息很高兴"}
+  ]
+}
+
+Rules:
+- 3–5 items. Each phrase MUST contain "${word}" (or a natural inflection).
+- Prefer high-frequency verb+noun / adj+noun / prep patterns useful in IELTS Writing/Speaking.
+- phrase: short English chunk (2–6 words), NOT a full sentence.
+- gloss: brief Chinese (≤20字).
+- No invented junk; no rare literary-only phrases.`;
+
+  const text = await callLLM([{ role: 'user', content: prompt }], settings, {
+    temperature: 0.35,
+    jsonMode: true,
+    maxTokens: 700,
+  });
+
+  try {
+    const parsed = parseJsonLoose<{ collocations?: unknown }>(text);
+    return normalizeCollocationList(parsed.collocations, word);
+  } catch {
+    return [];
   }
 }
 
