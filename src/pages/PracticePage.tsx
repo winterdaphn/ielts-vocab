@@ -12,6 +12,7 @@ import ClozePanel from '@/components/practice/ClozePanel';
 import ChoicePanel from '@/components/practice/ChoicePanel';
 import TranslatePanel from '@/components/practice/TranslatePanel';
 import SpeakButton from '@/components/SpeakButton';
+import PhoneticDisplay from '@/components/PhoneticDisplay';
 
 export default function PracticePage() {
   const s = usePracticeSession();
@@ -49,7 +50,7 @@ export default function PracticePage() {
         total={s.stats.total}
         remaining={s.remainingCount}
         onContinue={() => s.startPractice(s.mode, s.scope, s.difficulty)}
-        onHome={() => s.navigate('/today')}
+        onHome={s.exitPractice}
       />
     );
   }
@@ -58,7 +59,7 @@ export default function PracticePage() {
     return (
       <div className="app-card empty">
         <h3>没有题目</h3>
-        <Button type="primary" className="mt-3" onClick={() => s.navigate('/today')}>
+        <Button type="primary" className="mt-3" onClick={s.exitPractice}>
           返回
         </Button>
       </div>
@@ -138,10 +139,12 @@ export default function PracticePage() {
                 </>
               )}
             </div>
-            {current.word.phonetic && (
+            {(current.word.phonetic || current.word.phoneticUs || current.word.phoneticUk) && (
               <div style={{ color: 'var(--text-light)', fontSize: 13, marginBottom: 4 }}>
-                {current.word.phonetic}
-                {current.word.partOfSpeech ? ` · ${current.word.partOfSpeech}` : ''}
+                <PhoneticDisplay word={current.word} withSpeak />
+                {current.word.partOfSpeech ? (
+                  <span> · {current.word.partOfSpeech}</span>
+                ) : null}
               </div>
             )}
           </div>

@@ -110,6 +110,9 @@ export function usePracticeSession() {
   const inflightRef = useRef<Set<string>>(new Set());
   const prefetchRunningRef = useRef(false);
   const prefetchFromRef = useRef(0);
+  /** Words that already failed prefetch this session — do not spin forever */
+  const prefetchFailedRef = useRef<Set<string>>(new Set());
+  const abortRef = useRef<AbortController | null>(null);
   const queueRef = useRef<(Question | null)[]>([]);
   const startedRef = useRef(false);
   /** Snapshot: word was new when this session started */
@@ -136,6 +139,49 @@ export function usePracticeSession() {
       return next;
     });
   }
+
+  function isAbortError(e: unknown): boolean {
+    return (
+      (e instanceof DOMException && e.name === 'AbortError') ||
+      (e instanceof Error && e.name === 'AbortError')
+    );
+  }
+
+  /** Bump session id + abort in-flight LLM so leave/home stops retries. */
+  function cancelSessionWork() {
+    sessionIdRef.current += 1;
+    prefetchRunningRef.current = false;
+    inflightRef.current = new Set();
+    prefetchFailedRef.current = new Set();
+    try {
+      abortRef.current?.abort();
+    } catch {
+      /* ignore */
+    }
+    abortRef.current = null;
+  }
+
+  function beginSessionWork(): { sid: number; signal: AbortSignal } {
+    try {
+      abortRef.current?.abort();
+    } catch {
+      /* ignore */
+    }
+    const ac = new AbortController();
+    abortRef.current = ac;
+    const sid = ++sessionIdRef.current;
+    inflightRef.current = new Set();
+    prefetchRunningRef.current = false;
+    prefetchFailedRef.current = new Set();
+    return { sid, signal: ac.signal };
+  }
+
+  // Leave practice page → stop background prefetch / LLM retries
+  useEffect(() => {
+    return () => {
+      cancelSessionWork();
+    };
+  }, []);
 
   function persist(overrides: Partial<{
     phase: Phase;
@@ -331,13 +377,22 @@ export function usePracticeSession() {
 
   /** Returns error message if generation failed hard (API / parse). */
   async function fillBatch(sid: number, list: Word[], m: Mode, pool: Word[]): Promise<string> {
-    const todo = list.filter((w) => !inflightRef.current.has(w.id) && !queueRef.current[pool.findIndex((x) => x.id === w.id)]);
+    const todo = list.filter(
+      (w) =>
+        !inflightRef.current.has(w.id) &&
+        !prefetchFailedRef.current.has(w.id) &&
+        !queueRef.current[pool.findIndex((x) => x.id === w.id)]
+    );
     if (!todo.length) return '';
     todo.forEach((w) => inflightRef.current.add(w.id));
 
     try {
+      const signal = abortRef.current?.signal;
       const map = await generatePracticeBatch(todo, llmGenMode(m), settings, {
         difficulty: difficultyRef.current,
+        signal,
+        // Prefetch already loops; avoid 2× API calls per word on soft failures
+        noRetry: todo.length > 1,
       });
       if (sessionIdRef.current !== sid) return '';
 
@@ -351,6 +406,7 @@ export function usePracticeSession() {
       setQueue(next);
 
       const failed = todo.filter((w) => !map[w.id]);
+      for (const w of failed) prefetchFailedRef.current.add(w.id);
       if (failed.length) {
         console.warn('[practice] fillBatch missing', failed.map((w) => w.word).join(', '));
       }
@@ -359,7 +415,9 @@ export function usePracticeSession() {
       }
       return '';
     } catch (e) {
+      if (isAbortError(e) || sessionIdRef.current !== sid) return '';
       console.warn('[practice] fillBatch error', e);
+      for (const w of todo) prefetchFailedRef.current.add(w.id);
       const msg =
         e instanceof Error && e.message
           ? e.message
@@ -386,9 +444,7 @@ export function usePracticeSession() {
       return;
     }
 
-    const sid = ++sessionIdRef.current;
-    inflightRef.current = new Set();
-    prefetchRunningRef.current = false;
+    const { sid } = beginSessionWork();
 
     setMode(hydrated.mode);
     setScope(hydrated.scope);
@@ -428,31 +484,62 @@ export function usePracticeSession() {
   function kickPrefetch(sid: number, pool: Word[], m: Mode, fromIdx: number) {
     prefetchFromRef.current = fromIdx;
     if (prefetchRunningRef.current) return;
+    if (sessionIdRef.current !== sid) return;
     prefetchRunningRef.current = true;
     (async () => {
       try {
+        let idleRounds = 0;
         while (sessionIdRef.current === sid) {
           const start = prefetchFromRef.current;
           const missing: Word[] = [];
           const end = Math.min(pool.length, start + PREFETCH_AHEAD);
           for (let i = start; i < end && missing.length < PREFETCH_BATCH; i++) {
             const w = pool[i];
-            if (!queueRef.current[i] && !inflightRef.current.has(w.id)) {
+            if (
+              !queueRef.current[i] &&
+              !inflightRef.current.has(w.id) &&
+              !prefetchFailedRef.current.has(w.id)
+            ) {
               missing.push(w);
             }
           }
           if (!missing.length) break;
+
+          const filledBefore = missing.filter((w) => {
+            const i = pool.findIndex((x) => x.id === w.id);
+            return i >= 0 && !!queueRef.current[i];
+          }).length;
+
           await fillBatch(sid, missing, m, pool);
+          if (sessionIdRef.current !== sid) break;
+
+          const filledAfter = missing.filter((w) => {
+            const i = pool.findIndex((x) => x.id === w.id);
+            return i >= 0 && !!queueRef.current[i];
+          }).length;
+
+          // No progress → stop spinning on the same failures
+          if (filledAfter <= filledBefore) {
+            idleRounds += 1;
+            if (idleRounds >= 1) break;
+          } else {
+            idleRounds = 0;
+          }
         }
       } finally {
         prefetchRunningRef.current = false;
-        // If idx advanced while we were running, kick again
+        // Only re-kick if idx advanced and there are still non-failed gaps
         if (sessionIdRef.current === sid) {
           const start = prefetchFromRef.current;
           const end = Math.min(pool.length, start + PREFETCH_AHEAD);
-          const stillNeed = pool.slice(start, end).some(
-            (_w, j) => !queueRef.current[start + j] && !inflightRef.current.has(pool[start + j].id)
-          );
+          const stillNeed = pool.slice(start, end).some((w, j) => {
+            const i = start + j;
+            return (
+              !queueRef.current[i] &&
+              !inflightRef.current.has(w.id) &&
+              !prefetchFailedRef.current.has(w.id)
+            );
+          });
           if (stillNeed) kickPrefetch(sid, pool, m, start);
         }
       }
@@ -485,9 +572,7 @@ export function usePracticeSession() {
 
     wasNewRef.current = new Map(pool.map((w) => [w.id, isNew(w)]));
 
-    const sid = ++sessionIdRef.current;
-    inflightRef.current = new Set();
-    prefetchRunningRef.current = false;
+    const { sid } = beginSessionWork();
 
     setMode(m);
     setSessionWords(pool);
@@ -591,6 +676,7 @@ export function usePracticeSession() {
       persist();
       message.info('进度已保存，可随时继续');
     }
+    cancelSessionWork();
     navigate('/today');
   }
 
@@ -610,13 +696,15 @@ export function usePracticeSession() {
     const sid = sessionIdRef.current;
     const w = sessionWords[idx];
     if (!w) return;
-    fillBatch(sid, [w], mode, sessionWords).then(() => {
+    // Manual wait for current card — allow one more attempt even if prefetch failed it
+    prefetchFailedRef.current.delete(w.id);
+    fillBatch(sid, [w], mode, sessionWords).then((err) => {
       if (sessionIdRef.current !== sid) return;
       if (queueRef.current[idx]) {
         setGenError('');
         setPhase('asking');
       } else {
-        setGenError('本题出题失败，请点下方「重试出题」');
+        setGenError(err || '本题出题失败，请点下方「重试出题」');
         message.error('本题出题失败，可重试');
       }
     });
@@ -885,12 +973,14 @@ export function usePracticeSession() {
       return next;
     });
     inflightRef.current.delete(w.id);
+    prefetchFailedRef.current.delete(w.id);
 
     try {
       const map = await generatePracticeBatch([w], llmGenMode(m), settings, {
         avoidEn: prevEn ? [prevEn] : [],
         diverse: true,
         difficulty: difficultyRef.current,
+        signal: abortRef.current?.signal,
       });
       if (sessionIdRef.current !== sid) return;
       if (!map[w.id]) {
@@ -916,7 +1006,7 @@ export function usePracticeSession() {
       setPhase('asking');
       message.success('已换一句');
     } catch (e) {
-      if (sessionIdRef.current !== sid) return;
+      if (isAbortError(e) || sessionIdRef.current !== sid) return;
       if (prevQuestion) {
         setQueueBoth((prev) => {
           const next = [...prev];
@@ -937,6 +1027,7 @@ export function usePracticeSession() {
     const sid = sessionIdRef.current;
     setPhase('loading');
     inflightRef.current.delete(sessionWords[idx].id);
+    prefetchFailedRef.current.delete(sessionWords[idx].id);
     await fillBatch(sid, [sessionWords[idx]], mode, sessionWords);
     if (sessionIdRef.current !== sid) return;
     if (queueRef.current[idx]) {

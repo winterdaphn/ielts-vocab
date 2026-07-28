@@ -12,6 +12,7 @@ import {
   UserOutlined,
   DatabaseOutlined,
   RobotOutlined,
+  BookOutlined,
 } from '@ant-design/icons';
 import { useSettings } from '@/store/useSettings';
 import { useAuth } from '@/store/useAuth';
@@ -25,8 +26,19 @@ import { makeNewWord } from '@/store/useWords';
 import type { Word } from '@/types/word';
 import { useNavigate } from 'react-router-dom';
 import { modeLabel, parsePracticeMode } from '@/utils/practiceSession';
+import ieltsVocabBank from '@/json/ielts-vocab.json';
 
 type Tab = 'ai' | 'data' | 'account';
+
+interface VocabBankEntry {
+  word: string;
+  phonetic?: string;
+  phoneticUk?: string;
+  phoneticUs?: string;
+  pos?: string;
+  translation?: string;
+  source?: string;
+}
 
 function modeLabelSafe(mode: unknown): string {
   return modeLabel(parsePracticeMode(typeof mode === 'string' ? mode : undefined));
@@ -162,6 +174,7 @@ function DataSettings() {
   const [pasteText, setPasteText] = useState('');
   const [pushing, setPushing] = useState(false);
   const [pulling, setPulling] = useState(false);
+  const [importingSource, setImportingSource] = useState<'ielts' | 'kaoyan' | null>(null);
 
   async function handleExport() {
     const data = { version: 1, exportedAt: new Date().toISOString(), words };
@@ -192,6 +205,62 @@ function DataSettings() {
       added++;
     }
     message.success(`已导入 ${added} 个单词${skipped ? `（${skipped} 个跳过）` : ''}`);
+  }
+
+  async function handleImportBankVocab(source: 'ielts' | 'kaoyan') {
+    const label = source === 'ielts' ? '雅思' : '考研';
+    const bank = ieltsVocabBank as VocabBankEntry[];
+    const entries = bank.filter((w) => w.source === source && w.word);
+    const existing = new Set(words.map((w) => w.word.toLowerCase()));
+    const toAdd: Word[] = [];
+    let skipped = 0;
+
+    for (const entry of entries) {
+      if (existing.has(entry.word.toLowerCase())) {
+        skipped++;
+        continue;
+      }
+      toAdd.push(
+        makeNewWord({
+          word: entry.word,
+          translation: entry.translation || '',
+          phonetic: entry.phonetic || entry.phoneticUk || entry.phoneticUs || '',
+          phoneticUk: entry.phoneticUk || '',
+          phoneticUs: entry.phoneticUs || '',
+          partOfSpeech: entry.pos || '',
+        })
+      );
+      existing.add(entry.word.toLowerCase());
+    }
+
+    if (toAdd.length === 0) {
+      message.info(`${label}词库里没有新词可导入（已跳过 ${skipped} 个）`);
+      return;
+    }
+
+    const confirmed = await new Promise<boolean>((resolve) => {
+      modal.confirm({
+        title: `导入${label}词汇？`,
+        content: `将从内置词库导入 ${toAdd.length} 个${label}单词${
+          skipped ? `（已有 ${skipped} 个会跳过）` : ''
+        }。不会覆盖你现有的词。`,
+        okText: '导入',
+        cancelText: '取消',
+        onOk: () => resolve(true),
+        onCancel: () => resolve(false),
+      });
+    });
+    if (!confirmed) return;
+
+    setImportingSource(source);
+    try {
+      await useWordsStore.getState().addWords(toAdd);
+      message.success(`已导入 ${toAdd.length} 个${label}单词${skipped ? `（跳过 ${skipped} 个）` : ''}`);
+    } catch (e) {
+      message.error('导入失败：' + (e instanceof Error ? e.message : '未知错误'));
+    } finally {
+      setImportingSource(null);
+    }
   }
 
   async function handlePush() {
@@ -251,6 +320,23 @@ function DataSettings() {
           <Button icon={<ExportOutlined />} onClick={handleExport}>导出</Button>
           <Button icon={<ImportOutlined />} onClick={() => fileInputRef.current?.click()}>
             选择文件导入
+          </Button>
+          <Button
+            type="primary"
+            icon={<BookOutlined />}
+            loading={importingSource === 'ielts'}
+            disabled={importingSource !== null}
+            onClick={() => handleImportBankVocab('ielts')}
+          >
+            导入雅思词汇
+          </Button>
+          <Button
+            icon={<BookOutlined />}
+            loading={importingSource === 'kaoyan'}
+            disabled={importingSource !== null}
+            onClick={() => handleImportBankVocab('kaoyan')}
+          >
+            导入考研词汇
           </Button>
           <input
             ref={fileInputRef}

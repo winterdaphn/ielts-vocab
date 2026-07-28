@@ -1,5 +1,6 @@
 /**
- * English inflection helpers — lemma guess + duplicate detection.
+ * English inflection helpers — lemma guess, duplicate detection,
+ * and cloze sentence acceptance.
  */
 
 const VOWELS = new Set(['a', 'e', 'i', 'o', 'u']);
@@ -45,49 +46,62 @@ const IRREGULAR_LEMMA: Record<string, string> = {
   most: 'much',
 };
 
-/** Stem a verb roughly: walked→walk, running→run, studies→study */
-function stemVerb(w: string): string {
-  let s = w;
-  s = s.replace(/ies$/, 'y');
-  s = s.replace(/ing$/, '');
-  s = s.replace(/ed$/, '');
-  if (s.length >= 3) {
-    const last = s[s.length - 1];
-    const prev = s[s.length - 2];
-    const before = s[s.length - 3];
-    if (
-      VOWELS.has(before) &&
-      !VOWELS.has(prev) &&
-      last === prev &&
-      s.length >= 4
-    ) {
-      s = s.slice(0, -1);
+/** Collect comparable stems so embracing ↔ embraced ↔ embrace share a key. */
+function verbStemKeys(w: string): Set<string> {
+  const s = w.toLowerCase();
+  const keys = new Set<string>([s]);
+
+  let stem = s;
+  if (/ies$/.test(stem)) stem = stem.replace(/ies$/, 'y');
+  else if (/ing$/.test(stem) && stem.length > 4) stem = stem.slice(0, -3);
+  else if (/ed$/.test(stem) && stem.length > 3) stem = stem.slice(0, -2);
+  else if (/es$/.test(stem) && stem.length > 3) stem = stem.slice(0, -2);
+  else if (/s$/.test(stem) && stem.length > 3 && !/ss$/.test(stem)) stem = stem.slice(0, -1);
+
+  // running → runn → run
+  if (stem.length >= 3) {
+    const last = stem[stem.length - 1];
+    const prev = stem[stem.length - 2];
+    const before = stem[stem.length - 3];
+    if (VOWELS.has(before) && !VOWELS.has(prev) && last === prev) {
+      stem = stem.slice(0, -1);
     }
   }
-  return s;
+
+  keys.add(stem);
+  // silent -e: embrac ↔ embrace
+  if (stem.endsWith('e')) keys.add(stem.slice(0, -1));
+  else keys.add(stem + 'e');
+
+  return keys;
 }
 
 /** Stem a plural noun: dogs→dog, boxes→box, cities→city */
 function stemNoun(w: string): string {
-  let s = w;
+  let s = w.toLowerCase();
   s = s.replace(/ies$/, 'y');
   s = s.replace(/ves$/, 'f');
-  s = s.replace(/es$/, '');
-  s = s.replace(/s$/, '');
+  if (/xes$|ches$|shes$|sses$|zes$/.test(s)) s = s.replace(/es$/, '');
+  else s = s.replace(/s$/, '');
   return s;
 }
 
 export function areInflectionVariants(a: string, b: string): boolean {
-  if (a === b) return true;
+  if (!a || !b) return false;
   const al = a.toLowerCase();
   const bl = b.toLowerCase();
   if (al === bl) return true;
+
   const la = guessLemma(al);
   const lb = guessLemma(bl);
   if (la === lb) return true;
-  if (stemVerb(al) === stemVerb(bl)) return true;
+
+  const va = verbStemKeys(al);
+  for (const k of verbStemKeys(bl)) {
+    if (va.has(k)) return true;
+  }
+
   if (stemNoun(al) === stemNoun(bl)) return true;
-  if (stemVerb(al) === bl || al === stemVerb(bl)) return true;
   if (stemNoun(al) === bl || al === stemNoun(bl)) return true;
   return false;
 }
@@ -134,7 +148,7 @@ export function guessLemma(raw: string): string {
 
   // -ing
   if (/ing$/i.test(w) && w.length > 5) {
-    let s = w.slice(0, -3);
+    const s = w.slice(0, -3);
     // running → runn → run
     if (
       s.length >= 2 &&
@@ -154,7 +168,7 @@ export function guessLemma(raw: string): string {
 
   // -ed
   if (/ed$/i.test(w) && w.length > 4) {
-    let s = w.slice(0, -2);
+    const s = w.slice(0, -2);
     // stopped → stopp → stop
     if (
       s.length >= 2 &&
@@ -194,4 +208,19 @@ export function resolveLemma(input: string, aiLemma?: string | null): string {
     return fromAi;
   }
   return guessLemma(raw) || raw;
+}
+
+/** Find the token in `sentence` that matches `word` (incl. inflections). */
+export function findInflectedFormInSentence(sentence: string, word: string): string | null {
+  const w = word.trim();
+  if (!w || !sentence) return null;
+  const tokens = sentence.match(/[A-Za-z][A-Za-z'-]*/g) || [];
+  for (const t of tokens) {
+    if (areInflectionVariants(t, w)) return t;
+  }
+  return null;
+}
+
+export function sentenceContainsWordForm(sentence: string, word: string): boolean {
+  return !!findInflectedFormInSentence(sentence, word);
 }

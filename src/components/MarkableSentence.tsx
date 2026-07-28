@@ -87,6 +87,8 @@ export default function MarkableSentence({
       let formNote = '';
       let translation = '';
       let phonetic = '';
+      let phoneticUs = '';
+      let phoneticUk = '';
       let partOfSpeech = '';
       let synonyms: RelatedWord[] = [];
       let similars: RelatedWord[] = [];
@@ -97,6 +99,8 @@ export default function MarkableSentence({
           lemma = resolveLemma(clicked, info.lemma);
           formNote = info.formNote || '';
           if (info.translation) translation = info.translation;
+          if (info.phoneticUs) phoneticUs = info.phoneticUs;
+          if (info.phoneticUk) phoneticUk = info.phoneticUk;
           if (info.phonetic) phonetic = info.phonetic;
           if (info.partOfSpeech) partOfSpeech = info.partOfSpeech;
           synonyms = info.synonyms || [];
@@ -107,7 +111,7 @@ export default function MarkableSentence({
       }
 
       // Free dictionary on lemma (better than inflected form)
-      if (!translation || !phonetic) {
+      if (!translation || !phonetic || !phoneticUs || !phoneticUk) {
         try {
           const resp = await fetch(
             `https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(lemma)}`
@@ -120,6 +124,12 @@ export default function MarkableSentence({
                 data[0].phonetic ||
                 data[0].phonetics?.find((p: { text?: string }) => p.text)?.text ||
                 '';
+              for (const p of data[0].phonetics || []) {
+                const t = p?.text || '';
+                const a = p?.audio || '';
+                if (t && /-us\b|_us_|en-us|us\.mp3/i.test(a) && !phoneticUs) phoneticUs = t;
+                if (t && /-uk\b|_uk_|en-uk|uk\.mp3/i.test(a) && !phoneticUk) phoneticUk = t;
+              }
               partOfSpeech = partOfSpeech || data[0].meanings?.[0]?.partOfSpeech || '';
               const def = data[0].meanings?.[0]?.definitions?.[0]?.definition;
               if (!translation && def) translation = def;
@@ -131,6 +141,7 @@ export default function MarkableSentence({
       }
 
       if (!translation) translation = '（待补充释义）';
+      phonetic = phonetic || phoneticUk || phoneticUs;
 
       const related =
         findRelated(lemma) ||
@@ -151,6 +162,8 @@ export default function MarkableSentence({
           crossedOut: false,
           translation,
           phonetic: phonetic || related.entry.phonetic,
+          phoneticUs: phoneticUs || related.entry.phoneticUs,
+          phoneticUk: phoneticUk || related.entry.phoneticUk,
           partOfSpeech: partOfSpeech || related.entry.partOfSpeech,
           synonyms: synonyms.length ? synonyms : related.entry.synonyms,
           similars: similars.length ? similars : related.entry.similars,
@@ -162,6 +175,8 @@ export default function MarkableSentence({
             word: lemma,
             translation,
             phonetic,
+            phoneticUs,
+            phoneticUk,
             partOfSpeech,
             synonyms,
             similars,

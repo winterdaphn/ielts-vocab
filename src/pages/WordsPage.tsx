@@ -1,6 +1,5 @@
 import { useState, useMemo } from 'react';
 import { Popconfirm, App } from 'antd';
-import { SoundOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useUserWords, useWordsStore } from '@/store/useWords';
 import {
@@ -13,6 +12,7 @@ import {
 } from '@/utils/scheduler';
 import { relatedSummaryLine } from '@/components/RelatedWordsList';
 import type { Word } from '@/types/word';
+import PhoneticDisplay from '@/components/PhoneticDisplay';
 
 type Filter = 'all' | 'due' | 'new' | 'learning' | 'mastered' | 'crossed';
 
@@ -72,19 +72,6 @@ export default function WordsPage() {
     message.success('已删除');
   }
 
-  function speak(text: string, e: React.MouseEvent<HTMLButtonElement>) {
-    e.stopPropagation();
-    if (!window.speechSynthesis) return;
-    const btn = e.currentTarget;
-    window.speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text);
-    u.lang = 'en-US';
-    btn.classList.add('speaking');
-    u.onend = () => btn.classList.remove('speaking');
-    u.onerror = () => btn.classList.remove('speaking');
-    window.speechSynthesis.speak(u);
-  }
-
   return (
     <div>
       <div className="app-header">
@@ -131,15 +118,7 @@ export default function WordsPage() {
               <div className="word-main">
                 <div className="word-row">
                   <span className="word">{w.word}</span>
-                  {w.phonetic && <span className="phonetic">{w.phonetic}</span>}
-                  <button
-                    type="button"
-                    className="speak-btn"
-                    title="发音"
-                    onClick={(e) => speak(w.word, e)}
-                  >
-                    <SoundOutlined />
-                  </button>
+                  <PhoneticDisplay word={w} withSpeak />
                 </div>
                 <div className={`translation ${w.translation ? '' : 'mute'}`}>
                   {w.translation || '暂无翻译'}

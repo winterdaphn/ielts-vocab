@@ -5,6 +5,7 @@ import { useWordsStore, makeNewWord, useUserWords } from '@/store/useWords';
 import { areInflectionVariants, resolveLemma } from '@/utils/inflections';
 import { lookupWordInfo } from '@/api/llm';
 import RelatedWordsList from '@/components/RelatedWordsList';
+import PhoneticDisplay from '@/components/PhoneticDisplay';
 import type { RelatedWord } from '@/types/word';
 
 export default function AddPage() {
@@ -17,13 +18,15 @@ export default function AddPage() {
   const [formNote, setFormNote] = useState('');
   const [translation, setTranslation] = useState('');
   const [phonetic, setPhonetic] = useState('');
+  const [phoneticUs, setPhoneticUs] = useState('');
+  const [phoneticUk, setPhoneticUk] = useState('');
   const [partOfSpeech, setPartOfSpeech] = useState('');
   const [mnemonic, setMnemonic] = useState('');
   const [synonyms, setSynonyms] = useState<RelatedWord[]>([]);
   const [similars, setSimilars] = useState<RelatedWord[]>([]);
   const [generating, setGenerating] = useState(false);
 
-  const hasPreview = !!(translation || phonetic);
+  const hasPreview = !!(translation || phonetic || phoneticUs || phoneticUk);
   const showedLemmaHint =
     !!inputRaw && !!word && inputRaw.toLowerCase() !== word.toLowerCase();
 
@@ -33,6 +36,8 @@ export default function AddPage() {
     setFormNote('');
     setTranslation('');
     setPhonetic('');
+    setPhoneticUs('');
+    setPhoneticUk('');
     setPartOfSpeech('');
     setMnemonic('');
     setSynonyms([]);
@@ -57,7 +62,11 @@ export default function AddPage() {
       setWord(lemma);
       setFormNote(info.formNote || (lemma !== typed.toLowerCase() ? '词形变化' : ''));
       if (info.translation) setTranslation(info.translation);
+      if (info.phoneticUs) setPhoneticUs(info.phoneticUs);
+      if (info.phoneticUk) setPhoneticUk(info.phoneticUk);
       if (info.phonetic) setPhonetic(info.phonetic);
+      else if (info.phoneticUk) setPhonetic(info.phoneticUk);
+      else if (info.phoneticUs) setPhonetic(info.phoneticUs);
       if (info.partOfSpeech) setPartOfSpeech(info.partOfSpeech);
       if (info.mnemonic) setMnemonic(info.mnemonic);
       setSynonyms(info.synonyms || []);
@@ -88,7 +97,9 @@ export default function AddPage() {
     const w = makeNewWord({
       word: saveAs,
       translation: translation.trim(),
-      phonetic: phonetic.trim(),
+      phonetic: phonetic.trim() || phoneticUk.trim() || phoneticUs.trim(),
+      phoneticUs: phoneticUs.trim(),
+      phoneticUk: phoneticUk.trim(),
       partOfSpeech: partOfSpeech.trim(),
       mnemonic: mnemonic.trim(),
       synonyms,
@@ -165,7 +176,10 @@ export default function AddPage() {
             <div className="word-main">
               <div className="word-row">
                 <span className="word">{word}</span>
-                {phonetic && <span className="phonetic">{phonetic}</span>}
+                <PhoneticDisplay
+                  word={{ word, phonetic, phoneticUs, phoneticUk }}
+                  withSpeak
+                />
               </div>
               <span className="translation">{translation}</span>
             </div>
