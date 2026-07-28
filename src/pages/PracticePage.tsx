@@ -161,12 +161,17 @@ export default function PracticePage() {
             judgeResult={s.judgeResult}
             mnemonicTip={s.mnemonicTip}
             mnemonicLoading={s.mnemonicLoading}
+            synonymsTip={s.synonymsTip}
+            similarsTip={s.similarsTip}
+            relatedLoading={s.relatedLoading}
             structureTip={s.structureTip}
             structureLoading={s.structureLoading}
+            structureAvailable={s.structureAvailable}
             judging={judging}
             onUserTextChange={s.setUserText}
             onHint={() => s.setHintShown(true)}
             onSubmit={s.submitClozeInput}
+            onRequestStructure={s.requestStructureTip}
           />
         ) : s.mode === 'choice' ? (
           <ChoicePanel
@@ -174,10 +179,15 @@ export default function PracticePage() {
             showAnswer={s.showAnswer}
             hintShown={s.hintShown}
             picked={s.picked}
+            synonymsTip={s.synonymsTip}
+            similarsTip={s.similarsTip}
+            relatedLoading={s.relatedLoading}
             structureTip={s.structureTip}
             structureLoading={s.structureLoading}
+            structureAvailable={s.structureAvailable}
             onPick={s.pickAnswer}
             onHint={() => s.setHintShown(true)}
+            onRequestStructure={s.requestStructureTip}
           />
         ) : (
           <TranslatePanel

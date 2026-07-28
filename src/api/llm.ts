@@ -4,7 +4,7 @@
  */
 
 import type { Settings } from '@/types/settings';
-import type { Word } from '@/types/word';
+import type { RelatedWord, Word } from '@/types/word';
 import { PROVIDERS } from '@/config/providers';
 import { areInflectionVariants } from '@/utils/inflections';
 
@@ -475,29 +475,227 @@ Output ONLY valid JSON.`;
 }
 
 export async function lookupWordInfo(word: string, settings: Settings): Promise<{
+  /** Dictionary headword / lemma (prefer this when saving) */
+  lemma?: string;
+  /** How the input relates to lemma, e.g. 「复数」「现在分词」「第三人称单数」 */
+  formNote?: string;
   phonetic?: string;
   partOfSpeech?: string;
   translation?: string;
   mnemonic?: string;
+  synonyms?: RelatedWord[];
+  similars?: RelatedWord[];
 }> {
   const text = await callLLM(
     [
       {
         role: 'system',
-        content: `You are an IELTS vocabulary assistant. Given an English word, output JSON:
-{ "phonetic": "IPA in /.../", "partOfSpeech": "n./v./adj./adv.", "translation": "最常见的中文释义", "mnemonic": "a short Chinese memory aid (≤20字)" }
-Output ONLY valid JSON.`,
+        content: `You are an IELTS vocabulary assistant. The user may paste an inflected form (plural, -ing, -ed, 3rd-person -s, etc.).
+
+Always reduce to the dictionary HEADWORD (lemma) used in learner word lists.
+Examples: ingredients→ingredient, possesses→possess, running→run, studied→study, better→good (only if clearly comparative of good).
+
+Also give 2–3 near-synonyms and 0–2 ORTHOGRAPHIC look-alikes (形近词) for the LEMMA.
+- synonyms: similar meaning, often interchangeable with a nuance note
+- similars: ONLY real, standalone dictionary headwords that IELTS learners often mix up because the SPELLING looks almost the same (classic traps). Good examples: affect/effect, principal/principle, desert/dessert, adapt/adopt, accept/except, advice/advise, stationary/stationery.
+  Quality over quantity: if there is no well-known spelling trap for this lemma, return "similars": [].
+  FORBIDDEN: invented words, glued phrases (insightof, insightof, insightful-of), multi-word expressions written as one token, morphological extensions of the same word (insight→insightful), pure sound-alikes with very different spelling, topic-related or semantic near-misses.
+Do NOT include the lemma itself in either list.
+
+Output JSON ONLY:
+{
+  "lemma": "base dictionary form in lowercase",
+  "formNote": "中文说明词形，如「复数」「现在分词」「过去式」「第三人称单数」；若输入已是原形则空字符串",
+  "phonetic": "IPA of the LEMMA in /.../",
+  "partOfSpeech": "n./v./adj./adv. of the LEMMA",
+  "translation": "LEMMA 最常见的中文释义（不要只写「xxx的复数」）",
+  "mnemonic": "short Chinese memory aid for the LEMMA (≤20字)",
+  "synonyms": [{"word":"precise","gloss":"精确的","note":"更强调精密"}],
+  "similars": [{"word":"effect","gloss":"影响/结果","note":"形近：affect 是动词"}]
+}`,
       },
       { role: 'user', content: word },
     ],
     settings,
-    { temperature: 0.2, jsonMode: true }
+    { temperature: 0.1, jsonMode: true }
   );
 
   try {
-    return JSON.parse(text);
+    const parsed = parseJsonLoose<{
+      lemma?: string;
+      formNote?: string;
+      phonetic?: string;
+      partOfSpeech?: string;
+      translation?: string;
+      mnemonic?: string;
+      synonyms?: unknown;
+      similars?: unknown;
+    }>(text);
+    const lemma = parsed.lemma ? String(parsed.lemma).trim() : word;
+    return {
+      lemma: parsed.lemma ? String(parsed.lemma).trim() : undefined,
+      formNote: parsed.formNote ? String(parsed.formNote).trim() : undefined,
+      phonetic: parsed.phonetic ? String(parsed.phonetic).trim() : undefined,
+      partOfSpeech: parsed.partOfSpeech ? String(parsed.partOfSpeech).trim() : undefined,
+      translation: parsed.translation ? String(parsed.translation).trim() : undefined,
+      mnemonic: parsed.mnemonic ? String(parsed.mnemonic).trim() : undefined,
+      synonyms: normalizeRelatedList(parsed.synonyms, lemma),
+      similars: normalizeSimilarsList(parsed.similars, lemma),
+    };
   } catch {
     return {};
+  }
+}
+
+function normalizeRelatedList(raw: unknown, selfWord: string): RelatedWord[] {
+  if (!Array.isArray(raw)) return [];
+  const self = selfWord.toLowerCase().trim();
+  const out: RelatedWord[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const o = item as Record<string, unknown>;
+    const w = String(o.word || '')
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z'-]/g, '');
+    if (!w || w === self || w.length < 2) continue;
+    if (out.some((x) => x.word === w)) continue;
+    out.push({
+      word: w,
+      gloss: String(o.gloss || '').trim().slice(0, 40),
+      note: String(o.note || '').trim().slice(0, 48),
+    });
+    if (out.length >= 4) break;
+  }
+  return out;
+}
+
+/** Levenshtein distance for short dictionary lemmas */
+function editDistance(a: string, b: string): number {
+  const m = a.length;
+  const n = b.length;
+  const dp: number[] = Array.from({ length: n + 1 }, (_, j) => j);
+  for (let i = 1; i <= m; i++) {
+    let prev = dp[0];
+    dp[0] = i;
+    for (let j = 1; j <= n; j++) {
+      const tmp = dp[j];
+      dp[j] =
+        a[i - 1] === b[j - 1]
+          ? prev
+          : 1 + Math.min(prev, dp[j], dp[j - 1]);
+      prev = tmp;
+    }
+  }
+  return dp[n];
+}
+
+/** Keep only credible spelling traps (形近); drop glued junk / morphological pads */
+function isOrthographicLookAlike(a: string, b: string): boolean {
+  const x = a.toLowerCase().replace(/[^a-z]/g, '');
+  const y = b.toLowerCase().replace(/[^a-z]/g, '');
+  if (!x || !y || x === y) return false;
+  if (x.length < 4 || y.length < 4) return false;
+
+  // insight ⊂ insightof / economic ⊂ economical — not a classic spelling trap
+  if (x.includes(y) || y.includes(x)) return false;
+
+  const d = editDistance(x, y);
+  const maxLen = Math.max(x.length, y.length);
+  const lenDiff = Math.abs(x.length - y.length);
+  if (d < 1 || d > 2) return false;
+  if (lenDiff > 2) return false;
+  if (d / maxLen > 0.4) return false;
+
+  // Require substantial shared letters (not random short overlap)
+  const shorter = x.length <= y.length ? x : y;
+  const longer = x.length <= y.length ? y : x;
+  let sharedPrefix = 0;
+  while (sharedPrefix < shorter.length && shorter[sharedPrefix] === longer[sharedPrefix]) {
+    sharedPrefix++;
+  }
+  let sharedSuffix = 0;
+  while (
+    sharedSuffix < shorter.length - sharedPrefix &&
+    shorter[shorter.length - 1 - sharedSuffix] === longer[longer.length - 1 - sharedSuffix]
+  ) {
+    sharedSuffix++;
+  }
+  if (sharedPrefix + sharedSuffix < Math.min(3, shorter.length - 1)) return false;
+  return true;
+}
+
+function normalizeSimilarsList(raw: unknown, selfWord: string): RelatedWord[] {
+  return normalizeRelatedList(raw, selfWord)
+    .filter((item) => {
+      const w = item.word;
+      // Single token, letters only (no glued "insightof"-style nonsense heuristics beyond distance)
+      if (!/^[a-z]+$/.test(w)) return false;
+      if (w.length > 16) return false;
+      return isOrthographicLookAlike(w, selfWord);
+    })
+    .slice(0, 2)
+    .map((item) => ({
+      ...item,
+      note: item.note.startsWith('形近')
+        ? item.note
+        : item.note
+          ? `形近，${item.note}`
+          : '形近易混',
+    }));
+}
+
+/**
+ * Generate near-synonyms + orthographic look-alikes (形近词) for a headword.
+ * Used by practice reveal and word detail page.
+ */
+export async function generateRelatedWords(
+  word: string,
+  translation: string,
+  settings: Settings
+): Promise<{ synonyms: RelatedWord[]; similars: RelatedWord[] }> {
+  if (!word.trim() || !settings.apiKey) {
+    return { synonyms: [], similars: [] };
+  }
+  const gloss = (translation || '').trim().slice(0, 80);
+  const prompt = `You are an IELTS vocabulary coach. For the headword below, produce related words to help memory.
+
+Headword: "${word}"
+Chinese gloss (hint): "${gloss || 'N/A'}"
+
+Return JSON ONLY:
+{
+  "synonyms": [
+    {"word":"precise","gloss":"精确的","note":"更强调精密、一丝不苟"}
+  ],
+  "similars": [
+    {"word":"effect","gloss":"影响/结果","note":"形近：affect 多为动词"}
+  ]
+}
+
+Rules:
+- synonyms: 2–4 items (prefer 3). Near meaning; note = brief Chinese contrast (≤24字). Dictionary lemmas only.
+- similars: 0–2 items ONLY. Real standalone dictionary headwords that learners commonly confuse because SPELLING looks almost the same (differ by ~1–2 letters). Classic traps: affect/effect, principal/principle, desert/dessert, adapt/adopt, accept/except, advice/advise, stationary/stationery.
+  Prefer an EMPTY similars array over weak/forced pairs.
+  FORBIDDEN: invented tokens, glued phrases (e.g. insightof), multi-word expressions as one word, same-word morphology (insight→insightful), 音近但拼写差很多, topic/semantic near-misses.
+  Each similars.note MUST start with「形近」.
+- Do NOT include "${word}" itself
+- Concrete Chinese glosses`;
+
+  const text = await callLLM([{ role: 'user', content: prompt }], settings, {
+    temperature: 0.2,
+    jsonMode: true,
+    maxTokens: 900,
+  });
+
+  try {
+    const parsed = parseJsonLoose<{ synonyms?: unknown; similars?: unknown }>(text);
+    return {
+      synonyms: normalizeRelatedList(parsed.synonyms, word),
+      similars: normalizeSimilarsList(parsed.similars, word),
+    };
+  } catch {
+    return { synonyms: [], similars: [] };
   }
 }
 

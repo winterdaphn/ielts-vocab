@@ -3,6 +3,7 @@ import { useAuth } from '@/store/useAuth';
 import LoginPage from '@/pages/LoginPage';
 import TodayPage from '@/pages/TodayPage';
 import WordsPage from '@/pages/WordsPage';
+import WordDetailPage from '@/pages/WordDetailPage';
 import AddPage from '@/pages/AddPage';
 import SettingsPage from '@/pages/SettingsPage';
 import PracticePage from '@/pages/PracticePage';
@@ -26,6 +27,7 @@ export default function App() {
         <Route path="/" element={<Navigate to="/today" replace />} />
         <Route path="/today" element={<TodayPage />} />
         <Route path="/words" element={<WordsPage />} />
+        <Route path="/words/:id" element={<WordDetailPage />} />
         <Route path="/add" element={<AddPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/practice" element={<PracticePage />} />

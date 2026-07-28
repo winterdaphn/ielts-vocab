@@ -1,3 +1,12 @@
+export interface RelatedWord {
+  /** Related English headword */
+  word: string;
+  /** Short Chinese gloss */
+  gloss: string;
+  /** Contrast / usage note in Chinese (≤30 chars preferred) */
+  note: string;
+}
+
 export interface Word {
   id: string;
   word: string;
@@ -5,6 +14,10 @@ export interface Word {
   phonetic?: string;
   partOfSpeech?: string;
   mnemonic?: string;
+  /** Near-synonyms for richer expression */
+  synonyms?: RelatedWord[];
+  /** Orthographic look-alikes only (形近词), not sound-alikes or semantic near-misses */
+  similars?: RelatedWord[];
   examples: WordExample[];
   crossedOut: boolean;
   ease: number;

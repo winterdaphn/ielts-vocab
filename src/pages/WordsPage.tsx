@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import { Popconfirm, App } from 'antd';
 import { SoundOutlined } from '@ant-design/icons';
+import { useNavigate } from 'react-router-dom';
 import { useUserWords, useWordsStore } from '@/store/useWords';
 import {
   isDue,
@@ -10,6 +11,7 @@ import {
   wordStageLabel,
   wordStageClass,
 } from '@/utils/scheduler';
+import { relatedSummaryLine } from '@/components/RelatedWordsList';
 import type { Word } from '@/types/word';
 
 type Filter = 'all' | 'due' | 'new' | 'learning' | 'mastered' | 'crossed';
@@ -29,6 +31,7 @@ function matchesFilter(w: Word, filter: Filter): boolean {
 
 export default function WordsPage() {
   const { message } = App.useApp();
+  const navigate = useNavigate();
   const words = useUserWords();
   const [filter, setFilter] = useState<Filter>('all');
   const removeWord = useWordsStore((s) => s.removeWord);
@@ -57,7 +60,8 @@ export default function WordsPage() {
     [words, filter]
   );
 
-  async function toggleCrossed(w: Word) {
+  async function toggleCrossed(w: Word, e: React.MouseEvent) {
+    e.stopPropagation();
     const updated = { ...w, crossedOut: !w.crossedOut };
     await updateWord(updated);
     message.success(updated.crossedOut ? '已划掉' : '已恢复');
@@ -85,7 +89,7 @@ export default function WordsPage() {
     <div>
       <div className="app-header">
         <h1>词表</h1>
-        <p>共 {words.length} 个单词 · 单词 · 音标 · 发音 · 词语释义</p>
+        <p>共 {words.length} 个单词 · 点词条查看详情</p>
       </div>
 
       <div className="filter-tabs">
@@ -109,8 +113,21 @@ export default function WordsPage() {
       ) : (
         filtered.map((w) => {
           const stage = getWordStage(w);
+          const summary = relatedSummaryLine(w.synonyms, w.similars);
           return (
-            <div key={w.id} className={`word-list-item ${w.crossedOut ? 'crossed' : ''}`}>
+            <div
+              key={w.id}
+              className={`word-list-item ${w.crossedOut ? 'crossed' : ''}`}
+              role="button"
+              tabIndex={0}
+              onClick={() => navigate(`/words/${w.id}`)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  navigate(`/words/${w.id}`);
+                }
+              }}
+            >
               <div className="word-main">
                 <div className="word-row">
                   <span className="word">{w.word}</span>
@@ -127,16 +144,17 @@ export default function WordsPage() {
                 <div className={`translation ${w.translation ? '' : 'mute'}`}>
                   {w.translation || '暂无翻译'}
                 </div>
+                {summary && <div className="word-related-summary">{summary}</div>}
               </div>
               <div className="meta">
                 <div className="tags">
                   <span className={wordStageClass(stage)}>{wordStageLabel(stage)}</span>
                 </div>
-                <div className="actions">
+                <div className="actions" onClick={(e) => e.stopPropagation()}>
                   <button
                     type="button"
                     title={w.crossedOut ? '恢复' : '划掉'}
-                    onClick={() => toggleCrossed(w)}
+                    onClick={(e) => toggleCrossed(w, e)}
                   >
                     {w.crossedOut ? '↩' : '−'}
                   </button>

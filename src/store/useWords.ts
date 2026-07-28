@@ -74,6 +74,8 @@ export function makeNewWord(input: Partial<Word> & { word: string; translation?:
     phonetic: input.phonetic || '',
     partOfSpeech: input.partOfSpeech || '',
     mnemonic: input.mnemonic || '',
+    synonyms: Array.isArray(input.synonyms) ? input.synonyms : [],
+    similars: Array.isArray(input.similars) ? input.similars : [],
     examples: input.examples || [],
     crossedOut: input.crossedOut ?? false,
     ease: input.ease ?? 2.5,

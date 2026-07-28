@@ -2,9 +2,10 @@ import { useState } from 'react';
 import { App } from 'antd';
 import { useUserWords, useWordsStore, makeNewWord } from '@/store/useWords';
 import { useSettings } from '@/store/useSettings';
-import { areInflectionVariants } from '@/utils/inflections';
+import { areInflectionVariants, resolveLemma } from '@/utils/inflections';
 import { isMarkableToken, normalizeMarkWord } from '@/utils/markWords';
 import { lookupWordInfo } from '@/api/llm';
+import type { RelatedWord } from '@/types/word';
 
 interface Props {
   text: string;
@@ -21,7 +22,7 @@ interface Props {
 
 /**
  * Renders an English sentence with clickable content words.
- * Click → look up + add to local word list (like example.html markable-word).
+ * Click → look up lemma + add to local word list (like example.html markable-word).
  */
 export default function MarkableSentence({
   text,
@@ -57,50 +58,73 @@ export default function MarkableSentence({
 
   async function handleClick(raw: string) {
     if (busy) return;
-    const word = normalizeMarkWord(raw);
-    if (!isMarkableToken(word)) {
+    const clicked = normalizeMarkWord(raw);
+    if (!isMarkableToken(clicked)) {
       message.info('常见词，不用加入');
       return;
     }
 
-    const related = findRelated(word);
-    if (related && !related.entry.crossedOut) {
-      if (related.exact) message.info(`「${word}」已在词表`);
-      else message.info(`词表已有「${related.entry.word}」，「${word}」是词形变化，无需再加`);
+    // Pre-check against clicked form OR local lemma guess
+    const localLemma = resolveLemma(clicked);
+    const relatedEarly =
+      findRelated(clicked) ||
+      (localLemma !== clicked ? findRelated(localLemma) : null);
+    if (relatedEarly && !relatedEarly.entry.crossedOut) {
+      if (relatedEarly.exact && relatedEarly.entry.word.toLowerCase() === clicked) {
+        message.info(`「${clicked}」已在词表`);
+      } else {
+        message.info(
+          `词表已有「${relatedEarly.entry.word}」，「${clicked}」是词形变化，无需再加`
+        );
+      }
       return;
     }
 
     setBusy(true);
-    const hide = message.loading(`正在添加「${word}」…`, 0);
+    const hide = message.loading(`正在添加「${clicked}」…`, 0);
     try {
+      let lemma = localLemma;
+      let formNote = '';
       let translation = '';
       let phonetic = '';
       let partOfSpeech = '';
-
-      // Free dictionary API (same as example.html)
-      try {
-        const resp = await fetch(
-          `https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(word)}`
-        );
-        if (resp.ok) {
-          const data = await resp.json();
-          if (Array.isArray(data) && data[0]) {
-            phonetic = data[0].phonetic || data[0].phonetics?.find((p: { text?: string }) => p.text)?.text || '';
-            partOfSpeech = data[0].meanings?.[0]?.partOfSpeech || '';
-            const def = data[0].meanings?.[0]?.definitions?.[0]?.definition;
-            if (def) translation = def;
-          }
-        }
-      } catch {
-        /* ignore */
-      }
+      let synonyms: RelatedWord[] = [];
+      let similars: RelatedWord[] = [];
 
       if (settings.apiKey) {
         try {
-          const info = await lookupWordInfo(word, settings);
+          const info = await lookupWordInfo(clicked, settings);
+          lemma = resolveLemma(clicked, info.lemma);
+          formNote = info.formNote || '';
           if (info.translation) translation = info.translation;
-          if (info.phonetic) phonetic = phonetic || info.phonetic;
-          if (info.partOfSpeech) partOfSpeech = partOfSpeech || info.partOfSpeech;
+          if (info.phonetic) phonetic = info.phonetic;
+          if (info.partOfSpeech) partOfSpeech = info.partOfSpeech;
+          synonyms = info.synonyms || [];
+          similars = info.similars || [];
+        } catch {
+          /* fall through to free dict */
+        }
+      }
+
+      // Free dictionary on lemma (better than inflected form)
+      if (!translation || !phonetic) {
+        try {
+          const resp = await fetch(
+            `https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(lemma)}`
+          );
+          if (resp.ok) {
+            const data = await resp.json();
+            if (Array.isArray(data) && data[0]) {
+              phonetic =
+                phonetic ||
+                data[0].phonetic ||
+                data[0].phonetics?.find((p: { text?: string }) => p.text)?.text ||
+                '';
+              partOfSpeech = partOfSpeech || data[0].meanings?.[0]?.partOfSpeech || '';
+              const def = data[0].meanings?.[0]?.definitions?.[0]?.definition;
+              if (!translation && def) translation = def;
+            }
+          }
         } catch {
           /* ignore */
         }
@@ -108,29 +132,51 @@ export default function MarkableSentence({
 
       if (!translation) translation = '（待补充释义）';
 
+      const related =
+        findRelated(lemma) ||
+        (lemma !== clicked ? findRelated(clicked) : null) ||
+        relatedEarly;
+
+      if (related?.entry && !related.entry.crossedOut) {
+        message.info(
+          `词表已有「${related.entry.word}」，「${clicked}」是词形变化，无需再加`
+        );
+        return;
+      }
+
       if (related?.entry?.crossedOut) {
         await updateWord({
           ...related.entry,
+          word: lemma,
           crossedOut: false,
           translation,
           phonetic: phonetic || related.entry.phonetic,
           partOfSpeech: partOfSpeech || related.entry.partOfSpeech,
+          synonyms: synonyms.length ? synonyms : related.entry.synonyms,
+          similars: similars.length ? similars : related.entry.similars,
           nextReview: Date.now(),
         });
       } else {
         await addWord(
           makeNewWord({
-            word,
+            word: lemma,
             translation,
             phonetic,
             partOfSpeech,
+            synonyms,
+            similars,
           })
         );
       }
 
-      setJustMarked(word);
+      setJustMarked(clicked);
       setTimeout(() => setJustMarked(null), 600);
-      message.success(`已加入生词「${word}」`);
+      if (lemma !== clicked) {
+        const note = formNote ? `（${formNote}）` : '';
+        message.success(`已加入原形「${lemma}」${note} · 点击的是「${clicked}」`);
+      } else {
+        message.success(`已加入生词「${lemma}」`);
+      }
     } catch (e) {
       message.error('添加失败：' + (e instanceof Error ? e.message : '未知错误'));
     } finally {
@@ -183,7 +229,7 @@ export default function MarkableSentence({
         }
 
         const lower = part.toLowerCase();
-        const related = findRelated(lower);
+        const related = findRelated(lower) || findRelated(resolveLemma(lower));
         const inList = !!(related && !related.entry.crossedOut);
         // 完形答题前不常显「已在词表」，避免像在提示关键词；揭晓后或普通例句仍显示
         const showInList =
@@ -192,7 +238,7 @@ export default function MarkableSentence({
           ? related.exact
             ? '已在词表'
             : `已有词形「${related.entry.word}」`
-          : '点击加入生词';
+          : '点击加入生词（自动还原原形）';
 
         return (
           <span

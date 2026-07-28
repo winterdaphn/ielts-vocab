@@ -4,11 +4,13 @@ import { SoundOutlined } from '@ant-design/icons';
 import MarkableSentence from '@/components/MarkableSentence';
 import SpeakButton from '@/components/SpeakButton';
 import SentenceStructureTip from '@/components/practice/SentenceStructureTip';
+import CollapsibleTip from '@/components/practice/CollapsibleTip';
+import RelatedWordsList from '@/components/RelatedWordsList';
 import type { Question } from '@/utils/practiceSelect';
 import type { JudgeResult } from '@/hooks/usePracticeSession';
 import { speakEnglish, stopSpeaking } from '@/utils/speak';
 import { resolveClozeChinese, type SentenceStructureAnalysis } from '@/api/llm';
-import type { Word } from '@/types/word';
+import type { RelatedWord, Word } from '@/types/word';
 
 interface Props {
   current: Question;
@@ -18,12 +20,17 @@ interface Props {
   judgeResult: JudgeResult;
   mnemonicTip: string;
   mnemonicLoading: boolean;
+  synonymsTip: RelatedWord[];
+  similarsTip: RelatedWord[];
+  relatedLoading: boolean;
   structureTip: SentenceStructureAnalysis | null;
   structureLoading: boolean;
+  structureAvailable?: boolean;
   judging: boolean;
   onUserTextChange: (v: string) => void;
   onHint: () => void;
   onSubmit: () => void;
+  onRequestStructure: () => void;
 }
 
 function ClozeChineseMeaning({ zh, word }: { zh: string; word: Word }) {
@@ -46,12 +53,17 @@ export default function ClozePanel({
   judgeResult,
   mnemonicTip,
   mnemonicLoading,
+  synonymsTip,
+  similarsTip,
+  relatedLoading,
   structureTip,
   structureLoading,
+  structureAvailable = true,
   judging,
   onUserTextChange,
   onHint,
   onSubmit,
+  onRequestStructure,
 }: Props) {
   const [speaking, setSpeaking] = useState(false);
 
@@ -174,30 +186,67 @@ export default function ClozePanel({
                 {judgeResult.grammarTip}
               </div>
             )}
-            <SentenceStructureTip analysis={structureTip} loading={structureLoading} />
             {current.word.translation && (
-              <div className="suggestion" style={{ marginTop: 8 }}>
-                <div className="text-light" style={{ fontSize: 12, marginBottom: 2 }}>
-                  「{current.word.word}」词义复习
-                </div>
+              <CollapsibleTip
+                title={`「${current.word.word}」词义复习`}
+                sectionKey={`meaning:${current.word.id}`}
+                defaultOpen
+              >
                 <div style={{ lineHeight: 1.6 }}>{current.word.translation}</div>
-              </div>
+              </CollapsibleTip>
             )}
+            {(relatedLoading || synonymsTip.length > 0) && (
+              <CollapsibleTip
+                title="近义词"
+                sectionKey={`synonyms:${current.word.id}`}
+                defaultOpen={false}
+              >
+                {relatedLoading && !synonymsTip.length ? (
+                  <span className="text-light" style={{ fontSize: 12 }}>
+                    加载中…
+                  </span>
+                ) : (
+                  <RelatedWordsList items={synonymsTip} emptyText="暂无近义词" />
+                )}
+              </CollapsibleTip>
+            )}
+            {(relatedLoading || similarsTip.length > 0) && (
+              <CollapsibleTip
+                title="形近词"
+                sectionKey={`similars:${current.word.id}`}
+                defaultOpen={false}
+              >
+                {relatedLoading && !similarsTip.length ? (
+                  <span className="text-light" style={{ fontSize: 12 }}>
+                    加载中…
+                  </span>
+                ) : (
+                  <RelatedWordsList items={similarsTip} emptyText="暂无形近词" />
+                )}
+              </CollapsibleTip>
+            )}
+            <SentenceStructureTip
+              sentenceKey={`${current.word.id}:${current.example.en}`}
+              analysis={structureTip}
+              loading={structureLoading}
+              available={structureAvailable}
+              onRequest={onRequestStructure}
+            />
             {(mnemonicLoading || mnemonicTip) && (
-              <div className="suggestion cloze-mnemonic" style={{ marginTop: 8 }}>
+              <CollapsibleTip
+                title="助记 · 词根词缀"
+                sectionKey={`mnemonic:${current.word.id}`}
+                defaultOpen
+                className="cloze-mnemonic"
+              >
                 {mnemonicLoading && !mnemonicTip ? (
                   <span className="text-light" style={{ fontSize: 12 }}>
                     助记加载中…
                   </span>
                 ) : (
-                  <>
-                    <div className="text-light" style={{ fontSize: 12, marginBottom: 2 }}>
-                      💡 助记 · 词根词缀
-                    </div>
-                    <div style={{ lineHeight: 1.65 }}>{mnemonicTip}</div>
-                  </>
+                  <div style={{ lineHeight: 1.65 }}>{mnemonicTip}</div>
                 )}
-              </div>
+              </CollapsibleTip>
             )}
           </div>
         )

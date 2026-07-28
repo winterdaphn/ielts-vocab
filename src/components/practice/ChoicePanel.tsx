@@ -2,18 +2,26 @@ import { Button } from 'antd';
 import type { CSSProperties } from 'react';
 import MarkableSentence from '@/components/MarkableSentence';
 import SentenceStructureTip from '@/components/practice/SentenceStructureTip';
+import CollapsibleTip from '@/components/practice/CollapsibleTip';
+import RelatedWordsList from '@/components/RelatedWordsList';
 import { resolveClozeChinese, type SentenceStructureAnalysis } from '@/api/llm';
 import type { Question } from '@/utils/practiceSelect';
+import type { RelatedWord } from '@/types/word';
 
 interface Props {
   current: Question;
   showAnswer: boolean;
   hintShown: boolean;
   picked: string | null;
+  synonymsTip?: RelatedWord[];
+  similarsTip?: RelatedWord[];
+  relatedLoading?: boolean;
   structureTip: SentenceStructureAnalysis | null;
   structureLoading: boolean;
+  structureAvailable?: boolean;
   onPick: (letter: string) => void;
   onHint: () => void;
+  onRequestStructure: () => void;
 }
 
 export default function ChoicePanel({
@@ -21,10 +29,15 @@ export default function ChoicePanel({
   showAnswer,
   hintShown,
   picked,
+  synonymsTip = [],
+  similarsTip = [],
+  relatedLoading = false,
   structureTip,
   structureLoading,
+  structureAvailable = true,
   onPick,
   onHint,
+  onRequestStructure,
 }: Props) {
   const showZh = showAnswer || hintShown;
   const zhText = current.example.zh
@@ -91,14 +104,51 @@ export default function ChoicePanel({
             </b>
           </div>
           {current.word.translation && (
-            <div className="suggestion" style={{ marginTop: 8 }}>
-              <div className="text-light" style={{ fontSize: 12, marginBottom: 2 }}>
-                「{current.word.word}」词义复习
-              </div>
+            <CollapsibleTip
+              title={`「${current.word.word}」词义复习`}
+              sectionKey={`meaning:${current.word.id}`}
+              defaultOpen
+            >
               <div style={{ lineHeight: 1.6 }}>{current.word.translation}</div>
-            </div>
+            </CollapsibleTip>
           )}
-          <SentenceStructureTip analysis={structureTip} loading={structureLoading} />
+          {(relatedLoading || synonymsTip.length > 0) && (
+            <CollapsibleTip
+              title="近义词"
+              sectionKey={`synonyms:${current.word.id}`}
+              defaultOpen={false}
+            >
+              {relatedLoading && !synonymsTip.length ? (
+                <span className="text-light" style={{ fontSize: 12 }}>
+                  加载中…
+                </span>
+              ) : (
+                <RelatedWordsList items={synonymsTip} emptyText="暂无近义词" />
+              )}
+            </CollapsibleTip>
+          )}
+          {(relatedLoading || similarsTip.length > 0) && (
+            <CollapsibleTip
+              title="形近词"
+              sectionKey={`similars:${current.word.id}`}
+              defaultOpen={false}
+            >
+              {relatedLoading && !similarsTip.length ? (
+                <span className="text-light" style={{ fontSize: 12 }}>
+                  加载中…
+                </span>
+              ) : (
+                <RelatedWordsList items={similarsTip} emptyText="暂无形近词" />
+              )}
+            </CollapsibleTip>
+          )}
+          <SentenceStructureTip
+            sentenceKey={`${current.word.id}:${current.example.en}`}
+            analysis={structureTip}
+            loading={structureLoading}
+            available={structureAvailable}
+            onRequest={onRequestStructure}
+          />
         </div>
       )}
     </>

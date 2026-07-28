@@ -9,6 +9,7 @@ import {
   judgeCloze,
   getClozeExpectedForm,
   generateMnemonicTip,
+  generateRelatedWords,
   analyzeSentenceStructure,
   generateTranslateHints,
   isLazyMetaSentence,
@@ -17,7 +18,7 @@ import {
 } from '@/api/llm';
 import { applyReview, isNew } from '@/utils/scheduler';
 import { setLS, getLS, todayKey } from '@/utils/date';
-import type { Word } from '@/types/word';
+import type { RelatedWord, Word } from '@/types/word';
 import {
   clearPracticeSession,
   hydratePracticeSession,
@@ -95,6 +96,9 @@ export function usePracticeSession() {
   const [translateHintLoading, setTranslateHintLoading] = useState(false);
   const [mnemonicTip, setMnemonicTip] = useState('');
   const [mnemonicLoading, setMnemonicLoading] = useState(false);
+  const [synonymsTip, setSynonymsTip] = useState<RelatedWord[]>([]);
+  const [similarsTip, setSimilarsTip] = useState<RelatedWord[]>([]);
+  const [relatedLoading, setRelatedLoading] = useState(false);
   const [structureTip, setStructureTip] = useState<SentenceStructureAnalysis | null>(null);
   const [structureLoading, setStructureLoading] = useState(false);
   const [genError, setGenError] = useState('');
@@ -236,33 +240,52 @@ export function usePracticeSession() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, showAnswer, current?.word.id, idx]);
 
-  // 输入填空 / 选词填空：揭晓后 AI 句型分析
+  // 揭晓后：近义词 / 形近词（有缓存用缓存，否则 AI 生成写回）
   useEffect(() => {
     if ((mode !== 'cloze' && mode !== 'choice') || !showAnswer || !current) {
       return;
     }
+    const word = current.word;
+    const cachedSyn = Array.isArray(word.synonyms) ? word.synonyms : [];
+    const cachedSim = Array.isArray(word.similars) ? word.similars : [];
+    if (cachedSyn.length || cachedSim.length) {
+      setSynonymsTip(cachedSyn);
+      setSimilarsTip(cachedSim);
+      setRelatedLoading(false);
+      return;
+    }
     if (!settings.apiKey) {
-      setStructureTip(null);
-      setStructureLoading(false);
+      setSynonymsTip([]);
+      setSimilarsTip([]);
+      setRelatedLoading(false);
       return;
     }
 
     let cancelled = false;
-    setStructureTip(null);
-    setStructureLoading(true);
+    setRelatedLoading(true);
+    setSynonymsTip([]);
+    setSimilarsTip([]);
     (async () => {
       try {
-        const tip = await analyzeSentenceStructure(
-          current.example.en,
-          current.example.zh || '',
-          current.word.word,
+        const related = await generateRelatedWords(
+          word.word,
+          word.translation || '',
           settings
         );
-        if (!cancelled) setStructureTip(tip);
+        if (cancelled) return;
+        setSynonymsTip(related.synonyms);
+        setSimilarsTip(related.similars);
+        if (related.synonyms.length || related.similars.length) {
+          await updateWord({
+            ...word,
+            synonyms: related.synonyms,
+            similars: related.similars,
+          });
+        }
       } catch {
-        if (!cancelled) setStructureTip(null);
+        /* ignore */
       } finally {
-        if (!cancelled) setStructureLoading(false);
+        if (!cancelled) setRelatedLoading(false);
       }
     })();
 
@@ -270,7 +293,9 @@ export function usePracticeSession() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, showAnswer, current?.word.id, current?.example.en, idx]);
+  }, [mode, showAnswer, current?.word.id, idx]);
+
+  // 句型分析改为按需加载（见 requestStructureTip）
 
   // Save when leaving the page
   useEffect(() => {
@@ -478,6 +503,9 @@ export function usePracticeSession() {
     setTranslateHintLoading(false);
     setMnemonicTip('');
     setMnemonicLoading(false);
+    setSynonymsTip([]);
+    setSimilarsTip([]);
+    setRelatedLoading(false);
     setStructureTip(null);
     setStructureLoading(false);
     setGenError('');
@@ -722,11 +750,41 @@ export function usePracticeSession() {
       setTranslateHintLoading(false);
       setMnemonicTip('');
       setMnemonicLoading(false);
+      setSynonymsTip([]);
+      setSimilarsTip([]);
+      setRelatedLoading(false);
       setStructureTip(null);
       setStructureLoading(false);
       setUserText('');
       setJudgeResult(null);
       kickPrefetch(sessionIdRef.current, sessionWords, mode, idx + 1);
+    }
+  }
+
+  async function requestStructureTip() {
+    if (!current) return;
+    if (mode !== 'cloze' && mode !== 'choice') return;
+    if (!settings.apiKey) {
+      message.warning('请先在设置里填 API Key');
+      return;
+    }
+    if (structureLoading) return;
+    if (structureTip) return;
+
+    setStructureLoading(true);
+    try {
+      const tip = await analyzeSentenceStructure(
+        current.example.en,
+        current.example.zh || '',
+        current.word.word,
+        settings
+      );
+      setStructureTip(tip);
+    } catch (e) {
+      setStructureTip(null);
+      message.error('句型分析失败：' + (e instanceof Error ? e.message : '未知错误'));
+    } finally {
+      setStructureLoading(false);
     }
   }
 
@@ -810,6 +868,9 @@ export function usePracticeSession() {
     setTranslateHintLoading(false);
     setMnemonicTip('');
     setMnemonicLoading(false);
+    setSynonymsTip([]);
+    setSimilarsTip([]);
+    setRelatedLoading(false);
     setStructureTip(null);
     setStructureLoading(false);
     setUserText('');
@@ -908,8 +969,12 @@ export function usePracticeSession() {
     judgeResult,
     mnemonicTip,
     mnemonicLoading,
+    synonymsTip,
+    similarsTip,
+    relatedLoading,
     structureTip,
     structureLoading,
+    structureAvailable: !!settings.apiKey,
     genError,
     canGoNext,
     remainingCount,
@@ -921,6 +986,7 @@ export function usePracticeSession() {
     submitClozeInput,
     submitTranslate,
     requestTranslateHint,
+    requestStructureTip,
     next,
     exitPractice,
     regenerateCurrent,
