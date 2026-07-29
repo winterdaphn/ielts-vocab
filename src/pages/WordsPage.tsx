@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, memo, useCallback, useEffect } from 'react';
+import { useState, useMemo, useRef, memo, useCallback, useEffect, useLayoutEffect } from 'react';
 import { Popconfirm, App, Select, Input } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
@@ -17,8 +17,15 @@ import type { Word } from '@/types/word';
 import PhoneticDisplay from '@/components/PhoneticDisplay';
 import LetterIndexBar from '@/components/LetterIndexBar';
 import { categoryLabel, normalizeCategories, TOPIC_CATEGORIES, FUNCTION_CATEGORIES } from '@/config/categories';
+import { readWordsListUi, writeWordsListUi } from '@/utils/wordsListUi';
 
 type Filter = 'all' | 'due' | 'new' | 'learning' | 'mastered' | 'crossed';
+
+const FILTER_KEYS: Filter[] = ['all', 'due', 'new', 'learning', 'mastered', 'crossed'];
+
+function parseFilter(raw: string): Filter {
+  return FILTER_KEYS.includes(raw as Filter) ? (raw as Filter) : 'all';
+}
 
 type ListRow =
   | { type: 'header'; letter: string; key: string }
@@ -116,13 +123,19 @@ export default function WordsPage() {
   const navigate = useNavigate();
   const words = useUserWords();
   const allCategories = useCategories((s) => s.all);
-  const [filter, setFilter] = useState<Filter>('all');
-  const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
-  const [search, setSearch] = useState('');
+  const savedUi = useMemo(() => readWordsListUi(), []);
+  const [filter, setFilter] = useState<Filter>(() => parseFilter(savedUi.filter));
+  const [categoryFilter, setCategoryFilter] = useState<string | null>(
+    () => savedUi.categoryFilter
+  );
+  const [search, setSearch] = useState(() => savedUi.search);
   const removeWord = useWordsStore((s) => s.removeWord);
   const updateWord = useWordsStore((s) => s.updateWord);
   const parentRef = useRef<HTMLDivElement>(null);
   const scrollHideTimer = useRef<number | null>(null);
+  const pendingScrollTop = useRef(savedUi.scrollTop);
+  const pendingMeasurements = useRef(savedUi.measurements);
+  const didRestoreScroll = useRef(false);
   const [scrolling, setScrolling] = useState(false);
 
   const counts = useMemo(() => {
@@ -243,6 +256,10 @@ export default function WordsPage() {
   }, [filtered]);
 
   useEffect(() => {
+    writeWordsListUi({ filter, categoryFilter, search });
+  }, [filter, categoryFilter, search]);
+
+  useEffect(() => {
     const el = parentRef.current;
     if (!el) return;
     const onScroll = () => {
@@ -263,7 +280,21 @@ export default function WordsPage() {
     estimateSize: (index) => (rows[index]?.type === 'header' ? 28 : 72),
     overscan: 8,
     getItemKey: (index) => rows[index]?.key ?? index,
+    initialOffset: pendingScrollTop.current,
+    initialMeasurementsCache: pendingMeasurements.current as never,
   });
+
+  // Keep scrollTop in sync after remount (snapshot already fed via initial*)
+  useLayoutEffect(() => {
+    if (didRestoreScroll.current || !rows.length) return;
+    didRestoreScroll.current = true;
+    const top = pendingScrollTop.current;
+    if (top <= 0) return;
+    const el = parentRef.current;
+    if (!el) return;
+    el.scrollTop = top;
+    virtualizer.scrollToOffset(top, { align: 'start' });
+  }, [rows.length, virtualizer]);
 
   const activeLetter = (() => {
     const items = virtualizer.getVirtualItems();
@@ -284,9 +315,26 @@ export default function WordsPage() {
 
   const onOpen = useCallback(
     (id: string) => {
+      const el = parentRef.current;
+      const scrollTop = el?.scrollTop ?? virtualizer.scrollOffset ?? 0;
+      const snapshot = virtualizer.takeSnapshot();
+      writeWordsListUi({
+        filter,
+        categoryFilter,
+        search,
+        scrollTop,
+        measurements: snapshot.map((m) => ({
+          index: m.index,
+          key: m.key,
+          start: m.start,
+          size: m.size,
+          end: m.end,
+          lane: m.lane,
+        })),
+      });
       navigate(`/words/${id}`);
     },
-    [navigate]
+    [navigate, filter, categoryFilter, search, virtualizer]
   );
 
   const onToggleCrossed = useCallback(
