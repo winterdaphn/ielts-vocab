@@ -166,6 +166,7 @@ export default function PracticePage() {
             mnemonicLoading={s.mnemonicLoading}
             synonymsTip={s.synonymsTip}
             similarsTip={s.similarsTip}
+            derivativesTip={s.derivativesTip}
             relatedLoading={s.relatedLoading}
             structureTip={s.structureTip}
             structureLoading={s.structureLoading}
@@ -184,6 +185,7 @@ export default function PracticePage() {
             picked={s.picked}
             synonymsTip={s.synonymsTip}
             similarsTip={s.similarsTip}
+            derivativesTip={s.derivativesTip}
             relatedLoading={s.relatedLoading}
             structureTip={s.structureTip}
             structureLoading={s.structureLoading}

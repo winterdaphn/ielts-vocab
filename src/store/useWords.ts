@@ -98,7 +98,11 @@ export function makeNewWord(input: Partial<Word> & { word: string; translation?:
     category: normalizeCategories(input.category),
     synonyms: Array.isArray(input.synonyms) ? input.synonyms : [],
     similars: Array.isArray(input.similars) ? input.similars : [],
+    derivatives: Array.isArray(input.derivatives) ? input.derivatives : [],
     collocations: Array.isArray(input.collocations) ? input.collocations : [],
+    dictCollocations: Array.isArray(input.dictCollocations)
+      ? input.dictCollocations
+      : [],
     examples: input.examples || [],
     crossedOut: input.crossedOut ?? false,
     ease: input.ease ?? 2.5,

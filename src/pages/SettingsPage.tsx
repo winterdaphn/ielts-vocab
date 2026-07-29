@@ -29,6 +29,10 @@ import { useNavigate } from 'react-router-dom';
 import { modeLabel, parsePracticeMode } from '@/utils/practiceSession';
 import { loadVocabBySource, type VocabBankSource, type VocabBankEntry } from '@/json/vocab';
 import { normalizeCategories } from '@/config/categories';
+import {
+  bankEntryMap,
+  patchWordsWithBankLexis,
+} from '@/utils/mergeBankLexis';
 
 type Tab = 'ai' | 'data' | 'account';
 
@@ -168,6 +172,7 @@ function DataSettings() {
   const [pulling, setPulling] = useState(false);
   const [importingSource, setImportingSource] = useState<'ielts' | 'kaoyan' | null>(null);
   const [syncingCats, setSyncingCats] = useState(false);
+  const [syncingLexis, setSyncingLexis] = useState(false);
   const updateWords = useWordsStore((s) => s.updateWords);
 
   function bankCategoryMap(entries: VocabBankEntry[]): Map<string, string[]> {
@@ -226,6 +231,31 @@ function DataSettings() {
     }
   }
 
+  /** 为已导入词合并词库里的近义/形近/派生/搭配（本地优先，词库补缺） */
+  async function handleSyncLexisFromBank() {
+    setSyncingLexis(true);
+    try {
+      const [ielts, kaoyan] = await Promise.all([
+        loadVocabBySource('ielts'),
+        loadVocabBySource('kaoyan'),
+      ]);
+      const patched = patchWordsWithBankLexis(
+        words,
+        bankEntryMap([...ielts, ...kaoyan])
+      );
+      if (!patched.length) {
+        message.info('没有需要合并的近义/形近/派生/搭配');
+        return;
+      }
+      await updateWords(patched);
+      message.success(`已为 ${patched.length} 个词合并词库扩展字段`);
+    } catch (e) {
+      message.error('同步失败：' + (e instanceof Error ? e.message : '未知错误'));
+    } finally {
+      setSyncingLexis(false);
+    }
+  }
+
   async function handleExport() {
     const data = { version: 1, exportedAt: new Date().toISOString(), words };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -263,17 +293,15 @@ function DataSettings() {
     try {
       const bank = await loadVocabBySource(source);
       const entries = bank.filter((w) => w.word);
-      const existing = new Set(words.map((w) => w.word.toLowerCase()));
+      const byWord = bankEntryMap(entries);
+      const existingKeys = new Set(words.map((w) => w.word.toLowerCase()));
       const toAdd: Word[] = [];
-      const catMap = bankCategoryMap(entries);
-      const toPatch = patchWordsFromBankMap(words, catMap);
-      let skipped = 0;
+      // 已有词：合并分组 + 近义/形近/派生/搭配
+      const toPatch = patchWordsWithBankLexis(words, byWord);
 
       for (const entry of entries) {
-        if (existing.has(entry.word.toLowerCase())) {
-          skipped++;
-          continue;
-        }
+        const key = entry.word.toLowerCase();
+        if (existingKeys.has(key)) continue;
         toAdd.push(
           makeNewWord({
             word: entry.word,
@@ -288,14 +316,16 @@ function DataSettings() {
                 : [],
             synonyms: entry.synonyms || [],
             similars: entry.similars || [],
+            derivatives: entry.derivatives || [],
             collocations: entry.collocations || [],
+            dictCollocations: entry.dictCollocations || [],
           })
         );
-        existing.add(entry.word.toLowerCase());
+        existingKeys.add(key);
       }
 
       if (toAdd.length === 0 && toPatch.length === 0) {
-        message.info(`${label}词库里没有新词可导入（已跳过 ${skipped} 个）`);
+        message.info(`${label}词库没有可新增或可合并的内容`);
         return;
       }
 
@@ -304,8 +334,9 @@ function DataSettings() {
           title: `导入${label}词汇？`,
           content: [
             toAdd.length ? `新增 ${toAdd.length} 个词` : null,
-            toPatch.length ? `为已有 ${toPatch.length} 个词补全/迁移分组` : null,
-            skipped && !toPatch.length ? `已有 ${skipped} 个会跳过` : null,
+            toPatch.length
+              ? `合并已有 ${toPatch.length} 个词的分组/近义/形近/派生/搭配`
+              : null,
           ]
             .filter(Boolean)
             .join('；') || '没有变更',
@@ -321,7 +352,7 @@ function DataSettings() {
       if (toAdd.length) await useWordsStore.getState().addWords(toAdd);
       const bits: string[] = [];
       if (toAdd.length) bits.push(`新增 ${toAdd.length}`);
-      if (toPatch.length) bits.push(`补全分组 ${toPatch.length}`);
+      if (toPatch.length) bits.push(`合并已有 ${toPatch.length}`);
       message.success(bits.join(' · ') || '完成');
     } catch (e) {
       message.error('导入失败：' + (e instanceof Error ? e.message : '未知错误'));
@@ -392,7 +423,7 @@ function DataSettings() {
             type="primary"
             icon={<BookOutlined />}
             loading={importingSource === 'ielts'}
-            disabled={importingSource !== null || syncingCats}
+            disabled={importingSource !== null || syncingCats || syncingLexis}
             onClick={() => handleImportBankVocab('ielts')}
           >
             导入雅思词汇
@@ -400,7 +431,7 @@ function DataSettings() {
           <Button
             icon={<BookOutlined />}
             loading={importingSource === 'kaoyan'}
-            disabled={importingSource !== null || syncingCats}
+            disabled={importingSource !== null || syncingCats || syncingLexis}
             onClick={() => handleImportBankVocab('kaoyan')}
           >
             导入考研词汇
@@ -408,10 +439,18 @@ function DataSettings() {
           <Button
             icon={<SyncOutlined />}
             loading={syncingCats}
-            disabled={importingSource !== null}
+            disabled={importingSource !== null || syncingLexis}
             onClick={handleSyncCategoriesFromBank}
           >
             从词库补全分组
+          </Button>
+          <Button
+            icon={<SyncOutlined />}
+            loading={syncingLexis}
+            disabled={importingSource !== null || syncingCats}
+            onClick={handleSyncLexisFromBank}
+          >
+            同步近义/形近/派生/搭配
           </Button>
           <input
             ref={fileInputRef}

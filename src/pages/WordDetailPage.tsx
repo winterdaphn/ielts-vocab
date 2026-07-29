@@ -27,9 +27,10 @@ import {
   generateRelatedWords,
   lookupWordInfo,
 } from '@/api/llm';
-import { getRelatedFromBank, mergeRelatedLists, resolveBankGloss } from '@/utils/vocabBankRelated';
+import { getRelatedFromBank, mergeRelatedLists, resolveBankGloss, getBankLexisExtras } from '@/utils/vocabBankRelated';
 import RelatedWordsList from '@/components/RelatedWordsList';
 import CollocationsList from '@/components/CollocationsList';
+import DerivativesList from '@/components/DerivativesList';
 import MarkableSentence from '@/components/MarkableSentence';
 import PhoneticDisplay from '@/components/PhoneticDisplay';
 import CollapsibleTip from '@/components/practice/CollapsibleTip';
@@ -37,7 +38,8 @@ import type { Collocation, RelatedWord } from '@/types/word';
 import WordCategoryEditor from '@/components/WordCategoryEditor';
 import { normalizeCategories } from '@/config/categories';
 
-type TipTab = 'mnemonic' | 'synonyms' | 'similars';
+type TipTab = 'mnemonic' | 'synonyms' | 'similars' | 'derivatives';
+type ColoTab = 'dict' | 'mine';
 
 export default function WordDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -54,6 +56,7 @@ export default function WordDetailPage() {
   const nextWord = idx >= 0 && idx < words.length - 1 ? words[idx + 1] : null;
 
   const [tipTab, setTipTab] = useState<TipTab>('mnemonic');
+  const [coloTab, setColoTab] = useState<ColoTab>('dict');
   const [busyRelated, setBusyRelated] = useState(false);
   const [busyMnemonic, setBusyMnemonic] = useState(false);
   const [busyCollocations, setBusyCollocations] = useState(false);
@@ -74,7 +77,25 @@ export default function WordDetailPage() {
     setMnemonicDraft('');
     setShowSimilarAdd(false);
     setShowColoAdd(false);
+    setColoTab('dict');
   }, [id]);
+
+  // 旧导入词：从内置词库补上派生词 / 词典搭配（不覆盖已有）
+  useEffect(() => {
+    if (!word) return;
+    const bank = getBankLexisExtras(word.word);
+    const needDeriv =
+      !(word.derivatives && word.derivatives.length) && bank.derivatives.length > 0;
+    const needDict =
+      !(word.dictCollocations && word.dictCollocations.length) &&
+      bank.dictCollocations.length > 0;
+    if (!needDeriv && !needDict) return;
+    void updateWord({
+      ...word,
+      ...(needDeriv ? { derivatives: bank.derivatives } : {}),
+      ...(needDict ? { dictCollocations: bank.dictCollocations } : {}),
+    });
+  }, [word?.id, word?.word]);
 
   if (!id || !word) {
     return (
@@ -89,9 +110,18 @@ export default function WordDetailPage() {
   }
 
   const stage = getWordStage(word);
+  const bankExtras = getBankLexisExtras(word.word);
   const synonyms = word.synonyms || [];
   const similars = word.similars || [];
+  const derivatives =
+    word.derivatives && word.derivatives.length
+      ? word.derivatives
+      : bankExtras.derivatives;
   const collocations = word.collocations || [];
+  const dictCollocations =
+    word.dictCollocations && word.dictCollocations.length
+      ? word.dictCollocations
+      : bankExtras.dictCollocations;
   const examples = (word.examples || []).filter((ex) => ex?.en).slice(0, 3);
   const accuracy =
     word.totalReviews > 0
@@ -224,7 +254,6 @@ export default function WordDetailPage() {
       const item: RelatedWord = {
         word: lemma,
         gloss,
-        note: '',
       };
       await updateWord({ ...word!, similars: [...existing, item] });
       setSimilarInput('');
@@ -400,6 +429,7 @@ export default function WordDetailPage() {
               { key: 'mnemonic', label: '助记' },
               { key: 'synonyms', label: '近义' },
               { key: 'similars', label: '形近' },
+              { key: 'derivatives', label: '派生' },
             ] as const
           ).map((t) => (
             <button
@@ -557,64 +587,118 @@ export default function WordDetailPage() {
               )}
             </>
           )}
+
+          {tipTab === 'derivatives' && (
+            <>
+              <div className="tip-section-head" style={{ marginBottom: 8 }}>
+                <span className="text-light" style={{ fontSize: 12 }}>
+                  同根派生（词典）
+                </span>
+              </div>
+              <DerivativesList
+                items={derivatives}
+                emptyText="词库暂无该词的派生词"
+              />
+            </>
+          )}
         </div>
       </div>
 
-      <div className="app-card">
-        <div className="tip-section-head" style={{ marginBottom: 8 }}>
-          <h3 style={{ fontSize: 14, margin: 0 }}>固定搭配</h3>
-          <Space size={8}>
-            <Button
-              size="small"
-              icon={<PlusOutlined />}
-              onClick={() => setShowColoAdd((v) => !v)}
+      <div className="app-card wd-tab-card">
+        <div className="wd-tabs" role="tablist">
+          {(
+            [
+              { key: 'dict', label: '词典搭配' },
+              { key: 'mine', label: '固定搭配' },
+            ] as const
+          ).map((t) => (
+            <button
+              key={t.key}
+              type="button"
+              role="tab"
+              aria-selected={coloTab === t.key}
+              className={`wd-tab ${coloTab === t.key ? 'active' : ''}`}
+              onClick={() => setColoTab(t.key)}
             >
-              {showColoAdd ? '取消' : '添加'}
-            </Button>
-            <Button size="small" loading={busyCollocations} onClick={fillCollocations}>
-              {collocations.length ? 'AI 补充' : 'AI 抓取'}
-            </Button>
-          </Space>
+              {t.label}
+            </button>
+          ))}
         </div>
-        <CollocationsList
-          items={collocations}
-          emptyText="暂无搭配，可手记或点「AI 抓取」"
-          onRemove={removeCollocation}
-          removeTitle="删除这条搭配"
-        />
-        {showColoAdd && (
-          <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <Input
-              size="small"
-              placeholder="英文搭配，如 feel elated"
-              value={coloPhrase}
-              onChange={(e) => setColoPhrase(e.target.value)}
-              onPressEnter={() => !busyAddColo && addCollocation()}
-              disabled={busyAddColo}
-              allowClear
-              autoFocus
-            />
-            <Space.Compact style={{ width: '100%' }}>
-              <Input
-                size="small"
-                placeholder="中文意思（可选）"
-                value={coloGloss}
-                onChange={(e) => setColoGloss(e.target.value)}
-                onPressEnter={() => !busyAddColo && addCollocation()}
-                disabled={busyAddColo}
-                allowClear
+
+        <div className="wd-tab-body">
+          {coloTab === 'dict' && (
+            <>
+              <p className="text-light" style={{ fontSize: 12, margin: '0 0 8px' }}>
+                来自有道词组
+              </p>
+              <CollocationsList
+                items={dictCollocations}
+                emptyText="词库暂无该词的词典搭配"
               />
-              <Button
-                size="small"
-                type="primary"
-                loading={busyAddColo}
-                onClick={addCollocation}
-              >
-                确认
-              </Button>
-            </Space.Compact>
-          </div>
-        )}
+            </>
+          )}
+
+          {coloTab === 'mine' && (
+            <>
+              <div className="tip-section-head" style={{ marginBottom: 8 }}>
+                <span className="text-light" style={{ fontSize: 12 }}>
+                  手记 / AI
+                </span>
+                <Space size={8}>
+                  <Button
+                    size="small"
+                    icon={<PlusOutlined />}
+                    onClick={() => setShowColoAdd((v) => !v)}
+                  >
+                    {showColoAdd ? '取消' : '添加'}
+                  </Button>
+                  <Button size="small" loading={busyCollocations} onClick={fillCollocations}>
+                    {collocations.length ? 'AI 补充' : 'AI 抓取'}
+                  </Button>
+                </Space>
+              </div>
+              <CollocationsList
+                items={collocations}
+                emptyText="暂无搭配，可手记或点「AI 抓取」"
+                onRemove={removeCollocation}
+                removeTitle="删除这条搭配"
+              />
+              {showColoAdd && (
+                <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <Input
+                    size="small"
+                    placeholder="英文搭配，如 feel elated"
+                    value={coloPhrase}
+                    onChange={(e) => setColoPhrase(e.target.value)}
+                    onPressEnter={() => !busyAddColo && addCollocation()}
+                    disabled={busyAddColo}
+                    allowClear
+                    autoFocus
+                  />
+                  <Space.Compact style={{ width: '100%' }}>
+                    <Input
+                      size="small"
+                      placeholder="中文意思（可选）"
+                      value={coloGloss}
+                      onChange={(e) => setColoGloss(e.target.value)}
+                      onPressEnter={() => !busyAddColo && addCollocation()}
+                      disabled={busyAddColo}
+                      allowClear
+                    />
+                    <Button
+                      size="small"
+                      type="primary"
+                      loading={busyAddColo}
+                      onClick={addCollocation}
+                    >
+                      确认
+                    </Button>
+                  </Space.Compact>
+                </div>
+              )}
+            </>
+          )}
+        </div>
       </div>
 
       {examples.length > 0 && (

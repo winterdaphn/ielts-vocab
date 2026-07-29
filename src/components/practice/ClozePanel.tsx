@@ -6,11 +6,12 @@ import SpeakButton from '@/components/SpeakButton';
 import SentenceStructureTip from '@/components/practice/SentenceStructureTip';
 import CollapsibleTip from '@/components/practice/CollapsibleTip';
 import RelatedWordsList from '@/components/RelatedWordsList';
+import DerivativesList from '@/components/DerivativesList';
 import type { Question } from '@/utils/practiceSelect';
 import type { JudgeResult } from '@/hooks/usePracticeSession';
 import { speakEnglish, stopSpeaking } from '@/utils/speak';
 import { resolveClozeChinese, type SentenceStructureAnalysis } from '@/api/llm';
-import type { RelatedWord, Word } from '@/types/word';
+import type { RelatedWord, Derivative, Word } from '@/types/word';
 
 interface Props {
   current: Question;
@@ -22,6 +23,7 @@ interface Props {
   mnemonicLoading: boolean;
   synonymsTip: RelatedWord[];
   similarsTip: RelatedWord[];
+  derivativesTip?: Derivative[];
   relatedLoading: boolean;
   structureTip: SentenceStructureAnalysis | null;
   structureLoading: boolean;
@@ -55,6 +57,7 @@ export default function ClozePanel({
   mnemonicLoading,
   synonymsTip,
   similarsTip,
+  derivativesTip = [],
   relatedLoading,
   structureTip,
   structureLoading,
@@ -223,6 +226,15 @@ export default function ClozePanel({
                 ) : (
                   <RelatedWordsList items={similarsTip} emptyText="暂无形近词" />
                 )}
+              </CollapsibleTip>
+            )}
+            {derivativesTip.length > 0 && (
+              <CollapsibleTip
+                title="派生词"
+                sectionKey={`derivatives:${current.word.id}`}
+                defaultOpen={false}
+              >
+                <DerivativesList items={derivativesTip} emptyText="暂无派生词" />
               </CollapsibleTip>
             )}
             <SentenceStructureTip

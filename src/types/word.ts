@@ -3,8 +3,14 @@ export interface RelatedWord {
   word: string;
   /** Short Chinese gloss */
   gloss: string;
-  /** Optional contrast note (legacy; UI no longer shows by default) */
-  note: string;
+}
+
+/** Word-family derivative / cognate, e.g. decide → decision */
+export interface Derivative {
+  word: string;
+  gloss: string;
+  /** Part of speech from dictionary, e.g. n. / adj. */
+  pos?: string;
 }
 
 /** Fixed collocation / chunk, e.g. "feel elated" */
@@ -33,8 +39,12 @@ export interface Word {
   synonyms?: RelatedWord[];
   /** Orthographic look-alikes only (形近词), not sound-alikes or semantic near-misses */
   similars?: RelatedWord[];
-  /** Common fixed collocations / chunks */
+  /** Same-family derivatives (派生/同根词), e.g. decide → decision */
+  derivatives?: Derivative[];
+  /** LLM / 手记固定搭配 */
   collocations?: Collocation[];
+  /** 词典（有道 phrs）固定搭配，与 collocations 分开存、分开展示 */
+  dictCollocations?: Collocation[];
   examples: WordExample[];
   crossedOut: boolean;
   ease: number;

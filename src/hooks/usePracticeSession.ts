@@ -17,9 +17,9 @@ import {
   type TranslateHints,
 } from '@/api/llm';
 import { applyReview, isNew, formatNextReview } from '@/utils/scheduler';
-import { getRelatedFromBank, mergeRelatedLists } from '@/utils/vocabBankRelated';
+import { getRelatedFromBank, mergeRelatedLists, getBankLexisExtras } from '@/utils/vocabBankRelated';
 import { setLS, getLS, todayKey } from '@/utils/date';
-import type { RelatedWord, Word } from '@/types/word';
+import type { RelatedWord, Word, Derivative } from '@/types/word';
 import {
   clearPracticeSession,
   hydratePracticeSession,
@@ -99,6 +99,7 @@ export function usePracticeSession() {
   const [mnemonicLoading, setMnemonicLoading] = useState(false);
   const [synonymsTip, setSynonymsTip] = useState<RelatedWord[]>([]);
   const [similarsTip, setSimilarsTip] = useState<RelatedWord[]>([]);
+  const [derivativesTip, setDerivativesTip] = useState<Derivative[]>([]);
   const [relatedLoading, setRelatedLoading] = useState(false);
   const [structureTip, setStructureTip] = useState<SentenceStructureAnalysis | null>(null);
   const [structureLoading, setStructureLoading] = useState(false);
@@ -295,6 +296,13 @@ export function usePracticeSession() {
     const word = current.word;
     const cachedSyn = Array.isArray(word.synonyms) ? word.synonyms : [];
     const cachedSim = Array.isArray(word.similars) ? word.similars : [];
+    const bankExtras = getBankLexisExtras(word.word);
+    const deriv =
+      Array.isArray(word.derivatives) && word.derivatives.length
+        ? word.derivatives
+        : bankExtras.derivatives;
+    setDerivativesTip(deriv);
+
     if (cachedSyn.length || cachedSim.length) {
       setSynonymsTip(cachedSyn);
       setSimilarsTip(cachedSim);
@@ -1071,6 +1079,7 @@ export function usePracticeSession() {
     mnemonicLoading,
     synonymsTip,
     similarsTip,
+    derivativesTip,
     relatedLoading,
     structureTip,
     structureLoading,

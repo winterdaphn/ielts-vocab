@@ -9,3 +9,4 @@ dist
 vite.config.js
 vite.config.d.ts
 scripts/
+exports/

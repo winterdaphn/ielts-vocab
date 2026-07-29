@@ -4,7 +4,7 @@
  * Synonyms can be merged with AI results by callers.
  */
 import { allVocabBank, type VocabBankEntry } from '@/json/vocab';
-import type { RelatedWord } from '@/types/word';
+import type { RelatedWord, Collocation, Derivative } from '@/types/word';
 
 export type { VocabBankEntry };
 
@@ -121,7 +121,6 @@ function normalizeRelated(items: RelatedWord[] | undefined, self: string): Relat
     out.push({
       word: entry.word,
       gloss: (it.gloss || shortGloss(entry.translation)).slice(0, 40),
-      note: '',
     });
     if (out.length >= 4) break;
   }
@@ -163,7 +162,6 @@ function computeSimilars(head: string): RelatedWord[] {
     return {
       word: e.word,
       gloss: shortGloss(e.translation),
-      note: '',
     };
   });
 }
@@ -190,7 +188,7 @@ function computeSynonyms(head: string, translationHint?: string): RelatedWord[] 
     .slice(0, 3)
     .map(([k]) => {
       const e = byKey.get(k)!;
-      return { word: e.word, gloss: shortGloss(e.translation), note: '' };
+      return { word: e.word, gloss: shortGloss(e.translation) };
     });
 }
 
@@ -220,7 +218,6 @@ export function mergeRelatedLists(
     out.push({
       word: it.word.trim(),
       gloss: String(it.gloss || '').trim().slice(0, 40),
-      note: '',
     });
     if (out.length >= max) break;
   }
@@ -239,14 +236,8 @@ export function getRelatedFromBank(
   if (!key) return { synonyms: [], similars: [] };
 
   const entry = byKey.get(key);
-  let synonyms = normalizeRelated(entry?.synonyms, word).map((it) => ({
-    ...it,
-    note: '',
-  }));
-  let similars = normalizeRelated(entry?.similars, word).map((it) => ({
-    ...it,
-    note: '',
-  }));
+  let synonyms = normalizeRelated(entry?.synonyms, word);
+  let similars = normalizeRelated(entry?.similars, word);
 
   if (!synonyms.length) {
     synonyms = computeSynonyms(key, translation || entry?.translation);
@@ -256,4 +247,22 @@ export function getRelatedFromBank(
   }
 
   return { synonyms, similars };
+}
+
+/**
+ * Dictionary extras from the built-in bank (Youdao-enriched fields).
+ * Used to hydrate UI for words imported before these fields existed.
+ */
+export function getBankLexisExtras(word: string): {
+  derivatives: Derivative[];
+  dictCollocations: Collocation[];
+} {
+  const entry = lookupBankEntry(word);
+  if (!entry) return { derivatives: [], dictCollocations: [] };
+  return {
+    derivatives: Array.isArray(entry.derivatives) ? entry.derivatives : [],
+    dictCollocations: Array.isArray(entry.dictCollocations)
+      ? entry.dictCollocations
+      : [],
+  };
 }

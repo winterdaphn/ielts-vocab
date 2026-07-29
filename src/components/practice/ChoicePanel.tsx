@@ -4,9 +4,10 @@ import MarkableSentence from '@/components/MarkableSentence';
 import SentenceStructureTip from '@/components/practice/SentenceStructureTip';
 import CollapsibleTip from '@/components/practice/CollapsibleTip';
 import RelatedWordsList from '@/components/RelatedWordsList';
+import DerivativesList from '@/components/DerivativesList';
 import { resolveClozeChinese, type SentenceStructureAnalysis } from '@/api/llm';
 import type { Question } from '@/utils/practiceSelect';
-import type { RelatedWord } from '@/types/word';
+import type { RelatedWord, Derivative } from '@/types/word';
 
 interface Props {
   current: Question;
@@ -15,6 +16,7 @@ interface Props {
   picked: string | null;
   synonymsTip?: RelatedWord[];
   similarsTip?: RelatedWord[];
+  derivativesTip?: Derivative[];
   relatedLoading?: boolean;
   structureTip: SentenceStructureAnalysis | null;
   structureLoading: boolean;
@@ -31,6 +33,7 @@ export default function ChoicePanel({
   picked,
   synonymsTip = [],
   similarsTip = [],
+  derivativesTip = [],
   relatedLoading = false,
   structureTip,
   structureLoading,
@@ -140,6 +143,15 @@ export default function ChoicePanel({
               ) : (
                 <RelatedWordsList items={similarsTip} emptyText="暂无形近词" />
               )}
+            </CollapsibleTip>
+          )}
+          {derivativesTip.length > 0 && (
+            <CollapsibleTip
+              title="派生词"
+              sectionKey={`derivatives:${current.word.id}`}
+              defaultOpen={false}
+            >
+              <DerivativesList items={derivativesTip} emptyText="暂无派生词" />
             </CollapsibleTip>
           )}
           <SentenceStructureTip

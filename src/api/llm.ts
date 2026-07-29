@@ -507,11 +507,12 @@ Always reduce to the dictionary HEADWORD (lemma) used in learner word lists.
 Examples: ingredients→ingredient, possesses→possess, running→run, studied→study, better→good (only if clearly comparative of good).
 
 Also give 2–3 near-synonyms and 0–2 ORTHOGRAPHIC look-alikes (形近词) for the LEMMA.
-- synonyms: similar meaning, often interchangeable with a nuance note
+- synonyms: similar meaning, often interchangeable; each item is word + short Chinese gloss only
 - similars: ONLY real, standalone dictionary headwords that IELTS learners often mix up because the SPELLING looks almost the same (classic traps). Good examples: affect/effect, principal/principle, desert/dessert, adapt/adopt, accept/except, advice/advise, stationary/stationery.
   Quality over quantity: if there is no well-known spelling trap for this lemma, return "similars": [].
   FORBIDDEN: invented words, glued phrases (insightof, insightful-of), multi-word expressions written as one token, morphological extensions of the same word (insight→insightful), pure sound-alikes with very different spelling, topic-related or semantic near-misses.
 Do NOT include the lemma itself in either list.
+Do NOT include a "note" field on synonyms or similars.
 
 Output JSON ONLY:
 {
@@ -522,8 +523,8 @@ Output JSON ONLY:
   "partOfSpeech": "n./v./adj./adv. of the LEMMA",
   "translation": "LEMMA 最常见的中文释义（不要只写「xxx的复数」）",
   "mnemonic": "short Chinese memory aid for the LEMMA (≤20字)",
-  "synonyms": [{"word":"precise","gloss":"精确的","note":"更强调精密"}],
-  "similars": [{"word":"effect","gloss":"影响/结果","note":"形近：affect 是动词"}]
+  "synonyms": [{"word":"precise","gloss":"精确的"}],
+  "similars": [{"word":"effect","gloss":"影响/结果"}]
 }
 If US and UK phonetics are the same, still fill both. Output ONLY valid JSON.`,
       },
@@ -584,7 +585,6 @@ function normalizeRelatedList(raw: unknown, selfWord: string): RelatedWord[] {
     out.push({
       word: w,
       gloss: String(o.gloss || '').trim().slice(0, 40),
-      note: String(o.note || '').trim().slice(0, 48),
     });
     if (out.length >= 4) break;
   }
@@ -655,11 +655,7 @@ function normalizeSimilarsList(raw: unknown, selfWord: string): RelatedWord[] {
       if (w.length > 16) return false;
       return isOrthographicLookAlike(w, selfWord);
     })
-    .slice(0, 2)
-    .map((item) => ({
-      ...item,
-      note: '',
-    }));
+    .slice(0, 2);
 }
 
 /**
@@ -683,19 +679,19 @@ Chinese gloss (hint): "${gloss || 'N/A'}"
 Return JSON ONLY:
 {
   "synonyms": [
-    {"word":"precise","gloss":"精确的","note":"更强调精密、一丝不苟"}
+    {"word":"precise","gloss":"精确的"}
   ],
   "similars": [
-    {"word":"effect","gloss":"影响/结果","note":"形近：affect 多为动词"}
+    {"word":"effect","gloss":"影响/结果"}
   ]
 }
 
 Rules:
-- synonyms: 2–4 items (prefer 3). Near meaning; note = brief Chinese contrast (≤24字). Dictionary lemmas only.
+- synonyms: 2–4 items (prefer 3). Near meaning; each item is word + short Chinese gloss only. Dictionary lemmas only.
 - similars: 0–2 items ONLY. Real standalone dictionary headwords that learners commonly confuse because SPELLING looks almost the same (differ by ~1–2 letters). Classic traps: affect/effect, principal/principle, desert/dessert, adapt/adopt, accept/except, advice/advise, stationary/stationery.
   Prefer an EMPTY similars array over weak/forced pairs.
   FORBIDDEN: invented tokens, glued phrases (e.g. insightof), multi-word expressions as one word, same-word morphology (insight→insightful), 音近但拼写差很多, topic/semantic near-misses.
-  Each similars.note MUST start with「形近」.
+- Do NOT include a "note" field on synonyms or similars.
 - Do NOT include "${word}" itself
 - Concrete Chinese glosses`;
 

@@ -1329,8 +1329,36 @@ input, textarea, select {
   font-weight: 600;
 }
 
+button.related-word-en.is-link {
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-weight: 600;
+  font-size: inherit;
+  line-height: inherit;
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-thickness: 1px;
+}
+
+button.related-word-en.is-link:hover {
+  opacity: 0.85;
+}
+
 .related-word-gloss {
   color: var(--text);
+}
+
+.derivative-pos {
+  display: inline-block;
+  margin-right: 6px;
+  color: var(--text-light);
+  font-size: 12px;
+  font-weight: 500;
 }
 
 .collocations-list {

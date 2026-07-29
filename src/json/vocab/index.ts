@@ -6,7 +6,7 @@
  */
 import ielts from './ielts.json';
 import kaoyan from './kaoyan.json';
-import type { RelatedWord, Collocation } from '@/types/word';
+import type { RelatedWord, Collocation, Derivative } from '@/types/word';
 
 export interface VocabBankEntry {
   word: string;
@@ -18,7 +18,11 @@ export interface VocabBankEntry {
   category?: string | string[];
   synonyms?: RelatedWord[];
   similars?: RelatedWord[];
+  /** 同根/派生词（有道 rel_word 等） */
+  derivatives?: Derivative[];
   collocations?: Collocation[];
+  /** 有道词典搭配，不覆盖 collocations */
+  dictCollocations?: Collocation[];
 }
 
 export type VocabBankSource = 'ielts' | 'kaoyan';
