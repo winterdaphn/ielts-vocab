@@ -1,5 +1,5 @@
 ﻿import { Button } from 'antd';
-import { RightOutlined, ReloadOutlined } from '@ant-design/icons';
+import { RightOutlined, ReloadOutlined, StarOutlined, StarFilled } from '@ant-design/icons';
 import { usePracticeSession } from '@/hooks/usePracticeSession';
 import { isClozeFamily } from '@/utils/practiceSelect';
 import { modeLabel, scopeLabel, difficultyLabel } from '@/utils/practiceSession';
@@ -131,11 +131,27 @@ export default function PracticePage() {
                   答案是{' '}
                   <b style={{ color: 'var(--accent)' }}>{answerWord}</b>
                   <SpeakButton text={answerWord} title="复习读音" />
+                  <button
+                    type="button"
+                    className={`practice-star-btn${current.word.starred ? ' active' : ''}`}
+                    title={current.word.starred ? '取消星标' : '加星标'}
+                    onClick={s.toggleStarred}
+                  >
+                    {current.word.starred ? <StarFilled /> : <StarOutlined />}
+                  </button>
                 </>
               ) : (
                 <>
                   {current.word.word}
                   <SpeakButton text={current.word.word} title="发音" />
+                  <button
+                    type="button"
+                    className={`practice-star-btn${current.word.starred ? ' active' : ''}`}
+                    title={current.word.starred ? '取消星标' : '加星标'}
+                    onClick={s.toggleStarred}
+                  >
+                    {current.word.starred ? <StarFilled /> : <StarOutlined />}
+                  </button>
                 </>
               )}
             </div>
@@ -227,6 +243,17 @@ export default function PracticePage() {
         className="flex-row"
         style={{ justifyContent: 'center', gap: 8, marginTop: 10 }}
       >
+        <Button
+          type="text"
+          size="small"
+          className={current.word.starred ? 'practice-star-action active' : 'practice-star-action'}
+          icon={current.word.starred ? <StarFilled /> : <StarOutlined />}
+          onClick={s.toggleStarred}
+          disabled={judging}
+          title={current.word.starred ? '取消星标' : '加星标，方便单独复习'}
+        >
+          {current.word.starred ? '已星标' : '星标'}
+        </Button>
         <Button
           type="text"
           size="small"

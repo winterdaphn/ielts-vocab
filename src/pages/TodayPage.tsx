@@ -24,6 +24,7 @@ const SCOPES: { key: StudyScope; label: string; hint: string }[] = [
     hint: '按艾宾浩斯到期复习：5分钟 → 30分钟 → 12小时 → 1/2/4/7/15/30天',
   },
   { key: 'mixed', label: '混合', hint: '新词优先，再穿插到期复习' },
+  { key: 'starred', label: '星标', hint: '只练你标过星的词，不受到期时间限制' },
 ];
 
 const DIFFICULTIES: { key: SentenceDifficulty; label: string; hint: string }[] = [
@@ -67,6 +68,10 @@ export default function TodayPage() {
     () => words.filter((w) => w.crossedOut).length,
     [words]
   );
+  const starredCount = useMemo(
+    () => words.filter((w) => !w.crossedOut && !!w.starred).length,
+    [words]
+  );
 
   const total = words.length;
   const taskCount =
@@ -74,7 +79,9 @@ export default function TodayPage() {
       ? scopeCounts.newCount
       : scope === 'review'
         ? scopeCounts.reviewCount
-        : scopeCounts.mixedCount;
+        : scope === 'starred'
+          ? scopeCounts.starredCount
+          : scopeCounts.mixedCount;
   const hasTasks = taskCount > 0;
   const sessionCount = Math.min(50, taskCount);
   const streak = parseInt(getLS('streak') || '0', 10);
@@ -191,7 +198,9 @@ export default function TodayPage() {
                   ? scopeCounts.newCount
                   : s.key === 'review'
                     ? scopeCounts.reviewCount
-                    : scopeCounts.mixedCount}
+                    : s.key === 'starred'
+                      ? scopeCounts.starredCount
+                      : scopeCounts.mixedCount}
               </span>
             </button>
           ))}
@@ -261,6 +270,10 @@ export default function TodayPage() {
             <div className="label">已掌握</div>
           </div>
           <div className="stat-card">
+            <div className="num">{starredCount}</div>
+            <div className="label">星标</div>
+          </div>
+          <div className="stat-card">
             <div className="num">{crossedCount}</div>
             <div className="label">已划掉</div>
           </div>
@@ -279,14 +292,18 @@ export default function TodayPage() {
               ? '没有新词'
               : scope === 'review'
                 ? '暂无复习任务'
-                : '今日无任务'}
+                : scope === 'starred'
+                  ? '还没有星标词'
+                  : '今日无任务'}
           </h3>
           <p>
             {scope === 'new'
               ? '去「添加」加几个新词，或切换到「复习」'
               : scope === 'review'
                 ? '没有到期词，可以去学新词'
-                : '所有词都掌握了，去「添加」加几个新词吧'}
+                : scope === 'starred'
+                  ? '在词表或详情页点 ★ 标出重点词后再来练'
+                  : '所有词都掌握了，去「添加」加几个新词吧'}
           </p>
         </div>
       )}

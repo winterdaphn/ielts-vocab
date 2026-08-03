@@ -19,9 +19,17 @@ import LetterIndexBar from '@/components/LetterIndexBar';
 import { categoryLabel, normalizeCategories, TOPIC_CATEGORIES, FUNCTION_CATEGORIES } from '@/config/categories';
 import { readWordsListUi, writeWordsListUi } from '@/utils/wordsListUi';
 
-type Filter = 'all' | 'due' | 'new' | 'learning' | 'mastered' | 'crossed';
+type Filter = 'all' | 'due' | 'new' | 'learning' | 'mastered' | 'starred' | 'crossed';
 
-const FILTER_KEYS: Filter[] = ['all', 'due', 'new', 'learning', 'mastered', 'crossed'];
+const FILTER_KEYS: Filter[] = [
+  'all',
+  'due',
+  'new',
+  'learning',
+  'mastered',
+  'starred',
+  'crossed',
+];
 
 function parseFilter(raw: string): Filter {
   return FILTER_KEYS.includes(raw as Filter) ? (raw as Filter) : 'all';
@@ -34,6 +42,7 @@ type ListRow =
 function matchesFilter(w: Word, filter: Filter): boolean {
   if (filter === 'all') return true;
   if (filter === 'crossed') return !!w.crossedOut;
+  if (filter === 'starred') return !!w.starred;
   if (w.crossedOut) return false;
   if (filter === 'new') return isNew(w);
   if (filter === 'due') return !isNew(w) && isDue(w);
@@ -58,11 +67,13 @@ function wordInitial(word: string): string {
 const WordListRow = memo(function WordListRow({
   w,
   onOpen,
+  onToggleStarred,
   onToggleCrossed,
   onDelete,
 }: {
   w: Word;
   onOpen: (id: string) => void;
+  onToggleStarred: (w: Word, e: React.MouseEvent) => void;
   onToggleCrossed: (w: Word, e: React.MouseEvent) => void;
   onDelete: (id: string) => void;
 }) {
@@ -70,7 +81,7 @@ const WordListRow = memo(function WordListRow({
 
   return (
     <div
-      className={`word-list-item ${w.crossedOut ? 'crossed' : ''}`}
+      className={`word-list-item ${w.crossedOut ? 'crossed' : ''}${w.starred ? ' is-starred' : ''}`}
       role="button"
       tabIndex={0}
       onClick={() => onOpen(w.id)}
@@ -84,6 +95,11 @@ const WordListRow = memo(function WordListRow({
       <div className="word-main">
         <div className="word-row">
           <span className="word">{w.word}</span>
+          {w.starred ? (
+            <span className="word-star-badge" title="星标" aria-hidden>
+              ★
+            </span>
+          ) : null}
           <PhoneticDisplay word={w} withSpeak />
         </div>
         <div className={`translation ${w.translation ? '' : 'mute'}`}>
@@ -95,6 +111,14 @@ const WordListRow = memo(function WordListRow({
           <span className={wordStageClass(stage)}>{wordStageLabel(stage)}</span>
         </div>
         <div className="actions" onClick={(e) => e.stopPropagation()}>
+          <button
+            type="button"
+            className={w.starred ? 'star active' : 'star'}
+            title={w.starred ? '取消星标' : '加星标'}
+            onClick={(e) => onToggleStarred(w, e)}
+          >
+            {w.starred ? '★' : '☆'}
+          </button>
           <button
             type="button"
             title={w.crossedOut ? '恢复' : '划掉'}
@@ -144,7 +168,9 @@ export default function WordsPage() {
     let learning = 0;
     let mastered = 0;
     let crossed = 0;
+    let starred = 0;
     for (const w of words) {
+      if (w.starred) starred++;
       if (w.crossedOut) {
         crossed++;
         continue;
@@ -160,6 +186,7 @@ export default function WordsPage() {
       due,
       learning,
       mastered,
+      starred,
       crossed,
     };
   }, [words]);
@@ -170,6 +197,7 @@ export default function WordsPage() {
     { key: 'due', label: `待复习 (${counts.due})` },
     { key: 'learning', label: `学习中 (${counts.learning})` },
     { key: 'mastered', label: `已掌握 (${counts.mastered})` },
+    { key: 'starred', label: `星标 (${counts.starred})` },
     { key: 'crossed', label: `已划掉 (${counts.crossed})` },
   ];
 
@@ -325,7 +353,7 @@ export default function WordsPage() {
         scrollTop,
         measurements: snapshot.map((m) => ({
           index: m.index,
-          key: m.key,
+          key: typeof m.key === 'bigint' ? String(m.key) : m.key,
           start: m.start,
           size: m.size,
           end: m.end,
@@ -335,6 +363,16 @@ export default function WordsPage() {
       navigate(`/words/${id}`);
     },
     [navigate, filter, categoryFilter, search, virtualizer]
+  );
+
+  const onToggleStarred = useCallback(
+    async (w: Word, e: React.MouseEvent) => {
+      e.stopPropagation();
+      const updated = { ...w, starred: !w.starred };
+      await updateWord(updated);
+      message.success(updated.starred ? '已加星标' : '已取消星标');
+    },
+    [updateWord, message]
   );
 
   const onToggleCrossed = useCallback(
@@ -444,6 +482,7 @@ export default function WordsPage() {
                       <WordListRow
                         w={row.word}
                         onOpen={onOpen}
+                        onToggleStarred={onToggleStarred}
                         onToggleCrossed={onToggleCrossed}
                         onDelete={onDelete}
                       />

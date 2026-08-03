@@ -9,6 +9,8 @@ import {
   ReadOutlined,
   PlusOutlined,
   EditOutlined,
+  StarOutlined,
+  StarFilled,
 } from '@ant-design/icons';
 import { useUserWords, useWordsStore } from '@/store/useWords';
 import { useSettings } from '@/store/useSettings';
@@ -26,6 +28,7 @@ import {
   generateCollocations,
   generateRelatedWords,
   lookupWordInfo,
+  judgeSynonymCandidate,
 } from '@/api/llm';
 import { getRelatedFromBank, mergeRelatedLists, resolveBankGloss, getBankLexisExtras } from '@/utils/vocabBankRelated';
 import RelatedWordsList from '@/components/RelatedWordsList';
@@ -44,7 +47,7 @@ type ColoTab = 'dict' | 'mine';
 export default function WordDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
   const words = useUserWords();
   const updateWord = useWordsStore((s) => s.updateWord);
   const removeWord = useWordsStore((s) => s.removeWord);
@@ -63,6 +66,9 @@ export default function WordDetailPage() {
   const [similarInput, setSimilarInput] = useState('');
   const [busyAddSimilar, setBusyAddSimilar] = useState(false);
   const [showSimilarAdd, setShowSimilarAdd] = useState(false);
+  const [synonymInput, setSynonymInput] = useState('');
+  const [busyAddSynonym, setBusyAddSynonym] = useState(false);
+  const [showSynonymAdd, setShowSynonymAdd] = useState(false);
   const [coloPhrase, setColoPhrase] = useState('');
   const [coloGloss, setColoGloss] = useState('');
   const [busyAddColo, setBusyAddColo] = useState(false);
@@ -76,6 +82,8 @@ export default function WordDetailPage() {
     setEditingMnemonic(false);
     setMnemonicDraft('');
     setShowSimilarAdd(false);
+    setShowSynonymAdd(false);
+    setSynonymInput('');
     setShowColoAdd(false);
     setColoTab('dict');
   }, [id]);
@@ -182,6 +190,122 @@ export default function WordDetailPage() {
     );
     await updateWord({ ...word!, similars: next });
     message.success(`已移除形近「${target}」`);
+  }
+
+  async function removeSynonym(target: string) {
+    const next: RelatedWord[] = (word!.synonyms || []).filter(
+      (s) => s.word.toLowerCase() !== target.toLowerCase()
+    );
+    await updateWord({ ...word!, synonyms: next });
+    message.success(`已移除近义「${target}」`);
+  }
+
+  async function addSynonym() {
+    const raw = synonymInput.trim().toLowerCase().replace(/[^a-z'-]/g, '');
+    if (!raw) {
+      message.warning('请输入近义词');
+      return;
+    }
+    if (raw === word!.word.toLowerCase()) {
+      message.warning('不能添加自己');
+      return;
+    }
+    const existing = word!.synonyms || [];
+    if (existing.some((s) => s.word.toLowerCase() === raw)) {
+      message.warning('列表里已有这个词');
+      return;
+    }
+    if (!settings.apiKey) {
+      message.warning('添加近义词需要 API Key，以便 AI 判断是否合适');
+      return;
+    }
+
+    setBusyAddSynonym(true);
+    try {
+      let judge;
+      try {
+        judge = await judgeSynonymCandidate(
+          word!.word,
+          word!.translation || '',
+          raw,
+          settings
+        );
+      } catch (e) {
+        message.error('AI 判断失败：' + (e instanceof Error ? e.message : '未知错误'));
+        return;
+      }
+
+      let lemma = judge.lemma || raw;
+      let gloss = judge.gloss || '';
+
+      if (!gloss) {
+        const fromBank = resolveBankGloss(lemma);
+        if (fromBank) {
+          lemma = fromBank.word;
+          gloss = fromBank.gloss;
+        } else {
+          const inList = words.find((w) => w.word.toLowerCase() === lemma);
+          if (inList?.translation) {
+            lemma = inList.word;
+            gloss = inList.translation.split(/[；;，,]/)[0].trim().slice(0, 40);
+          }
+        }
+      }
+
+      if (existing.some((s) => s.word.toLowerCase() === lemma.toLowerCase())) {
+        message.warning('列表里已有这个词');
+        return;
+      }
+
+      const verdict = judge.suitable
+        ? `合适（评分 ${judge.score}/5）`
+        : `不太合适（评分 ${judge.score}/5）`;
+      const confirmed = await new Promise<boolean>((resolve) => {
+        modal.confirm({
+          title: `添加近义「${lemma}」？`,
+          content: (
+            <div style={{ fontSize: 13, lineHeight: 1.65 }}>
+              <div style={{ marginBottom: 8 }}>
+                <b>AI 判断：</b>
+                {verdict}
+              </div>
+              <div style={{ color: 'var(--text-light)' }}>{judge.reason}</div>
+              {gloss ? (
+                <div style={{ marginTop: 8 }}>
+                  释义：{gloss}
+                </div>
+              ) : null}
+              {!judge.suitable ? (
+                <div style={{ marginTop: 8, color: 'var(--text-light)' }}>
+                  仍可强制添加；不合适的近义可能干扰记忆。
+                </div>
+              ) : null}
+            </div>
+          ),
+          okText: judge.suitable ? '添加' : '仍要添加',
+          cancelText: '取消',
+          okButtonProps: judge.suitable ? undefined : { danger: true },
+          onOk: () => resolve(true),
+          onCancel: () => resolve(false),
+        });
+      });
+      if (!confirmed) return;
+
+      if (!gloss) {
+        message.warning('缺少释义，无法添加');
+        return;
+      }
+
+      await updateWord({
+        ...word!,
+        synonyms: [...existing, { word: lemma, gloss }],
+      });
+      setSynonymInput('');
+      setShowSynonymAdd(false);
+      message.success(`已添加近义「${lemma}」`);
+    } finally {
+      setBusyAddSynonym(false);
+    }
   }
 
   function startEditMnemonic() {
@@ -359,6 +483,11 @@ export default function WordDetailPage() {
     }
   }
 
+  async function toggleStarred() {
+    await updateWord({ ...word!, starred: !word!.starred });
+    message.success(word!.starred ? '已取消星标' : '已加星标');
+  }
+
   async function toggleCrossed() {
     await updateWord({ ...word!, crossedOut: !word!.crossedOut });
     message.success(word!.crossedOut ? '已恢复' : '已划掉');
@@ -386,12 +515,20 @@ export default function WordDetailPage() {
         <button
           type="button"
           className="wd-navbar-back"
-          aria-label="返回词表"
-          onClick={() => navigate('/words')}
+          aria-label="返回"
+          onClick={() => {
+            // 练习 / 近义链进来 → 上一页；直接打开且无历史 → 词表
+            const idx = (window.history.state as { idx?: number } | null)?.idx;
+            if (typeof idx === 'number' && idx > 0) navigate(-1);
+            else navigate('/words');
+          }}
         >
           <LeftOutlined />
         </button>
-        <h1 className={`wd-navbar-title${word.crossedOut ? ' crossed' : ''}`}>{word.word}</h1>
+        <h1 className={`wd-navbar-title${word.crossedOut ? ' crossed' : ''}`}>
+          {word.starred ? <span className="wd-star-mark" aria-hidden>★ </span> : null}
+          {word.word}
+        </h1>
         <span className={`wd-navbar-stage ${wordStageClass(stage)}`}>
           {wordStageLabel(stage)}
         </span>
@@ -513,15 +650,62 @@ export default function WordDetailPage() {
             <>
               <div className="tip-section-head" style={{ marginBottom: 8 }}>
                 <span className="text-light" style={{ fontSize: 12 }}>
-                  近义词（词库 + AI）
+                  近义词（可增删 · 添加时 AI 把关）
                 </span>
-                {!synonyms.length && (
-                  <Button size="small" loading={busyRelated} onClick={fillRelated}>
-                    补全
+                <Space size={8}>
+                  <Button
+                    size="small"
+                    icon={<PlusOutlined />}
+                    onClick={() => setShowSynonymAdd((v) => !v)}
+                  >
+                    {showSynonymAdd ? '取消' : '添加'}
                   </Button>
-                )}
+                  {!synonyms.length && (
+                    <Button size="small" loading={busyRelated} onClick={fillRelated}>
+                      补全
+                    </Button>
+                  )}
+                </Space>
               </div>
-              <RelatedWordsList items={synonyms} emptyText="暂无近义词，可点「补全」" />
+              <RelatedWordsList
+                items={synonyms}
+                emptyText="暂无近义词，可点「补全」或「添加」"
+                onRemove={removeSynonym}
+                removeTitle="移除这个近义词"
+              />
+              {showSynonymAdd && (
+                <Space.Compact style={{ width: '100%', marginTop: 10 }}>
+                  <Input
+                    size="small"
+                    placeholder="输入近义词，AI 判断是否合适"
+                    value={synonymInput}
+                    onChange={(e) => setSynonymInput(e.target.value)}
+                    onPressEnter={() => !busyAddSynonym && addSynonym()}
+                    disabled={busyAddSynonym}
+                    allowClear
+                    autoFocus
+                  />
+                  <Button
+                    size="small"
+                    type="primary"
+                    loading={busyAddSynonym}
+                    onClick={addSynonym}
+                  >
+                    确认
+                  </Button>
+                </Space.Compact>
+              )}
+              {(synonyms.length > 0 || similars.length > 0) && (
+                <Button
+                  size="small"
+                  type="link"
+                  loading={busyRelated}
+                  onClick={fillRelated}
+                  style={{ paddingLeft: 0, marginTop: 8 }}
+                >
+                  重新补全近义 / 形近
+                </Button>
+              )}
             </>
           )}
 
@@ -772,6 +956,14 @@ export default function WordDetailPage() {
         >
           <RightOutlined />
           <span>下一个</span>
+        </button>
+        <button
+          type="button"
+          className={`wd-bar-btn${word.starred ? ' is-starred' : ''}`}
+          onClick={toggleStarred}
+        >
+          {word.starred ? <StarFilled /> : <StarOutlined />}
+          <span>{word.starred ? '已星标' : '星标'}</span>
         </button>
         <button type="button" className="wd-bar-btn" onClick={toggleCrossed}>
           <StopOutlined />

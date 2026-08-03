@@ -105,6 +105,7 @@ export function makeNewWord(input: Partial<Word> & { word: string; translation?:
       : [],
     examples: input.examples || [],
     crossedOut: input.crossedOut ?? false,
+    starred: input.starred ?? false,
     ease: input.ease ?? 2.5,
     interval: input.interval ?? 0,
     streak: input.streak ?? 0,

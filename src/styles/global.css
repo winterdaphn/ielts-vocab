@@ -822,6 +822,33 @@ input, textarea, select {
   text-align: right;
 }
 
+.practice-star-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--text-mute);
+  cursor: pointer;
+  padding: 4px;
+  font-size: 18px;
+  line-height: 1;
+  border-radius: 6px;
+}
+
+.practice-star-btn:hover {
+  color: #d4a017;
+  background: rgba(212, 160, 23, 0.1);
+}
+
+.practice-star-btn.active {
+  color: #d4a017;
+}
+
+.practice-star-action.active {
+  color: #d4a017 !important;
+}
+
 /* Practice mode tag */
 .mode-tag {
   display: inline-block;
@@ -1169,6 +1196,22 @@ input, textarea, select {
 .word-list-item .actions button:hover {
   background: var(--accent-light);
   color: var(--accent);
+}
+
+.word-list-item .actions button.star.active {
+  color: #d4a017;
+}
+
+.word-list-item .actions button.star.active:hover {
+  color: #b8860b;
+  background: rgba(212, 160, 23, 0.12);
+}
+
+.word-list-item .word-star-badge {
+  color: #d4a017;
+  font-size: 12px;
+  line-height: 1;
+  flex-shrink: 0;
 }
 
 .word-list-item .actions .delete:hover,
@@ -1755,6 +1798,15 @@ button.related-word-en.is-link:hover {
 
 .wd-bar-btn.danger {
   color: var(--danger, #e04b4b);
+}
+
+.wd-bar-btn.is-starred {
+  color: #d4a017;
+}
+
+.wd-star-mark {
+  color: #d4a017;
+  font-weight: 400;
 }
 
 .wd-bar-primary {

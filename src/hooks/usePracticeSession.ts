@@ -38,6 +38,7 @@ import {
   selectDailyWords,
   selectNewWords,
   selectReviewWords,
+  selectStarredWords,
   SESSION_SIZE,
   type Mode,
   type Question,
@@ -132,7 +133,9 @@ export function usePracticeSession() {
       ? selectNewWords(words).length
       : scope === 'review'
         ? selectReviewWords(words).length
-        : selectDailyWords(words).length;
+        : scope === 'starred'
+          ? selectStarredWords(words).length
+          : selectDailyWords(words).length;
 
   function setQueueBoth(updater: (prev: (Question | null)[]) => (Question | null)[]) {
     setQueue((prev) => {
@@ -577,7 +580,9 @@ export function usePracticeSession() {
           ? '没有新词可学'
           : s === 'review'
             ? '暂无待复习的词'
-            : '没有可练习的单词'
+            : s === 'starred'
+              ? '还没有星标词，先在词表点 ★'
+              : '没有可练习的单词'
       );
       navigate('/today');
       return;
@@ -1056,6 +1061,24 @@ export function usePracticeSession() {
     }
   }
 
+  async function toggleStarred() {
+    if (!current) return;
+    const nextStarred = !current.word.starred;
+    const updated = { ...current.word, starred: nextStarred };
+    await updateWord(updated);
+    setSessionWords((prev) =>
+      prev.map((w) => (w.id === updated.id ? { ...w, starred: nextStarred } : w))
+    );
+    setQueueBoth((prev) =>
+      prev.map((item) =>
+        item && item.word.id === updated.id
+          ? { ...item, word: { ...item.word, starred: nextStarred } }
+          : item
+      )
+    );
+    message.success(nextStarred ? '已加星标' : '已取消星标');
+  }
+
   return {
     phase,
     mode,
@@ -1100,6 +1123,7 @@ export function usePracticeSession() {
     exitPractice,
     regenerateCurrent,
     retryGenerate,
+    toggleStarred,
     navigate,
   };
 }

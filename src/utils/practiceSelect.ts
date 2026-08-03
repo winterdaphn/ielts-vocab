@@ -45,6 +45,11 @@ export function selectDailyWords(all: Word[]): Word[] {
   return [...selectNewWords(all), ...selectReviewWords(all)];
 }
 
+/** Starred words for focused review (ignores due schedule) */
+export function selectStarredWords(all: Word[]): Word[] {
+  return shuffle(all.filter((w) => !w.crossedOut && !!w.starred));
+}
+
 /** Pick up to SESSION_SIZE words for this round, preserving scope priority */
 export function pickSessionWords(all: Word[], scope: StudyScope = 'mixed'): Word[] {
   const pool =
@@ -52,7 +57,9 @@ export function pickSessionWords(all: Word[], scope: StudyScope = 'mixed'): Word
       ? selectNewWords(all)
       : scope === 'review'
         ? selectReviewWords(all)
-        : selectDailyWords(all);
+        : scope === 'starred'
+          ? selectStarredWords(all)
+          : selectDailyWords(all);
   return pool.slice(0, SESSION_SIZE);
 }
 
@@ -60,13 +67,16 @@ export function countByScope(all: Word[]): {
   newCount: number;
   reviewCount: number;
   mixedCount: number;
+  starredCount: number;
 } {
   const newCount = all.filter((w) => !w.crossedOut && isNew(w)).length;
   const reviewCount = selectReviewWords(all).length;
+  const starredCount = all.filter((w) => !w.crossedOut && !!w.starred).length;
   return {
     newCount,
     reviewCount,
     mixedCount: newCount + reviewCount,
+    starredCount,
   };
 }
 

@@ -58,6 +58,7 @@ function normalizeCloudWord(raw: Partial<Word> & { word?: string }): Word | null
       : [],
     examples: Array.isArray(raw.examples) ? raw.examples : [],
     crossedOut: raw.crossedOut ?? false,
+    starred: raw.starred ?? false,
     ease: raw.ease ?? 2.5,
     interval: raw.interval ?? 0,
     streak: raw.streak ?? 0,

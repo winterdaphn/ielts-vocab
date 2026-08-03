@@ -11,7 +11,7 @@ import { getLS, setLS, delLS } from '@/utils/date';
 import type { Word, WordExample } from '@/types/word';
 
 export type PracticeMode = 'cloze' | 'choice' | 'translate';
-export type StudyScope = 'new' | 'review' | 'mixed';
+export type StudyScope = 'new' | 'review' | 'mixed' | 'starred';
 /** Sentence generation difficulty for cloze / choice / translate */
 export type SentenceDifficulty = 'easy' | 'medium' | 'hard';
 
@@ -24,6 +24,7 @@ export function modeLabel(mode: PracticeMode): string {
 export function scopeLabel(scope: StudyScope): string {
   if (scope === 'new') return '学新词';
   if (scope === 'review') return '复习';
+  if (scope === 'starred') return '星标';
   return '混合';
 }
 
@@ -40,7 +41,7 @@ export function parsePracticeMode(raw: string | null | undefined): PracticeMode 
 }
 
 export function parseStudyScope(raw: string | null | undefined): StudyScope {
-  if (raw === 'new' || raw === 'review') return raw;
+  if (raw === 'new' || raw === 'review' || raw === 'starred') return raw;
   return 'mixed';
 }
 

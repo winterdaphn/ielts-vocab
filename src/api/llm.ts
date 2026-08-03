@@ -712,6 +712,96 @@ Rules:
   }
 }
 
+export interface SynonymJudgeResult {
+  lemma: string;
+  gloss: string;
+  /** Whether AI considers it a usable near-synonym */
+  suitable: boolean;
+  /** 1–5 closeness; >=4 usually suitable */
+  score: number;
+  /** Short Chinese opinion for the user */
+  reason: string;
+}
+
+/**
+ * Judge whether `candidate` is a reasonable near-synonym of the headword.
+ * Used when the learner manually adds a synonym.
+ */
+export async function judgeSynonymCandidate(
+  headword: string,
+  headTranslation: string,
+  candidate: string,
+  settings: Settings
+): Promise<SynonymJudgeResult> {
+  const head = headword.trim();
+  const cand = candidate.trim().toLowerCase().replace(/[^a-z'-]/g, '');
+  const fallback: SynonymJudgeResult = {
+    lemma: cand || candidate.trim(),
+    gloss: '',
+    suitable: false,
+    score: 1,
+    reason: '无法判断，请自行决定是否添加',
+  };
+  if (!head || !cand || !settings.apiKey) return fallback;
+
+  const prompt = `You are an IELTS vocabulary coach. Judge if the candidate is a NEAR-SYNONYM of the headword (similar meaning, often interchangeable in academic English). NOT look-alikes, NOT antonyms, NOT loose topic associates.
+
+Headword: "${head}"
+Headword Chinese gloss (hint): "${(headTranslation || '').trim().slice(0, 100) || 'N/A'}"
+Candidate: "${cand}"
+
+Return JSON ONLY:
+{
+  "lemma": "dictionary lemma of candidate in lowercase",
+  "gloss": "short Chinese gloss of the candidate (≤16字)",
+  "suitable": true,
+  "score": 4,
+  "reason": "一两句中文：为何合适或不合适（点明语义差异/词性/语域）"
+}
+
+Rules:
+- suitable=true only if score>=4 and meanings are close enough to teach as synonyms
+- score 1–5 (5=几乎可互换)
+- reason must be Chinese, concrete, ≤40字
+- Do NOT invent the candidate; if misspelled, put corrected lemma in "lemma"`;
+
+  const text = await callLLM([{ role: 'user', content: prompt }], settings, {
+    temperature: 0.1,
+    jsonMode: true,
+    maxTokens: 400,
+  });
+
+  try {
+    const parsed = parseJsonLoose<{
+      lemma?: string;
+      gloss?: string;
+      suitable?: boolean;
+      score?: number;
+      reason?: string;
+    }>(text);
+    const lemma = String(parsed.lemma || cand)
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z'-]/g, '') || cand;
+    let score = Number(parsed.score);
+    if (!Number.isFinite(score)) score = 1;
+    score = Math.max(1, Math.min(5, Math.round(score)));
+    const suitable =
+      typeof parsed.suitable === 'boolean' ? parsed.suitable : score >= 4;
+    return {
+      lemma,
+      gloss: String(parsed.gloss || '')
+        .trim()
+        .slice(0, 40),
+      suitable,
+      score,
+      reason: String(parsed.reason || '').trim().slice(0, 80) || fallback.reason,
+    };
+  } catch {
+    return fallback;
+  }
+}
+
 function normalizeCollocationList(raw: unknown, headword: string): Collocation[] {
   if (!Array.isArray(raw)) return [];
   const head = headword.toLowerCase().trim();

@@ -47,6 +47,8 @@ export interface Word {
   dictCollocations?: Collocation[];
   examples: WordExample[];
   crossedOut: boolean;
+  /** 星标：方便单独复习的重点词 */
+  starred?: boolean;
   ease: number;
   interval: number;
   streak: number;

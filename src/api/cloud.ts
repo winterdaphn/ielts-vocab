@@ -1,6 +1,8 @@
 /**
- * Cloud sync — read/write vocab data via Worker cloud storage (gzip + base64).
- * Per-user: X-Profile header routes to that user's backup file.
+ * Cloud sync v2.6 — direct COS upload/download (bypass Worker 1MB limit).
+ *
+ * Push: POST /api/upload-url → gzip JSON → PUT to COS
+ * Pull: GET  /api/download-url → GET COS → ungzip JSON
  */
 
 import { gzip, ungzip } from 'pako';
@@ -14,17 +16,6 @@ export interface SyncPayload {
   encrypted?: { iv: string; data: string; v?: number } | null;
 }
 
-function getBaseUrl(workerUrl: string): string {
-  return workerUrl.replace(/\/$/, '');
-}
-
-function authHeaders(settings: Settings, username: string): Record<string, string> {
-  const headers: Record<string, string> = {};
-  if (settings.syncToken) headers['X-Auth-Token'] = settings.syncToken;
-  if (username) headers['X-Profile'] = username;
-  return headers;
-}
-
 export class CloudError extends Error {
   status: number;
   constructor(message: string, status: number) {
@@ -33,74 +24,108 @@ export class CloudError extends Error {
   }
 }
 
-/** Avoid stack overflow on large Uint8Array (1–5MB payloads). */
-function uint8ToBase64(bytes: Uint8Array): string {
-  let binary = '';
-  const chunkSize = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
-  }
-  return btoa(binary);
+function getBase(url: string): string {
+  return url.replace(/\/$/, '');
 }
 
-function base64ToUint8(base64: string): Uint8Array {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes;
+function authHeaders(settings: Settings, username: string): Record<string, string> {
+  const h: Record<string, string> = {};
+  if (settings.syncToken) h['X-Auth-Token'] = settings.syncToken;
+  if (username) h['X-Profile'] = username;
+  return h;
 }
 
+async function readJsonSafe(resp: Response): Promise<Record<string, unknown>> {
+  try {
+    return (await resp.json()) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
+/** 推：拿预签名 URL → gzip → PUT 到 COS */
 export async function uploadAll(
   settings: Settings,
   username: string,
   payload: SyncPayload
 ): Promise<void> {
   if (!settings.workerUrl) throw new CloudError('未设置 Worker URL', 0);
-  const json = JSON.stringify({
-    words: payload.words,
-    state: payload.state,
-    meta: payload.meta,
-    encrypted: payload.encrypted,
-  });
-  const compressed = gzip(json);
-  const base64 = uint8ToBase64(compressed);
-  const resp = await fetch(getBaseUrl(settings.workerUrl) + '/api/upload', {
+
+  const signResp = await fetch(getBase(settings.workerUrl) + '/api/upload-url', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...authHeaders(settings, username),
-    },
-    body: JSON.stringify({ data: base64 }),
+    headers: authHeaders(settings, username),
   });
-  if (!resp.ok) {
-    const data = await resp.json().catch(() => ({}));
-    throw new CloudError(data.error || '上传失败', resp.status);
+  const signData = await readJsonSafe(signResp);
+  if (!signResp.ok) {
+    throw new CloudError(
+      String(signData.error || '获取上传地址失败'),
+      signResp.status
+    );
+  }
+  const url = String(signData.url || '');
+  const cosHeaders = (signData.headers || {}) as Record<string, string>;
+  if (!url) throw new CloudError('上传地址为空', 0);
+
+  const json = JSON.stringify({
+    words: payload.words || [],
+    state: payload.state || {},
+    meta: { ...(payload.meta || {}), lastSyncAt: Date.now() },
+    encrypted: payload.encrypted || null,
+  });
+  const gz = gzip(json);
+  const put = await fetch(url, {
+    method: 'PUT',
+    body: gz,
+    headers: cosHeaders,
+  });
+  if (!put.ok) {
+    throw new CloudError(`COS 上传失败: ${put.status}`, put.status);
   }
 }
 
+/** 拉：拿预签名 URL → GET COS → 解压 */
 export async function downloadAll(
   settings: Settings,
   username: string
 ): Promise<SyncPayload | null> {
   if (!settings.workerUrl) return null;
+
   try {
-    const resp = await fetch(getBaseUrl(settings.workerUrl) + '/api/download', {
-      method: 'GET',
-      headers: authHeaders(settings, username),
-    });
-    if (!resp.ok) return null;
-    const data = await resp.json();
-    if (!data.hasBackup) return null;
-    const compressed = base64ToUint8(data.data);
-    const json = ungzip(compressed, { toText: true });
-    return JSON.parse(json) as SyncPayload;
+    const signResp = await fetch(
+      getBase(settings.workerUrl) + '/api/download-url',
+      { headers: authHeaders(settings, username) }
+    );
+    if (!signResp.ok) return null;
+    const signData = await readJsonSafe(signResp);
+    if (!signData.hasBackup) return null;
+    const url = String(signData.url || '');
+    if (!url) return null;
+
+    const buf = await (await fetch(url)).arrayBuffer();
+    const text = ungzip(new Uint8Array(buf), { toText: true });
+    return JSON.parse(text) as SyncPayload;
   } catch {
     return null;
   }
 }
 
-/** Alias for compatibility — new code prefers downloadAll / uploadAll */
-export const fetchAll = downloadAll;
+/** 备份元信息（可选） */
+export async function getInfo(
+  settings: Settings,
+  username: string
+): Promise<{ hasBackup?: boolean; [k: string]: unknown }> {
+  if (!settings.workerUrl) return { hasBackup: false };
+  try {
+    const resp = await fetch(getBase(settings.workerUrl) + '/api/info', {
+      headers: authHeaders(settings, username),
+    });
+    if (!resp.ok) return { hasBackup: false };
+    return await readJsonSafe(resp);
+  } catch {
+    return { hasBackup: false };
+  }
+}
+
+/** Aliases matching FRONTEND_MIGRATION.md naming */
 export const pushAll = uploadAll;
+export const fetchAll = downloadAll;
