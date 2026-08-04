@@ -10,28 +10,32 @@ cd "$(dirname "$0")"
 
 MODE="${1:-auto}"
 
-OLD_HEAD=$(git rev-parse HEAD)
+# 用 reflog 拿 pull 前的 HEAD（即使外部先 pull 过也能识别改动）
+OLD_HEAD=$(git rev-parse HEAD@{1} 2>/dev/null || echo "")
 echo "[1/4] git pull..."
 git pull --ff-only
 NEW_HEAD=$(git rev-parse HEAD)
 
 CHANGED=""
-if [ "$OLD_HEAD" != "$NEW_HEAD" ]; then
-    CHANGED=$(git diff --name-only "$OLD_HEAD".."$NEW_HEAD")
+if [ -n "$OLD_HEAD" ] && [ "$OLD_HEAD" != "$NEW_HEAD" ]; then
+    CHANGED=$(git diff --name-only "$OLD_HEAD".."$NEW_HEAD" 2>/dev/null || true)
+fi
+
+if [ -n "$CHANGED" ]; then
     echo "本次更新："
     echo "$CHANGED" | sed 's/^/  /'
 else
-    echo "无新提交（可能 fast-forward 失败或本地有未推送提交）"
+    echo "未检测到代码改动（可能 reflog 已被清理或本地有未 push 提交）"
 fi
 
 changed_web()  { echo "$CHANGED" | grep -q "^apps/web/"; }
 changed_api()  { echo "$CHANGED" | grep -q "^apps/api/"; }
 changed_infra(){ echo "$CHANGED" | grep -q -E "^(docker-compose\.yml|nginx/|deploy-server\.sh|apps/web/Dockerfile)"; }
 
-build_web()  { docker compose build web;  docker compose up -d --no-deps web;  }
-build_api()  { docker compose build api;  docker compose up -d --no-deps api;  }
-reload_nginx(){ docker compose restart nginx; }
-full_up()    { docker compose build web api; docker compose up -d; }
+build_web()    { docker compose build web;  docker compose up -d --no-deps web;  }
+build_api()    { docker compose build api;  docker compose up -d --no-deps api;  }
+reload_nginx() { docker compose restart nginx; }
+full_up()      { docker compose build web api; docker compose up -d; }
 
 case "$MODE" in
     all)
@@ -68,7 +72,7 @@ case "$MODE" in
             build_api
             reload_nginx
         else
-            echo "[2/4] 无应用代码改动，重启所有服务..."
+            echo "[2/4] 未检测到代码改动，重启服务..."
             docker compose restart
         fi
         ;;
