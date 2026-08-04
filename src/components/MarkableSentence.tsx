@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { App } from 'antd';
 import { useUserWords, useWordsStore, makeNewWord } from '@/store/useWords';
 import { useSettings } from '@/store/useSettings';
-import { areInflectionVariants, resolveLemma } from '@/utils/inflections';
+import { areInflectionVariants, resolveLemma, isPlausibleLemmaReduction } from '@/utils/inflections';
 import { isMarkableToken, normalizeMarkWord } from '@/utils/markWords';
 import { resolveLemmaWithAI, suggestCategoriesWithAI, generateRelatedWords } from '@/api/llm';
 import { lookupYoudaoWord, canUseYoudao } from '@/api/youdao';
@@ -103,14 +103,18 @@ export default function MarkableSentence({
           const ai = await resolveLemmaWithAI(clicked, settings);
           lemma = ai.lemma || lemma;
           formNote = ai.formNote || '';
+          if (!isPlausibleLemmaReduction(clicked, lemma)) {
+            lemma = resolveLemma(clicked);
+            formNote = '';
+          }
         } catch {
           /* keep local lemma */
         }
       }
       if (canYoudao) {
         try {
-          const info = await lookupYoudaoWord(lemma, settings);
-          lemma = resolveLemma(lemma, info.lemma);
+          const info = await lookupYoudaoWord(clicked, settings);
+          lemma = resolveLemma(clicked, info.lemma);
           if (!formNote && info.formNote) formNote = info.formNote;
           if (info.translation) translation = info.translation;
           if (info.phoneticUs) phoneticUs = info.phoneticUs;

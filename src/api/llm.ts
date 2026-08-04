@@ -14,7 +14,7 @@ import type {
 
 export type { SynonymDiffItem, SynonymDiffResult };
 import { PROVIDERS } from '@/config/providers';
-import { areInflectionVariants, findInflectedFormInSentence, resolveLemma } from '@/utils/inflections';
+import { areInflectionVariants, findInflectedFormInSentence, resolveLemma, isPlausibleLemmaReduction } from '@/utils/inflections';
 import { categoryLabel, normalizeCategories } from '@/config/categories';
 
 export interface ChatMessage {
@@ -515,6 +515,10 @@ export async function resolveLemmaWithAI(
         content: `Reduce the English word to its dictionary HEADWORD (lemma) for a learner word list.
 Input may be plural, -ing, -ed, 3rd-person -s, comparative, etc.
 
+Do NOT split compound or distinct headwords into a shorter inner word:
+- offbeat, upbeat, downbeat, heartbeat → keep as-is (NOT beat)
+- only reduce true inflections: beats→beat, running→run, studied→study
+
 Examples: ingredients→ingredient, possesses→possess, running→run, studied→study, better→good (only if clearly of good).
 
 Input: "${raw}"
@@ -534,9 +538,13 @@ Return JSON ONLY:
       .trim()
       .replace(/[^a-z'-]/g, '');
     if (!lemma) return fallback;
+    const normalized = resolveLemma(raw, lemma);
+    const accepted = isPlausibleLemmaReduction(raw, normalized);
     return {
-      lemma: resolveLemma(raw, lemma),
-      formNote: String(parsed.formNote || '').trim().slice(0, 20),
+      lemma: accepted ? normalized : resolveLemma(raw),
+      formNote: accepted
+        ? String(parsed.formNote || '').trim().slice(0, 20)
+        : '',
     };
   } catch {
     return fallback;

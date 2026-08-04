@@ -23,6 +23,7 @@
  */
 
 import type { Settings } from '@/types/settings';
+import { isPlausibleLemmaReduction } from '@/utils/inflections';
 import type { Collocation, Derivative, RelatedWord } from '@/types/word';
 
 export class YoudaoError extends Error {}
@@ -298,10 +299,9 @@ function parseOne(
   const { phoneticUs, phoneticUk, partOfSpeech } = parsePhonetics(json);
   const translation = formatEcTranslation(json);
   const formNote =
-    lettersOnly(typed) !== lettersOnly(lemma)
-      ? typed.toLowerCase() !== lemma.toLowerCase()
-        ? '词形变化'
-        : undefined
+    lettersOnly(typed) !== lettersOnly(lemma) &&
+    isPlausibleLemmaReduction(typed, lemma)
+      ? '词形变化'
       : undefined;
   return {
     lemma,
@@ -329,7 +329,14 @@ export async function lookupYoudaoWord(
 
   let json = await fetchYoudaoJson(typed, settings);
   const { prototype } = parsePhonetics(json);
-  const lemma = (prototype || typed).toLowerCase().trim();
+  let lemma = typed.toLowerCase().trim();
+  const proto = String(prototype || '')
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z'-]/g, '');
+  if (proto && isPlausibleLemmaReduction(typed, proto)) {
+    lemma = proto;
+  }
 
   if (lettersOnly(lemma) && lettersOnly(lemma) !== lettersOnly(typed)) {
     try {

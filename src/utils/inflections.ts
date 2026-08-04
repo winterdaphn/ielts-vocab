@@ -106,6 +106,35 @@ export function areInflectionVariants(a: string, b: string): boolean {
   return false;
 }
 
+const INFLECTION_PREFIX_RE = /^(s|es|ed|d|ing|er|est|ly|ies|ied)$/;
+
+/**
+ * Whether `lemma` is a real inflection/base of `raw` (not a shorter unrelated substring).
+ * Blocks offbeat→beat, upbeat→beat; allows beats→beat, studying→study.
+ */
+export function isPlausibleLemmaReduction(raw: string, lemma: string): boolean {
+  const r = String(raw || '')
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z'-]/g, '');
+  const l = String(lemma || '')
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z'-]/g, '');
+  if (!r || !l) return false;
+  if (r === l) return true;
+  if (r.replace(/-/g, '') === l.replace(/-/g, '')) return true;
+  if (areInflectionVariants(r, l)) return true;
+  if (l.length >= r.length) return false;
+  if (r.endsWith(l)) {
+    const prefix = r.slice(0, r.length - l.length);
+    if (INFLECTION_PREFIX_RE.test(prefix)) return true;
+    if (prefix.length >= 2) return false;
+    return true;
+  }
+  return false;
+}
+
 /**
  * Best-effort local lemma (no AI). Prefer AI `lookupWordInfo().lemma` when available.
  * Examples: ingredients→ingredient, possesses→possess, running→run, studied→study
@@ -205,7 +234,7 @@ export function resolveLemma(input: string, aiLemma?: string | null): string {
     .trim()
     .replace(/[^a-z'-]/g, '');
   if (fromAi && /^[a-z][a-z'-]*$/.test(fromAi) && fromAi.length >= 2) {
-    return fromAi;
+    if (isPlausibleLemmaReduction(raw, fromAi)) return fromAi;
   }
   return guessLemma(raw) || raw;
 }

@@ -3,7 +3,7 @@ import { Input, Button, App, Alert } from 'antd';
 import { useSettings } from '@/store/useSettings';
 import { useWordsStore, makeNewWord, useUserWords } from '@/store/useWords';
 import { useCategories } from '@/store/useCategories';
-import { areInflectionVariants, resolveLemma } from '@/utils/inflections';
+import { areInflectionVariants, resolveLemma, isPlausibleLemmaReduction } from '@/utils/inflections';
 import { resolveLemmaWithAI, suggestCategoriesWithAI, generateRelatedWords } from '@/api/llm';
 import { lookupYoudaoWord, YoudaoError, canUseYoudao } from '@/api/youdao';
 import { mergeSynonymSources } from '@/utils/vocabBankRelated';
@@ -39,7 +39,10 @@ export default function AddPage() {
 
   const hasPreview = !!(translation || phoneticUs || phoneticUk);
   const showedLemmaHint =
-    !!inputRaw && !!word && inputRaw.toLowerCase() !== word.toLowerCase();
+    !!inputRaw &&
+    !!word &&
+    inputRaw.toLowerCase() !== word.toLowerCase() &&
+    isPlausibleLemmaReduction(inputRaw, word);
   const canLookup = canUseYoudao(settings);
 
   function clearAll() {
@@ -77,20 +80,27 @@ export default function AddPage() {
         const ai = await resolveLemmaWithAI(typed, settings);
         lemma = ai.lemma || lemma;
         formNote = ai.formNote || '';
+        if (!isPlausibleLemmaReduction(typed, lemma)) {
+          lemma = resolveLemma(typed);
+          formNote = '';
+        }
       } catch {
         /* keep local lemma */
       }
 
-      // 2) 有道查释义 / 近义 / 搭配 / 派生
-      const info = await lookupYoudaoWord(lemma, settings);
-      lemma = resolveLemma(lemma, info.lemma);
+      // 2) 有道查释义（用用户输入查，避免误还原后查错词）
+      const info = await lookupYoudaoWord(typed, settings);
+      lemma = resolveLemma(typed, info.lemma);
       const gloss = info.translation || '';
       setInputRaw(typed);
       setWord(lemma);
       setFormNote(
         formNote ||
           info.formNote ||
-          (lemma !== typed.toLowerCase() ? '词形变化' : '')
+          (lemma !== typed.toLowerCase() &&
+          isPlausibleLemmaReduction(typed, lemma)
+            ? '词形变化'
+            : '')
       );
       if (gloss) setTranslation(gloss);
       if (info.phoneticUs) setPhoneticUs(info.phoneticUs);
