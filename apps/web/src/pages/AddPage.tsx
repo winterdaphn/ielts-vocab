@@ -67,7 +67,7 @@ export default function AddPage() {
       return;
     }
     if (!canLookup) {
-      message.error('查词需要配置 Worker URL（设置 → 云同步）');
+      message.error('查词需要配置 API Base（设置 → 云同步），或本地开发走代理');
       return;
     }
     const typed = word.trim();
@@ -238,7 +238,7 @@ export default function AddPage() {
             loading={generating}
             disabled={!canLookup}
           >
-            {canLookup ? '有道查词' : '先配置 Worker URL'}
+            {canLookup ? '有道查词' : '先配置 API Base'}
           </Button>
         </div>
       </div>

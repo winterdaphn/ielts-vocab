@@ -93,6 +93,8 @@ export interface Word {
   totalReviews: number;
   correctReviews: number;
   createdAt: number;
+  /** Last local/remote mutation time (ms); used for LWW sync */
+  updatedAt?: number;
 }
 
 export interface WordExample {

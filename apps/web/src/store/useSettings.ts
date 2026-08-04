@@ -12,9 +12,11 @@ const initial: Settings = {
   apiKey: '',
   apiBase: PROVIDERS[DEFAULT_PROVIDER].base,
   model: PROVIDERS[DEFAULT_PROVIDER].model,
-  workerUrl: 'https://ielts-vocab-d5gu0dfe9e1a9b5e9-1257115199.ap-shanghai.app.tcloudbase.com/vocab-api',
+  // Dev: leave empty and use Vite proxy, or set http://127.0.0.1:3000
+  // Prod: e.g. http://129.204.147.93  (nginx serves /api)
+  workerUrl: '',
   syncToken: '',
-  autoSync: false,
+  autoSync: true,
   lastSyncAt: 0,
   welcomeSeen: false,
 };

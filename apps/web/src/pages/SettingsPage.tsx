@@ -20,13 +20,16 @@ import { useAuth } from '@/store/useAuth';
 import { useWordsStore, useUserWords } from '@/store/useWords';
 import { PROVIDERS } from '@/config/providers';
 import { testConnection } from '@/api/llm';
-import { pullFromCloud, pushToCloud } from '@/api/sync';
+import { flushSyncQueue, pullIncremental, pushAllWordsNow } from '@/api/realtimeSync';
+import {
+  DEFAULT_CLOUDBASE_URL,
+  importFromCloudBase,
+} from '@/api/migrateCloudBase';
 import { clearCryptoCache } from '@/api/crypto';
 import { dbClearForUser } from '@/db/ieltsDb';
 import { makeNewWord } from '@/store/useWords';
 import type { Word } from '@/types/word';
 import { useNavigate } from 'react-router-dom';
-import { modeLabel, parsePracticeMode } from '@/utils/practiceSession';
 import { loadVocabBySource, type VocabBankSource, type VocabBankEntry } from '@/json/vocab';
 import { normalizeCategories } from '@/config/categories';
 import {
@@ -35,10 +38,6 @@ import {
 } from '@/utils/mergeBankLexis';
 
 type Tab = 'ai' | 'data' | 'account';
-
-function modeLabelSafe(mode: unknown): string {
-  return modeLabel(parsePracticeMode(typeof mode === 'string' ? mode : undefined));
-}
 
 export default function SettingsPage() {
   const [tab, setTab] = useState<Tab>('ai');
@@ -170,6 +169,9 @@ function DataSettings() {
   const [pasteText, setPasteText] = useState('');
   const [pushing, setPushing] = useState(false);
   const [pulling, setPulling] = useState(false);
+  const [importingCb, setImportingCb] = useState(false);
+  const [cbUrl, setCbUrl] = useState(DEFAULT_CLOUDBASE_URL);
+  const [cbToken, setCbToken] = useState('');
   const [importingSource, setImportingSource] = useState<'ielts' | 'kaoyan' | null>(null);
   const [syncingCats, setSyncingCats] = useState(false);
   const [syncingLexis, setSyncingLexis] = useState(false);
@@ -353,6 +355,14 @@ function DataSettings() {
       const bits: string[] = [];
       if (toAdd.length) bits.push(`新增 ${toAdd.length}`);
       if (toPatch.length) bits.push(`合并已有 ${toPatch.length}`);
+      if (settings.syncToken && settings.autoSync) {
+        try {
+          const n = await pushAllWordsNow();
+          bits.push(`已同步 ${n}`);
+        } catch {
+          bits.push('本地已导入，云端同步失败可点「立即同步」');
+        }
+      }
       message.success(bits.join(' · ') || '完成');
     } catch (e) {
       message.error('导入失败：' + (e instanceof Error ? e.message : '未知错误'));
@@ -362,66 +372,60 @@ function DataSettings() {
   }
 
   async function handlePush() {
-    if (!settings.workerUrl) return message.error('请先填 Worker URL');
-    if (!password) return message.error('请先登录');
+    if (!settings.syncToken) return message.error('请先登录以获取 JWT');
     setPushing(true);
     try {
-      const { payload, upload } = await pushToCloud(words, settings, username, password);
-      const practice = payload.state?.practice as
-        | { idx?: number; wordIds?: string[]; mode?: string }
-        | null
-        | undefined;
-      const patchCount = payload.patches?.length || 0;
-      const customCount = payload.custom?.length || 0;
-      const bits = [
-        `已推送 ${patchCount + customCount} 条进度/笔记` +
-          (customCount ? `（含 ${customCount} 个自建词）` : ''),
-      ];
-      if (practice && Array.isArray(practice.wordIds) && practice.wordIds.length) {
-        bits.push(
-          `练习进度 ${modeLabelSafe(practice.mode)} ${(practice.idx ?? 0) + 1}/${practice.wordIds.length}`
-        );
-      } else {
-        bits.push('无未完成练习');
-      }
-      if (payload.encrypted) bits.push('配置已加密');
-      if (upload.chunked) bits.push(`分包 ${upload.parts} 段`);
-      message.success(bits.join(' · '));
+      await flushSyncQueue();
+      const n = await pushAllWordsNow();
+      message.success(`已立即同步 ${n} 个词到服务器`);
     } catch (e) {
-      message.error('推送失败：' + (e instanceof Error ? e.message : '未知错误'));
+      message.error('同步失败：' + (e instanceof Error ? e.message : '未知错误'));
     } finally {
       setPushing(false);
     }
   }
 
   async function handlePull() {
-    if (!settings.workerUrl) return message.error('请先填 Worker URL');
-    if (!password) return message.error('请先登录');
+    if (!settings.syncToken) return message.error('请先登录以获取 JWT');
     setPulling(true);
     try {
-      const result = await pullFromCloud(settings, username, password);
-      if (
-        !result.replaced &&
-        result.added === 0 &&
-        result.patched === 0 &&
-        !result.practiceRestored
-      ) {
-        message.info('云端没有可同步的数据');
-        return;
-      }
-      const bits: string[] = [];
-      if (result.patched > 0) bits.push(`合并 ${result.patched} 条进度/笔记`);
-      if (result.added > 0) bits.push(`新增 ${result.added} 个词`);
-      if (result.practiceRestored) bits.push('练习进度已恢复');
-      if (!bits.length) bits.push('已同步');
-      message.success(bits.join(' · '));
-      if (result.needsPassword) {
-        message.warning('进度已合并，但加密配置解密失败（密码可能不一致）');
-      }
+      // Force full pull
+      update({ lastSyncAt: 0 });
+      const result = await pullIncremental();
+      message.success(
+        result.merged > 0 ? `已拉取并合并 ${result.merged} 个词` : '服务器无更新'
+      );
     } catch (e) {
       message.error('拉取失败：' + (e instanceof Error ? e.message : '未知错误'));
     } finally {
       setPulling(false);
+    }
+  }
+
+  async function handleCloudBaseImport() {
+    if (!settings.syncToken) return message.error('请先登录新服务器');
+    if (!password || !username) return message.error('请先登录');
+    setImportingCb(true);
+    try {
+      const result = await importFromCloudBase({
+        cloudbaseUrl: cbUrl.trim() || DEFAULT_CLOUDBASE_URL,
+        legacyToken: cbToken.trim() || undefined,
+        password,
+        username,
+      });
+      const bits = [
+        `本机合并 +${result.added}/改${result.patched}`,
+        `已上传 ${result.uploaded} 词`,
+      ];
+      if (result.practiceRestored) bits.push('练习进度');
+      message.success(bits.join(' · '));
+      if (result.needsPassword) {
+        message.warning('词数据已导入，但加密配置解密失败（密码可能不一致）');
+      }
+    } catch (e) {
+      message.error('CloudBase 导入失败：' + (e instanceof Error ? e.message : '未知错误'));
+    } finally {
+      setImportingCb(false);
     }
   }
 
@@ -526,23 +530,30 @@ function DataSettings() {
         </p>
       </Card>
 
-      <Card title="☁️ 云同步">
+      <Card title="云同步（自动增量）">
+        <Alert
+          type="success"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message="自动同步已开启"
+          description="改笔记、近义词、搭配、复习进度会防抖后自动写入服务器，一般无需手动推送。"
+        />
         <Form layout="vertical">
-          <Form.Item label="Worker URL">
+          <Form.Item label="API Base URL">
             <Input
               value={settings.workerUrl}
               onChange={(e) => update({ workerUrl: e.target.value })}
-              placeholder="https://ielts-vocab-d5gu0dfe9e1a9b5e9-1257115199.ap-shanghai.app.tcloudbase.com/vocab-api"
+              placeholder="留空=同源 /api；生产填 http://服务器"
             />
           </Form.Item>
           <Form.Item
-            label="同步 Token（可选）"
-            extra={<span style={{ fontSize: 12, color: 'var(--text-light)' }}>如果 Worker 设置了 AUTH_TOKEN 就填</span>}
+            label="JWT（登录后自动写入）"
+            extra={<span style={{ fontSize: 12, color: 'var(--text-light)' }}>一般无需手改</span>}
           >
             <Input.Password
               value={settings.syncToken}
               onChange={(e) => update({ syncToken: e.target.value })}
-              placeholder="可选"
+              placeholder="Bearer token"
             />
           </Form.Item>
           <Form.Item>
@@ -552,29 +563,48 @@ function DataSettings() {
                 checked={settings.autoSync}
                 onChange={(e) => update({ autoSync: e.target.checked })}
               />
-              <span>词表增减时自动推送</span>
+              <span>写库后自动同步到服务器</span>
             </label>
           </Form.Item>
           <Space.Compact block>
             <Button type="primary" loading={pushing} onClick={handlePush} icon={<CloudUploadOutlined />} style={{ flex: 1 }}>
-              推送到云端
+              立即同步
             </Button>
             <Button loading={pulling} onClick={handlePull} icon={<CloudDownloadOutlined />} style={{ flex: 1 }}>
-              从云端拉取
+              从服务器拉取
             </Button>
           </Space.Compact>
           <p style={{ color: 'var(--text-mute)', fontSize: 12, marginTop: 12 }}>
             {settings.lastSyncAt
               ? `上次同步：${new Date(settings.lastSyncAt).toLocaleString('zh-CN')}`
               : '尚未同步'}
-            <br />
-            推送只上传你改过的内容：笔记、近义/形近、固定搭配、分组、星标、划掉与复习进度，以及自建词；词库原文不重复上传。
-            备份过大时会自动分包上传（需云函数支持 uploadId/part/parts，见 scripts/cloudbase-upload-chunks-snippet.js）。
-            <br />
-            拉取会合并到本地（不覆盖整表）。新设备请先「导入雅思/考研词汇」，再拉取云端进度。
-            <br />
-            另会同步：连续学习天数、今日完成标记、未完成练习（题号/模式）。请推送一次以写入新格式。
           </p>
+        </Form>
+      </Card>
+
+      <Card title="从 CloudBase 导入" style={{ marginTop: 12 }}>
+        <p style={{ color: 'var(--text-mute)', fontSize: 13, marginBottom: 12 }}>
+          一次性把旧云函数整包迁到新关系库。需已登录新服务器，密码与当初加密同步时一致。
+        </p>
+        <Form layout="vertical">
+          <Form.Item label="CloudBase Endpoint">
+            <Input value={cbUrl} onChange={(e) => setCbUrl(e.target.value)} />
+          </Form.Item>
+          <Form.Item
+            label="旧同步 Token（可选）"
+            extra={<span style={{ fontSize: 12 }}>若 CloudBase 启用了 AUTH_TOKEN 再填</span>}
+          >
+            <Input.Password value={cbToken} onChange={(e) => setCbToken(e.target.value)} />
+          </Form.Item>
+          <Button
+            type="primary"
+            loading={importingCb}
+            icon={<ImportOutlined />}
+            onClick={handleCloudBaseImport}
+            block
+          >
+            开始导入
+          </Button>
         </Form>
       </Card>
     </>

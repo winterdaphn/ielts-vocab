@@ -1,24 +1,12 @@
 /**
- * Cloud sync v2.12+ — POST/GET base64 gzipped JSON via Worker / 云函数.
- *
- * Push (single): gzip JSON → base64 → POST /api/upload { data }
- * Push (chunked): same gzip, split base64 when body > ~900KB (1MB 云函数上限)
- *   → POST /api/upload { data, uploadId, part, parts }
- *
- * Pull: GET /api/download → { data: base64 } → ungzip JSON
- *
- * Server merge snippet: scripts/cloudbase-upload-chunks-snippet.js
+ * Cloud sync — POST/GET base64 gzipped JSON via /api/words/sync.
+ * Auth: Authorization Bearer JWT (settings.syncToken).
  */
 
 import { gzip, ungzip } from 'pako';
 import type { Settings } from '@/types/settings';
 import type { Word } from '@/types/word';
 import type { CustomWordSync, WordSyncPatch } from '@/utils/wordSyncPatch';
-
-/** ~1MB 云函数 body 上限；留 JSON 字段与转义余量 */
-const MAX_SINGLE_UPLOAD_JSON_CHARS = 920_000;
-/** 每段 base64 字符数（分包上传） */
-const UPLOAD_CHUNK_B64_CHARS = 720_000;
 
 export interface SyncPayload {
   /** 3 = compact patches (notes / lexis edits / SRS only) */
@@ -52,10 +40,9 @@ function getBase(url: string): string {
   return url.replace(/\/$/, '');
 }
 
-function authHeaders(settings: Settings, username: string): Record<string, string> {
+function authHeaders(settings: Settings): Record<string, string> {
   const h: Record<string, string> = {};
-  if (settings.syncToken) h['X-Auth-Token'] = settings.syncToken;
-  if (username) h['X-Profile'] = username;
+  if (settings.syncToken) h['Authorization'] = `Bearer ${settings.syncToken}`;
   return h;
 }
 
@@ -80,13 +67,6 @@ function base64ToBytes(b64: string): Uint8Array {
   return bytes;
 }
 
-function newUploadId(): string {
-  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
-    return crypto.randomUUID();
-  }
-  return `up-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-}
-
 function payloadToJson(payload: SyncPayload): string {
   return JSON.stringify({
     v: payload.v || 3,
@@ -100,67 +80,42 @@ function payloadToJson(payload: SyncPayload): string {
   });
 }
 
-async function postUploadBody(
+/** 推：gzip → base64 → POST /api/words/sync */
+export async function uploadAll(
   settings: Settings,
-  username: string,
-  body: Record<string, unknown>
-): Promise<void> {
-  const resp = await fetch(getBase(settings.workerUrl) + '/api/upload', {
+  _username: string,
+  payload: SyncPayload
+): Promise<UploadResult> {
+  if (!settings.syncToken) throw new CloudError('未登录或缺少 JWT', 401);
+
+  const gz = gzip(payloadToJson(payload));
+  const b64 = bytesToBase64(gz);
+
+  const resp = await fetch(getBase(settings.workerUrl || '') + '/api/words/sync', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      ...authHeaders(settings, username),
+      ...authHeaders(settings),
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify({ data: b64 }),
   });
   const data = await readJsonSafe(resp);
   if (!resp.ok) {
     throw new CloudError(String(data.error || `上传失败: ${resp.status}`), resp.status);
   }
+  return { chunked: false, parts: 1, bytesApprox: b64.length };
 }
 
-/** 推：gzip → base64 → POST /api/upload（过大则自动分包） */
-export async function uploadAll(
-  settings: Settings,
-  username: string,
-  payload: SyncPayload
-): Promise<UploadResult> {
-  if (!settings.workerUrl) throw new CloudError('未设置 Worker URL', 0);
-
-  const gz = gzip(payloadToJson(payload));
-  const b64 = bytesToBase64(gz);
-
-  const singleBody = JSON.stringify({ data: b64 });
-  if (singleBody.length <= MAX_SINGLE_UPLOAD_JSON_CHARS) {
-    await postUploadBody(settings, username, { data: b64 });
-    return { chunked: false, parts: 1, bytesApprox: b64.length };
-  }
-
-  const uploadId = newUploadId();
-  const parts = Math.ceil(b64.length / UPLOAD_CHUNK_B64_CHARS);
-  for (let part = 0; part < parts; part++) {
-    const start = part * UPLOAD_CHUNK_B64_CHARS;
-    const slice = b64.slice(start, start + UPLOAD_CHUNK_B64_CHARS);
-    await postUploadBody(settings, username, {
-      data: slice,
-      uploadId,
-      part,
-      parts,
-    });
-  }
-  return { chunked: true, parts, bytesApprox: b64.length };
-}
-
-/** 拉：GET /api/download → base64 → ungzip */
+/** 拉：GET /api/words/sync → base64 → ungzip */
 export async function downloadAll(
   settings: Settings,
-  username: string
+  _username: string
 ): Promise<SyncPayload | null> {
-  if (!settings.workerUrl) return null;
+  if (!settings.syncToken) return null;
 
   try {
-    const resp = await fetch(getBase(settings.workerUrl) + '/api/download', {
-      headers: authHeaders(settings, username),
+    const resp = await fetch(getBase(settings.workerUrl || '') + '/api/words/sync', {
+      headers: authHeaders(settings),
     });
     if (!resp.ok) return null;
     const body = await readJsonSafe(resp);
@@ -174,18 +129,15 @@ export async function downloadAll(
   }
 }
 
-/** 备份元信息 */
+/** 备份元信息（自建后端无独立 info；有 blob 即视为有备份） */
 export async function getInfo(
   settings: Settings,
   username: string
 ): Promise<{ hasBackup?: boolean; [k: string]: unknown }> {
-  if (!settings.workerUrl) return { hasBackup: false };
+  if (!settings.syncToken) return { hasBackup: false };
   try {
-    const resp = await fetch(getBase(settings.workerUrl) + '/api/info', {
-      headers: authHeaders(settings, username),
-    });
-    if (!resp.ok) return { hasBackup: false };
-    return await readJsonSafe(resp);
+    const data = await downloadAll(settings, username);
+    return { hasBackup: !!data };
   } catch {
     return { hasBackup: false };
   }

@@ -7,9 +7,8 @@ import {
   SettingOutlined,
 } from '@ant-design/icons';
 import { useAuth } from '@/store/useAuth';
-import { useUserWords } from '@/store/useWords';
 import { useSettings } from '@/store/useSettings';
-import { pushToCloud } from '@/api/sync';
+import { flushSyncQueue, pullIncremental, pushPrefsNow } from '@/api/realtimeSync';
 
 const NAV_ITEMS = [
   { path: '/today', label: '今日', icon: <HomeOutlined /> },
@@ -22,32 +21,41 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
   const location = useLocation();
   const navigate = useNavigate();
   const username = useAuth((s) => s.username);
-  const password = useAuth((s) => s.password);
   const settings = useSettings();
-  const words = useUserWords();
   const isPractice = location.pathname === '/practice';
   const isWordDetail = /^\/words\/[^/]+$/.test(location.pathname);
   const isWordsList = location.pathname === '/words';
   const hideMainNav = isPractice || isWordDetail;
 
-  // Auto-sync after word list change
+  // Pull incremental when tab becomes visible; periodic soft pull
   useEffect(() => {
-    if (!settings.autoSync || !settings.workerUrl) return;
-    if (!username || !password) return;
-    const t = setTimeout(() => {
-      autoSync().catch(() => {});
-    }, 1500);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [words.length]);
+    if (!settings.syncToken || !username) return;
 
-  async function autoSync() {
-    try {
-      await pushToCloud(words, settings, username, password);
-    } catch {
-      // silent
-    }
-  }
+    const pull = () => {
+      pullIncremental().catch(() => {});
+    };
+
+    const onVis = () => {
+      if (document.visibilityState === 'visible') {
+        void flushSyncQueue().then(pull);
+      }
+    };
+    document.addEventListener('visibilitychange', onVis);
+    const interval = setInterval(pull, 5 * 60 * 1000);
+    return () => {
+      document.removeEventListener('visibilitychange', onVis);
+      clearInterval(interval);
+    };
+  }, [settings.syncToken, username]);
+
+  // Flush prefs occasionally when categories may have changed
+  useEffect(() => {
+    if (!settings.syncToken || !settings.autoSync) return;
+    const t = setTimeout(() => {
+      pushPrefsNow().catch(() => {});
+    }, 3000);
+    return () => clearTimeout(t);
+  }, [settings.syncToken, settings.autoSync]);
 
   return (
     <div

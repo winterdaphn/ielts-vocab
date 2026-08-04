@@ -17,6 +17,9 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -26,11 +29,14 @@ jobs:
         with:
           node-version: 20
           cache: npm
+          cache-dependency-path: apps/web/package-lock.json
 
       - name: Install
         run: npm ci
 
       - name: Build
+        env:
+          VITE_BASE: /ielts-vocab/
         run: |
           npm run build
           cp dist/index.html dist/404.html
@@ -38,7 +44,7 @@ jobs:
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: dist
+          path: apps/web/dist
 
   deploy:
     needs: build

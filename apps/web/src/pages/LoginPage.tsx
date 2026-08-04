@@ -4,7 +4,7 @@ import { LockOutlined, UserOutlined } from '@ant-design/icons';
 import { useAuth } from '@/store/useAuth';
 import { useSettings } from '@/store/useSettings';
 import { authLogin, authRegister, isValidUsername, AuthError } from '@/api/auth';
-import { pullFromCloud } from '@/api/sync';
+import { pullOnLogin } from '@/api/realtimeSync';
 
 export default function LoginPage() {
   const { message } = App.useApp();
@@ -75,22 +75,15 @@ export default function LoginPage() {
   async function onAuthSuccess(u: string, p: string) {
     // Must set auth first so replaceAll can scope IndexedDB by username
     setAuth(u, p);
-    const url = settings.workerUrl || workerUrl.trim();
+    const url = (workerUrl.trim() || settings.workerUrl || '').replace(/\/$/, '');
+    if (url) updateSettings({ workerUrl: url });
     try {
-      const result = await pullFromCloud({ ...settings, workerUrl: url }, u, p);
-      if (result.needsPassword) {
-        // Plaintext words may still apply; only encrypted settings failed
-        console.warn('encrypted settings decrypt failed');
-      }
-      if (result.added > 0 || result.patched > 0 || result.practiceRestored) {
-        const bits: string[] = [];
-        if (result.patched > 0) bits.push(`合并 ${result.patched} 条进度`);
-        if (result.added > 0) bits.push(`新增 ${result.added} 个词`);
-        if (result.practiceRestored) bits.push('练习进度');
-        message.info(`已同步云端：${bits.join(' · ')}`);
+      const result = await pullOnLogin();
+      if (result.merged > 0) {
+        message.info(`已从服务器同步 ${result.merged} 个词`);
       }
     } catch {
-      // offline / empty cloud — fine for first login
+      // offline / empty — fine for first login
     }
   }
 
@@ -101,22 +94,22 @@ export default function LoginPage() {
           <div style={{ fontSize: 48 }}>🔐</div>
           <h1 style={{ fontSize: 24, margin: '8px 0' }}>登录 / 注册</h1>
           <p style={{ color: 'var(--text-light)', margin: 0, fontSize: 14 }}>
-            数据云端加密同步
+            自动增量同步 · 改笔记/近义即上云
           </p>
         </div>
 
         {!settings.workerUrl && (
           <Alert
-            type="warning"
+            type="info"
             showIcon
             style={{ marginBottom: 16 }}
-            message="首次使用"
+            message="API Base（本地开发可留空，走 Vite 代理）"
             description={
               <Input
                 size="small"
                 value={workerUrl}
                 onChange={(e) => setWorkerUrl(e.target.value)}
-                placeholder="https://ielts-vocab-d5gu0dfe9e1a9b5e9-1257115199.ap-shanghai.app.tcloudbase.com/vocab-api"
+                placeholder="http://127.0.0.1:3000 或 http://你的服务器"
               />
             }
           />
@@ -165,8 +158,8 @@ export default function LoginPage() {
         </Form>
 
         <div style={{ marginTop: 24, fontSize: 12, color: 'var(--text-mute)', lineHeight: 1.6 }}>
-          • 服务端只存密码哈希，原始密码永远在你设备<br />
-          • 同一个用户名 + 密码在不同设备能解密同一份数据
+          • 服务端只存密码哈希；词数据按行存库并自动同步<br />
+          • 老用户可在设置里「从 CloudBase 导入」
         </div>
       </div>
     </div>

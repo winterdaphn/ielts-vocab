@@ -21,7 +21,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       locale={zhCN}
     >
       <AntdApp>
-        <BrowserRouter basename="/ielts-vocab">
+        <BrowserRouter basename={import.meta.env.BASE_URL.replace(/\/$/, '') || undefined}>
           <App />
         </BrowserRouter>
       </AntdApp>

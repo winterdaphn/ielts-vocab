@@ -1,9 +1,11 @@
 /**
  * Auth API — login, register, hash password.
  * Password is hashed locally before sending — server never sees plaintext.
+ * Successful auth returns JWT stored as settings.syncToken.
  */
 
 import { arrayToBase64 } from './crypto';
+import { useSettings } from '@/store/useSettings';
 
 const USERNAME_RE = /^[\u4e00-\u9fa5a-zA-Z0-9_\-]+$/;
 
@@ -38,17 +40,22 @@ function getBaseUrl(workerUrl: string): string {
   return workerUrl.replace(/\/$/, '');
 }
 
-export interface RegisterResult {
+export interface AuthResult {
   ok: true;
   username: string;
+  token: string;
+  createdAt?: number;
+}
+
+function persistToken(token: string | undefined) {
+  if (token) useSettings.getState().update({ syncToken: token });
 }
 
 export async function authRegister(
   username: string,
   password: string,
   workerUrl: string
-): Promise<RegisterResult> {
-  if (!workerUrl) throw new AuthError('请先设置 Worker URL', 0, 'no_url');
+): Promise<AuthResult> {
   const authHash = await hashAuthPassword(password, username);
   const resp = await fetch(getBaseUrl(workerUrl) + '/api/auth/register', {
     method: 'POST',
@@ -59,21 +66,15 @@ export async function authRegister(
   if (!resp.ok) {
     throw new AuthError(data.error || '注册失败', resp.status, data.error);
   }
+  persistToken(data.token);
   return data;
-}
-
-export interface LoginResult {
-  ok: true;
-  username: string;
-  createdAt: number;
 }
 
 export async function authLogin(
   username: string,
   password: string,
   workerUrl: string
-): Promise<LoginResult> {
-  if (!workerUrl) throw new AuthError('请先设置 Worker URL', 0, 'no_url');
+): Promise<AuthResult> {
   const authHash = await hashAuthPassword(password, username);
   const resp = await fetch(getBaseUrl(workerUrl) + '/api/auth/login', {
     method: 'POST',
@@ -84,5 +85,6 @@ export async function authLogin(
   if (!resp.ok) {
     throw new AuthError(data.error || '登录失败', resp.status, data.error);
   }
+  persistToken(data.token);
   return data;
 }

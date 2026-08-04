@@ -32,7 +32,7 @@
 5 分钟 → 30 分钟 → 12 小时 → 1 天 → 2 天 → 4 天 → 7 天 → 15 天 → 30 天
 ```
 
-复习池只抽**已到期**的词。实现见 `src/utils/scheduler.ts`。
+复习池只抽**已到期**的词。实现见 `apps/web/src/utils/scheduler.ts`。
 
 ---
 
@@ -46,72 +46,55 @@
 | 状态 | Zustand（登录 / 设置持久化到 localStorage） |
 | 词表存储 | Dexie（IndexedDB） |
 | AI | OpenAI 兼容 HTTP（DeepSeek / Moonshot / 智谱等） |
-| 同步 | CloudBase HTTP + 客户端 AES-GCM 加密 |
+| 后端 | Node.js 22、**Fastify**、PostgreSQL 16、JWT |
+| 同步 | 关系表按词增量同步（改笔记/近义自动推）+ Dexie 本地优先 |
+| 编排 | Docker Compose（nginx / api / db） |
 
 ---
 
-## 本地开发
+## 本地开发（monorepo）
 
 ```bash
-npm install
-npm run dev      # http://localhost:5173（仓库 base 为 /ielts-vocab/）
-npm run build    # 产出 dist/
-npm run preview  # 预览构建
-npm run lint     # tsc --noEmit
+# 前端
+cd apps/web && npm install
+npm run dev:web    # 根目录也可；http://localhost:5173，/api 代理到 :3000
+
+# 后端（需 Postgres，或 docker compose up db -d）
+cd apps/api && npm install && cp .env.example .env
+# 编辑 .env 里的 DATABASE_URL / JWT_SECRET
+npm run dev:api    # http://localhost:3000
 ```
 
-路径别名：`@` → `src/`。
+路径别名：`@` → `apps/web/src/`。
 
 ---
 
 ## 部署（GitHub Pages）
 
-推送到 `main` 后，Actions 会 `npm run build` 并部署 `dist/`（[`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)）。
+推送到 `main` 后，Actions 在 `apps/web` 下 build 并部署（[`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)）。
 
-**首次启用：**
-
-1. 仓库 Settings → Pages → Source 选 **GitHub Actions**
-2. 如有需要，在 Actions 权限中允许 workflow 运行
-
-之后：
-
-```bash
-git push origin main
-```
-
-约 1–2 分钟后刷新线上地址即可。
+自建服务器部署见根目录 `docker-compose.yml`（nginx + Fastify api + Postgres）。
 
 ---
 
 ## 项目结构
 
 ```
-src/
-├── api/                 # 网络、加密、LLM
-│   ├── auth.ts          # 登录 / 注册、密码哈希
-│   ├── cloud.ts         # CloudBase HTTP
-│   ├── crypto.ts        # PBKDF2 + AES-GCM
-│   └── llm.ts           # 出题、评判、近义/形近/搭配等生成与规范化
-├── components/          # 共享 UI（布局、可标记例句、近义/形近/搭配列表等）
-├── config/              # LLM 服务商预设等
-├── db/                  # Dexie schema 与 CRUD
-├── hooks/               # 练习会话等
-├── json/
-│   ├── ielts-vocab.json # 内置词库（释义、音标、近义/形近、搭配等）
-│   └── collocations.json# 搭配中间数据（可合并进词库）
-├── pages/               # 路由页面
-├── store/               # Zustand：auth / settings / words
-├── styles/              # 主题、全局样式、Antd 覆盖
-├── types/               # Word、Settings 等
-└── utils/
-    ├── scheduler.ts     # 艾宾浩斯阶梯
-    ├── practiceSelect.ts / practiceSession.ts
-    ├── vocabBankRelated.ts  # 从词库取近义/形近
-    ├── phonetic.ts / speak.ts / inflections.ts
-    └── ...
+apps/
+├── web/                 # React 前端
+│   └── src/
+│       ├── api/         # auth / cloud sync / crypto / llm / youdao
+│       ├── components/
+│       ├── db/
+│       ├── pages/
+│       ├── store/
+│       └── ...
+└── api/                 # Fastify 后端（server.js）
+docker-compose.yml
+nginx/default.conf
 ```
 
-`scripts/` 下可有词库增强脚本（如批量写搭配）；若在 `.gitignore` 中，仅本地使用。
+`apps/web/scripts/` 下可有词库增强脚本（若在 `.gitignore` 中，仅本地使用）。
 
 ---
 
@@ -148,7 +131,7 @@ interface Word {
 
 ## 内置词库
 
-- 路径：`src/json/ielts-vocab.json`
+- 路径：`apps/web/src/json/vocab/`（雅思 / 考研）
 - **设置 → 导入雅思词汇 / 导入考研词汇**：按标签批量导入本地词表
 - 导入时会带上词库中的 `synonyms` / `similars` / `collocations`（若有）
 - **已导入的旧词不会自动更新**词库新字段；需要重新导入跳过已有词，或自行做「从词库同步」类能力
@@ -174,16 +157,19 @@ interface Word {
 - 服务端只存哈希与密文，无法直接读明文词表
 - 换设备：同一用户名 + 密码 → 拉云端解密到本地 IndexedDB
 
-云函数（独立部署，约 v2.4）常见接口：
+自建 Fastify API 常见接口：
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| POST | `/api/auth/register` | 注册 |
-| POST | `/api/auth/login` | 登录 |
-| GET | `/api/all` | 拉数据（`X-Profile`） |
-| POST | `/api/all` | 推数据（`X-Profile`） |
+| POST | `/api/auth/register` | 注册 → JWT |
+| POST | `/api/auth/login` | 登录 → JWT |
+| GET | `/api/words?since=` | 增量拉词 |
+| PUT/PATCH/DELETE | `/api/words/:id` | 单词 upsert / 进度 / 删除 |
+| POST | `/api/words/batch` | 批量导入 |
+| GET/PUT | `/api/me/prefs` | 分类 / 练习 / 打卡 |
+| GET | `/api/youdao?q=` | 有道词典代理 |
 
-设置页可配置同步 Endpoint / Token，并手动推送、拉取。
+设置页可配置 API Base，并支持 **从 CloudBase 一键导入**。
 
 ---
 

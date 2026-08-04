@@ -10,3 +10,7 @@ vite.config.js
 vite.config.d.ts
 scripts/
 exports/
+db-data/
+apps/api/.env
+apps/*/node_modules
+apps/*/dist

@@ -95,21 +95,21 @@ function isLocalDevHost(): boolean {
   return /^(localhost|127\.0\.0\.1)$/i.test(location.hostname);
 }
 
-/** Whether Youdao lookup can run (Worker proxy or local Vite proxy). */
+/** Whether Youdao lookup can run (API proxy or local Vite proxy). */
 export function canUseYoudao(settings: Settings): boolean {
   return !!(settings.workerUrl || isLocalDevHost());
 }
 
-/** Build request URL (Worker proxy or Vite proxy). */
+/** Build request URL (self-hosted /api/youdao or Vite youdao proxy). */
 function buildFetchUrl(word: string, settings: Settings): string {
   const q = encodeURIComponent(word);
   if (settings.workerUrl) {
     return `${getBase(settings.workerUrl)}/api/youdao?q=${q}`;
   }
   if (isLocalDevHost()) {
-    return `/youdao-proxy/jsonapi?q=${q}&dicts=${DICTS_PARAM}`;
+    return `/api/youdao?q=${q}`;
   }
-  throw new YoudaoError('查词需要配置 Worker URL（有道接口需服务端代理）');
+  throw new YoudaoError('查词需要配置 API Base URL（有道接口需服务端代理）');
 }
 
 async function fetchYoudaoJson(
@@ -118,15 +118,15 @@ async function fetchYoudaoJson(
 ): Promise<Record<string, unknown>> {
   const url = buildFetchUrl(word.trim(), settings);
   const headers: Record<string, string> = { Accept: 'application/json' };
-  if (settings.workerUrl && settings.syncToken) {
-    headers['X-Auth-Token'] = settings.syncToken;
+  if (settings.syncToken) {
+    headers['Authorization'] = `Bearer ${settings.syncToken}`;
   }
   const resp = await fetch(url, { headers });
   if (!resp.ok) {
     throw new YoudaoError(`有道查词失败 HTTP ${resp.status}`);
   }
   const data = (await resp.json()) as Record<string, unknown>;
-  // Worker may wrap as { ok, data } or return raw youdao JSON
+  // API may wrap as { ok, data } or return raw youdao JSON
   if (data && typeof data === 'object' && data.data && typeof data.data === 'object') {
     return data.data as Record<string, unknown>;
   }

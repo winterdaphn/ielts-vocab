@@ -8,7 +8,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react()],
-  base: '/ielts-vocab/',  // GitHub Pages 子路径
+  // Self-host nginx root: '/'. GitHub Pages: set VITE_BASE=/ielts-vocab/
+  base: process.env.VITE_BASE || '/',
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
@@ -24,7 +25,12 @@ export default defineConfig({
     port: 5173,
     host: '0.0.0.0',
     proxy: {
-      // Dev-only: browser → Vite → Youdao (avoids CORS without Worker)
+      // Dev: Vite → local Fastify API
+      '/api': {
+        target: 'http://127.0.0.1:3000',
+        changeOrigin: true,
+      },
+      // Dev-only: browser → Vite → Youdao (avoids CORS without API)
       '/youdao-proxy': {
         target: 'https://dict.youdao.com',
         changeOrigin: true,

@@ -10,6 +10,7 @@ import { useAuth } from './useAuth';
 import { normalizeCategories } from '@/config/categories';
 import { migratePhoneticFields } from '@/utils/phonetic';
 import { migrateUserWordIdsIfNeeded } from '@/utils/migrateWordIds';
+import { enqueueDelete, enqueueWord } from '@/api/realtimeSync';
 import { wordToId, withCanonicalWordId } from '@/utils/wordId';
 
 interface WordsState {
@@ -29,45 +30,56 @@ interface WordsState {
   setLoaded: (v: boolean) => void;
 }
 
-export const useWordsStore = create<WordsState>((set) => ({
+function withUpdatedAt(w: Word): Word {
+  return { ...w, updatedAt: Date.now() };
+}
+
+export const useWordsStore = create<WordsState>((set, _get) => ({
   words: [],
   loaded: false,
   setWords: (words) => set({ words, loaded: true }),
   addWord: async (w) => {
+    const word = withUpdatedAt(withCanonicalWordId(w));
     const row: WordRow = {
-      ...withCanonicalWordId(w),
+      ...word,
       userId: useAuth.getState().username,
     };
     await dbPut(row);
+    enqueueWord(word, 'content');
   },
   addWords: async (words) => {
     const userId = useAuth.getState().username;
     if (!userId || words.length === 0) return;
     const rows: WordRow[] = words.map((w) => ({
-      ...withCanonicalWordId(w),
+      ...withUpdatedAt(withCanonicalWordId(w)),
       userId,
     }));
     await db.words.bulkPut(rows);
+    // Bulk import: caller should pushAllWordsNow(); avoid N PUTs
   },
   /** Bulk overwrite existing rows (same ids). */
   updateWords: async (words) => {
     const userId = useAuth.getState().username;
     if (!userId || words.length === 0) return;
     const rows: WordRow[] = words.map((w) => ({
-      ...withCanonicalWordId(w),
+      ...withUpdatedAt(withCanonicalWordId(w)),
       userId,
     }));
     await db.words.bulkPut(rows);
   },
   updateWord: async (w) => {
+    const prev = useWordsStore.getState().words.find((x) => x.id === w.id);
+    const word = withUpdatedAt(withCanonicalWordId(w));
     const row: WordRow = {
-      ...withCanonicalWordId(w),
+      ...word,
       userId: useAuth.getState().username,
     };
     await dbPut(row);
+    enqueueWord(word, undefined, prev);
   },
   removeWord: async (id) => {
     await dbDelete(id);
+    enqueueDelete(id);
   },
   clearForUser: async (userId) => {
     await dbClearForUser(userId);
@@ -151,5 +163,6 @@ export function makeNewWord(input: Partial<Word> & { word: string; translation?:
     totalReviews: input.totalReviews ?? 0,
     correctReviews: input.correctReviews ?? 0,
     createdAt: input.createdAt ?? Date.now(),
+    updatedAt: input.updatedAt ?? Date.now(),
   };
 }
