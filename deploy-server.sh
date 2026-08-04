@@ -10,6 +10,13 @@ cd "$(dirname "$0")"
 
 MODE="${1:-auto}"
 
+# Load .env into host shell so docker compose ${POSTGRES_PASSWORD} interpolation works
+if [ -f apps/api/.env ]; then
+    set -a
+    source apps/api/.env
+    set +a
+fi
+
 # 用 reflog 拿 pull 前的 HEAD（即使外部先 pull 过也能识别改动）
 OLD_HEAD=$(git rev-parse HEAD@{1} 2>/dev/null || echo "")
 echo "[1/4] git pull..."
