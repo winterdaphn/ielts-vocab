@@ -82,9 +82,10 @@ export default function LoginPage() {
         // Plaintext words may still apply; only encrypted settings failed
         console.warn('encrypted settings decrypt failed');
       }
-      if (result.added > 0 || result.practiceRestored) {
+      if (result.added > 0 || result.patched > 0 || result.practiceRestored) {
         const bits: string[] = [];
-        if (result.added > 0) bits.push(`${result.added} 个单词`);
+        if (result.patched > 0) bits.push(`合并 ${result.patched} 条进度`);
+        if (result.added > 0) bits.push(`新增 ${result.added} 个词`);
         if (result.practiceRestored) bits.push('练习进度');
         message.info(`已同步云端：${bits.join(' · ')}`);
       }

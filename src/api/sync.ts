@@ -1,14 +1,12 @@
 /**
- * Cloud sync payload build/apply — mirrors example.html getSyncPayload / applySyncPayload.
+ * Cloud sync payload build/apply.
  *
- * Cloud shape:
- *   - words[]   — plaintext vocab + SRS fields (source of truth for the word list)
- *   - state     — streak / lastDay / todayDone / practice (compact resume)
+ * Cloud shape (v3+):
+ *   - patches[] / custom[] — compact user overlays (笔记/近义/形近/搭配/分组/星标/SRS)
+ *   - state     — streak / lastDay / todayDone / practice / customCategories
  *   - encrypted — sensitive settings + practice session (password-gated)
  *
- * Practice sync is intentionally compact: mode + wordIds + idx + stats.
- * In-progress answers and prefetched sentences are not uploaded; remaining
- * questions regenerate when the learner opens practice on another device.
+ * Legacy backups may still have full words[]; pull merges overlays instead of replace-all.
  */
 
 import type { Settings } from '@/types/settings';
@@ -17,15 +15,28 @@ import { decryptJSON, encryptJSON, type EncryptedPayload } from '@/api/crypto';
 import { downloadAll, uploadAll, type SyncPayload } from '@/api/cloud';
 import { useWordsStore, makeNewWord } from '@/store/useWords';
 import { useSettings } from '@/store/useSettings';
+import { useCategories } from '@/store/useCategories';
 import { getLS, setLS, lsKey } from '@/utils/date';
 import {
   applyPracticeSyncSnapshot,
   getPracticeSyncSnapshot,
   normalizePracticeSyncPayload,
 } from '@/utils/practiceSession';
+import {
+  SYNC_FORMAT_VERSION,
+  buildSyncPatches,
+  legacyWordToPatch,
+  mergeSyncIntoWords,
+  type CustomWordSync,
+  type WordSyncPatch,
+} from '@/utils/wordSyncPatch';
 
 export interface ApplySyncResult {
+  /** Words newly created from cloud */
   added: number;
+  /** Existing local words that received overlay updates */
+  patched: number;
+  /** @deprecated use patched; true when any word data applied */
   replaced: boolean;
   needsPassword: boolean;
   decrypted: boolean;
@@ -40,7 +51,6 @@ function normalizeCloudWord(raw: Partial<Word> & { word?: string }): Word | null
     translation: String(raw.translation || ''),
     phoneticUs: raw.phoneticUs || '',
     phoneticUk: raw.phoneticUk || '',
-    // legacy single IPA → makeNewWord migrates into Us/Uk
     phonetic: raw.phonetic || '',
     partOfSpeech: raw.partOfSpeech || '',
     category: Array.isArray(raw.category)
@@ -69,8 +79,8 @@ function normalizeCloudWord(raw: Partial<Word> & { word?: string }): Word | null
   });
 }
 
-/** Replace local IndexedDB word list for current user (like example dbClear + dbPut loop). */
-export async function replaceLocalWords(cloudWords: unknown[]): Promise<number> {
+/** Full restore used only when local is empty and cloud is a legacy full dump. */
+async function replaceLocalWordsFull(cloudWords: unknown[]): Promise<number> {
   const normalized: Word[] = [];
   for (const item of cloudWords) {
     const w = normalizeCloudWord(item as Partial<Word> & { word?: string });
@@ -84,7 +94,6 @@ function applyPracticeFromSources(
   statePractice: unknown,
   decryptedSession: unknown
 ): boolean {
-  // Prefer plaintext state.practice; fall back to encrypted.session (example.html)
   const fromState = normalizePracticeSyncPayload(statePractice);
   const fromEncrypted =
     fromState === undefined
@@ -97,6 +106,55 @@ function applyPracticeFromSources(
   return true;
 }
 
+function mergeCustomCategories(raw: unknown): void {
+  if (!Array.isArray(raw)) return;
+  const add = useCategories.getState().addCustom;
+  for (const item of raw) {
+    const name = String(item || '').trim();
+    if (name) add(name);
+  }
+}
+
+/** Merge patch payload into IndexedDB (no full wipe). */
+export async function mergeLocalFromPatches(
+  patches: WordSyncPatch[],
+  customs: CustomWordSync[]
+): Promise<{ added: number; patched: number }> {
+  const local = await loadLocalWordsFallback();
+  const { words, patched, added } = mergeSyncIntoWords(local, patches, customs);
+  if (patched > 0 || added > 0) {
+    await useWordsStore.getState().replaceAll(words);
+  }
+  return { added, patched };
+}
+
+/** LiveQuery may lag; read Dexie directly when store snapshot is empty. */
+async function loadLocalWordsFallback(): Promise<Word[]> {
+  const { db } = await import('@/db/ieltsDb');
+  const { useAuth } = await import('@/store/useAuth');
+  const userId = useAuth.getState().username;
+  if (!userId) return [];
+  return (await db.words.where('userId').equals(userId).toArray()) as Word[];
+}
+
+function patchesFromLegacyWords(cloudWords: unknown[]): {
+  patches: WordSyncPatch[];
+  custom: CustomWordSync[];
+} {
+  const patches: WordSyncPatch[] = [];
+  const custom: CustomWordSync[] = [];
+  for (const item of cloudWords) {
+    const p = legacyWordToPatch(item as Partial<Word> & { word?: string });
+    if (!p) continue;
+    if ('custom' in p && (p as CustomWordSync).custom) {
+      custom.push(p as CustomWordSync);
+    } else {
+      patches.push(p);
+    }
+  }
+  return { patches, custom };
+}
+
 export async function applySyncPayload(
   data: SyncPayload | null,
   password: string,
@@ -105,6 +163,7 @@ export async function applySyncPayload(
   if (!data || typeof data !== 'object') {
     return {
       added: 0,
+      patched: 0,
       replaced: false,
       needsPassword: false,
       decrypted: false,
@@ -115,7 +174,6 @@ export async function applySyncPayload(
   let decrypted: Record<string, unknown> | null = null;
   let needsPassword = false;
 
-  // Encrypted blob holds sensitive settings + optional practice session
   if (data.encrypted) {
     if (!password) {
       needsPassword = true;
@@ -134,12 +192,31 @@ export async function applySyncPayload(
   }
 
   let added = 0;
-  let replaced = false;
+  let patched = 0;
 
-  // Plaintext words[] is the source of truth — apply even if settings decrypt fails
-  if (Array.isArray(data.words)) {
-    added = await replaceLocalWords(data.words);
-    replaced = true;
+  const hasPatchFormat =
+    data.v === SYNC_FORMAT_VERSION ||
+    Array.isArray(data.patches) ||
+    Array.isArray(data.custom);
+
+  if (hasPatchFormat) {
+    const result = await mergeLocalFromPatches(
+      Array.isArray(data.patches) ? data.patches : [],
+      Array.isArray(data.custom) ? (data.custom as CustomWordSync[]) : []
+    );
+    added = result.added;
+    patched = result.patched;
+  } else if (Array.isArray(data.words) && data.words.length > 0) {
+    const local = await loadLocalWordsFallback();
+    if (local.length === 0) {
+      // Empty device + legacy full backup → one-time full restore
+      added = await replaceLocalWordsFull(data.words);
+    } else {
+      const { patches, custom } = patchesFromLegacyWords(data.words);
+      const result = await mergeLocalFromPatches(patches, custom);
+      added = result.added;
+      patched = result.patched;
+    }
   }
 
   if (data.state && typeof data.state === 'object') {
@@ -155,6 +232,11 @@ export async function applySyncPayload(
         }
       }
     }
+    mergeCustomCategories(st.customCategories);
+  }
+
+  if (Array.isArray(data.customCategories)) {
+    mergeCustomCategories(data.customCategories);
   }
 
   if (decrypted) {
@@ -188,7 +270,8 @@ export async function applySyncPayload(
 
   return {
     added,
-    replaced,
+    patched,
+    replaced: added > 0 || patched > 0,
     needsPassword,
     decrypted: !!decrypted,
     practiceRestored,
@@ -202,12 +285,16 @@ export async function buildSyncPayload(
   username: string
 ): Promise<SyncPayload> {
   const practice = getPracticeSyncSnapshot();
+  const { patches, custom } = buildSyncPatches(words);
+  const customCategories = useCategories
+    .getState()
+    .custom.filter(Boolean);
 
   const stateObj = {
     streak: getLS('streak') || '0',
     lastDay: getLS('last-day') || '',
-    /** Compact unfinished practice — null clears continue-card on other devices */
     practice,
+    customCategories,
   };
 
   const todayDone: Record<string, string> = {};
@@ -230,7 +317,6 @@ export async function buildSyncPayload(
     provider: settings.provider || 'openai',
     apiBase: settings.apiBase || '',
     model: settings.model || '',
-    // Same compact snapshot inside encrypted blob (example.html-compatible slot)
     session: practice,
   };
 
@@ -240,10 +326,19 @@ export async function buildSyncPayload(
   }
 
   return {
-    words: words.map((w) => ({ ...w })),
+    v: SYNC_FORMAT_VERSION,
+    patches,
+    custom,
+    customCategories,
+    // Keep empty words[] so older clients don't crash on missing field
+    words: [],
     state: { ...stateObj, todayDone },
     meta: {
       lastSyncAt: Date.now(),
+      format: 'patch-v3',
+      patchCount: patches.length,
+      customCount: custom.length,
+      localWordCount: words.length,
       hasPractice: !!practice,
       practiceIdx: practice ? practice.idx + 1 : 0,
       practiceTotal: practice ? practice.wordIds.length : 0,
@@ -252,7 +347,7 @@ export async function buildSyncPayload(
   };
 }
 
-/** Pull from cloud and apply locally. */
+/** Pull from cloud and merge locally. */
 export async function pullFromCloud(
   settings: Settings,
   username: string,
@@ -262,6 +357,7 @@ export async function pullFromCloud(
   if (!data) {
     return {
       added: 0,
+      patched: 0,
       replaced: false,
       needsPassword: false,
       decrypted: false,
@@ -275,7 +371,7 @@ export async function pullFromCloud(
   return result;
 }
 
-/** Build payload and push to cloud. */
+/** Build compact payload and push to cloud. */
 export async function pushToCloud(
   words: Word[],
   settings: Settings,

@@ -371,7 +371,12 @@ function DataSettings() {
         | { idx?: number; wordIds?: string[]; mode?: string }
         | null
         | undefined;
-      const bits = [`已推送 ${payload.words.length} 个单词`];
+      const patchCount = payload.patches?.length || 0;
+      const customCount = payload.custom?.length || 0;
+      const bits = [
+        `已推送 ${patchCount + customCount} 条进度/笔记` +
+          (customCount ? `（含 ${customCount} 个自建词）` : ''),
+      ];
       if (practice && Array.isArray(practice.wordIds) && practice.wordIds.length) {
         bits.push(
           `练习进度 ${modeLabelSafe(practice.mode)} ${(practice.idx ?? 0) + 1}/${practice.wordIds.length}`
@@ -394,15 +399,23 @@ function DataSettings() {
     setPulling(true);
     try {
       const result = await pullFromCloud(settings, username, password);
-      if (!result.replaced && result.added === 0 && !result.practiceRestored) {
+      if (
+        !result.replaced &&
+        result.added === 0 &&
+        result.patched === 0 &&
+        !result.practiceRestored
+      ) {
         message.info('云端没有可同步的数据');
         return;
       }
-      const bits = [`已拉取 ${result.added} 个单词`];
+      const bits: string[] = [];
+      if (result.patched > 0) bits.push(`合并 ${result.patched} 条进度/笔记`);
+      if (result.added > 0) bits.push(`新增 ${result.added} 个词`);
       if (result.practiceRestored) bits.push('练习进度已恢复');
+      if (!bits.length) bits.push('已同步');
       message.success(bits.join(' · '));
       if (result.needsPassword) {
-        message.warning('词表已同步，但加密配置解密失败（密码可能不一致）');
+        message.warning('进度已合并，但加密配置解密失败（密码可能不一致）');
       }
     } catch (e) {
       message.error('拉取失败：' + (e instanceof Error ? e.message : '未知错误'));
@@ -554,9 +567,11 @@ function DataSettings() {
               ? `上次同步：${new Date(settings.lastSyncAt).toLocaleString('zh-CN')}`
               : '尚未同步'}
             <br />
-            手动推送会上传：词表与复习进度、连续学习天数、今日完成标记、未完成练习（题号/模式，不含已填答案）。换电脑拉取后可继续上次练习，题目现出。
+            推送只上传你改过的内容：笔记、近义/形近、固定搭配、分组、星标、划掉与复习进度，以及自建词；词库原文不重复上传。
             <br />
-            升级后请手动「推送到云端」一次，把本地数据写入新的云存储；旧库数据不会自动迁移。
+            拉取会合并到本地（不覆盖整表）。新设备请先「导入雅思/考研词汇」，再拉取云端进度。
+            <br />
+            另会同步：连续学习天数、今日完成标记、未完成练习（题号/模式）。请推送一次以写入新格式。
           </p>
         </Form>
       </Card>

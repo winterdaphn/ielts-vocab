@@ -1,0 +1,407 @@
+/**
+ * Compact cloud sync patches — only user overlays + SRS, not bank lexemes.
+ *
+ * Push: diff local words against vocab bank; skip untouched bank copies.
+ * Pull: merge patches into existing local rows (never wipe the whole list).
+ */
+
+import type { Word, RelatedWord, Collocation } from '@/types/word';
+import { allVocabBank, type VocabBankEntry } from '@/json/vocab';
+import { normalizeCategories } from '@/config/categories';
+import { makeNewWord } from '@/store/useWords';
+
+export const SYNC_FORMAT_VERSION = 3;
+
+/** Compact related item in sync JSON */
+export type SyncRelated = { w: string; g: string };
+/** Compact collocation in sync JSON */
+export type SyncColo = { p: string; g: string };
+
+/**
+ * Per-word overlay. Only set fields that differ from bank / defaults.
+ * Short keys keep gzip payload small.
+ */
+export interface WordSyncPatch {
+  /** Headword spelling as stored locally */
+  w: string;
+  id?: string;
+  /** mnemonic / 笔记 */
+  m?: string;
+  syn?: SyncRelated[];
+  sim?: SyncRelated[];
+  /** 固定搭配（手记 / LLM），不含词典 dictCollocations */
+  col?: SyncColo[];
+  cat?: string[];
+  star?: boolean;
+  /** crossedOut */
+  x?: boolean;
+  ease?: number;
+  /** interval (days) */
+  iv?: number;
+  /** streak */
+  st?: number;
+  /** nextReview timestamp */
+  nr?: number;
+  tr?: number;
+  cr?: number;
+  /** createdAt */
+  ca?: number;
+}
+
+/** Word not found in built-in bank — needs base fields to recreate on another device */
+export interface CustomWordSync extends WordSyncPatch {
+  custom: true;
+  trl?: string;
+  pus?: string;
+  puk?: string;
+  pos?: string;
+}
+
+export function lettersKey(s: string): string {
+  return String(s || '')
+    .toLowerCase()
+    .replace(/[^a-z]/g, '');
+}
+
+let bankMapCache: Map<string, VocabBankEntry> | null = null;
+
+export function getBankMap(): Map<string, VocabBankEntry> {
+  if (bankMapCache) return bankMapCache;
+  const m = new Map<string, VocabBankEntry>();
+  for (const e of allVocabBank) {
+    const k = lettersKey(e.word);
+    if (k && !m.has(k)) m.set(k, e);
+  }
+  bankMapCache = m;
+  return m;
+}
+
+function packRelated(list: RelatedWord[] | undefined): SyncRelated[] {
+  return (list || [])
+    .map((it) => ({
+      w: String(it.word || '').trim(),
+      g: String(it.gloss || '').trim().slice(0, 40),
+    }))
+    .filter((it) => it.w);
+}
+
+function unpackRelated(list: SyncRelated[] | undefined): RelatedWord[] {
+  return (list || [])
+    .map((it) => ({
+      word: String(it.w || '').trim(),
+      gloss: String(it.g || '').trim().slice(0, 40),
+    }))
+    .filter((it) => it.word);
+}
+
+function packColo(list: Collocation[] | undefined): SyncColo[] {
+  return (list || [])
+    .map((it) => ({
+      p: String(it.phrase || '').trim().replace(/\s+/g, ' ').slice(0, 60),
+      g: String(it.gloss || '').trim().slice(0, 40),
+    }))
+    .filter((it) => it.p);
+}
+
+function unpackColo(list: SyncColo[] | undefined): Collocation[] {
+  return (list || [])
+    .map((it) => ({
+      phrase: String(it.p || '').trim(),
+      gloss: String(it.g || '').trim().slice(0, 40),
+    }))
+    .filter((it) => it.phrase);
+}
+
+function relatedEqual(
+  a: RelatedWord[] | undefined,
+  b: RelatedWord[] | undefined
+): boolean {
+  const pa = packRelated(a);
+  const pb = packRelated(b);
+  if (pa.length !== pb.length) return false;
+  return pa.every(
+    (x, i) =>
+      x.w.toLowerCase() === pb[i].w.toLowerCase() && x.g === pb[i].g
+  );
+}
+
+function coloEqual(
+  a: Collocation[] | undefined,
+  b: Collocation[] | undefined
+): boolean {
+  const pa = packColo(a);
+  const pb = packColo(b);
+  if (pa.length !== pb.length) return false;
+  return pa.every(
+    (x, i) =>
+      x.p.toLowerCase() === pb[i].p.toLowerCase() && x.g === pb[i].g
+  );
+}
+
+function catsEqual(a: string[] | undefined, b: string[] | undefined): boolean {
+  const na = normalizeCategories(a).slice().sort();
+  const nb = normalizeCategories(b).slice().sort();
+  if (na.length !== nb.length) return false;
+  return na.every((x, i) => x === nb[i]);
+}
+
+function hasLearningProgress(w: Word): boolean {
+  return (
+    !!w.crossedOut ||
+    !!w.starred ||
+    (w.totalReviews || 0) > 0 ||
+    (w.correctReviews || 0) > 0 ||
+    (w.streak || 0) > 0 ||
+    (w.interval || 0) > 0 ||
+    (typeof w.ease === 'number' && w.ease !== 2.5)
+  );
+}
+
+function bankCats(entry: VocabBankEntry | undefined): string[] {
+  if (!entry) return [];
+  return normalizeCategories(
+    Array.isArray(entry.category)
+      ? entry.category
+      : entry.category
+        ? [String(entry.category)]
+        : []
+  );
+}
+
+/**
+ * Build a compact patch for one local word.
+ * Returns null if there is nothing beyond bank defaults to sync.
+ */
+export function wordToSyncPatch(
+  w: Word,
+  bank = getBankMap()
+): WordSyncPatch | CustomWordSync | null {
+  const key = lettersKey(w.word);
+  if (!key) return null;
+  const entry = bank.get(key);
+  const isCustom = !entry;
+
+  const patch: WordSyncPatch = { w: w.word.trim() };
+  if (w.id) patch.id = w.id;
+
+  const mnemonic = String(w.mnemonic || '').trim();
+  if (mnemonic) patch.m = mnemonic.slice(0, 500);
+
+  if (!relatedEqual(w.synonyms, entry?.synonyms)) {
+    patch.syn = packRelated(w.synonyms);
+  }
+  if (!relatedEqual(w.similars, entry?.similars)) {
+    patch.sim = packRelated(w.similars);
+  }
+  if (!coloEqual(w.collocations, entry?.collocations)) {
+    patch.col = packColo(w.collocations);
+  }
+  if (!catsEqual(w.category, bankCats(entry))) {
+    patch.cat = normalizeCategories(w.category);
+  }
+
+  if (w.starred) patch.star = true;
+  if (w.crossedOut) patch.x = true;
+
+  if (hasLearningProgress(w)) {
+    if (typeof w.ease === 'number') patch.ease = w.ease;
+    if (w.interval) patch.iv = w.interval;
+    if (w.streak) patch.st = w.streak;
+    if (w.nextReview) patch.nr = w.nextReview;
+    if (w.totalReviews) patch.tr = w.totalReviews;
+    if (w.correctReviews) patch.cr = w.correctReviews;
+  }
+  if (w.createdAt) patch.ca = w.createdAt;
+
+  const hasOverlay =
+    patch.m !== undefined ||
+    patch.syn !== undefined ||
+    patch.sim !== undefined ||
+    patch.col !== undefined ||
+    patch.cat !== undefined ||
+    patch.star !== undefined ||
+    patch.x !== undefined ||
+    patch.tr !== undefined ||
+    patch.iv !== undefined ||
+    patch.st !== undefined ||
+    patch.nr !== undefined ||
+    patch.ease !== undefined;
+
+  if (isCustom) {
+    return {
+      ...patch,
+      custom: true,
+      trl: (w.translation || '').trim().slice(0, 200),
+      pus: w.phoneticUs || '',
+      puk: w.phoneticUk || '',
+      pos: w.partOfSpeech || '',
+    };
+  }
+
+  return hasOverlay ? patch : null;
+}
+
+/** Extract overlay fields from a legacy full Word (cloud v1/v2). */
+export function legacyWordToPatch(raw: Partial<Word> & { word?: string }): WordSyncPatch | null {
+  if (!raw?.word) return null;
+  const w = makeNewWord({
+    id: raw.id,
+    word: String(raw.word),
+    translation: String(raw.translation || ''),
+    phoneticUs: raw.phoneticUs || '',
+    phoneticUk: raw.phoneticUk || '',
+    phonetic: raw.phonetic || '',
+    partOfSpeech: raw.partOfSpeech || '',
+    category: raw.category,
+    mnemonic: raw.mnemonic || '',
+    synonyms: Array.isArray(raw.synonyms) ? raw.synonyms : [],
+    similars: Array.isArray(raw.similars) ? raw.similars : [],
+    collocations: Array.isArray(raw.collocations) ? raw.collocations : [],
+    examples: [],
+    crossedOut: raw.crossedOut ?? false,
+    starred: raw.starred ?? false,
+    ease: raw.ease ?? 2.5,
+    interval: raw.interval ?? 0,
+    streak: raw.streak ?? 0,
+    nextReview: raw.nextReview ?? Date.now(),
+    totalReviews: raw.totalReviews ?? 0,
+    correctReviews: raw.correctReviews ?? 0,
+    createdAt: raw.createdAt ?? Date.now(),
+  });
+  // Force include lexis from legacy backup (may predate bank merge) as overlay
+  // by comparing to bank — wordToSyncPatch already diffs.
+  return wordToSyncPatch(w);
+}
+
+export function buildSyncPatches(words: Word[]): {
+  patches: WordSyncPatch[];
+  custom: CustomWordSync[];
+} {
+  const bank = getBankMap();
+  const patches: WordSyncPatch[] = [];
+  const custom: CustomWordSync[] = [];
+  for (const w of words) {
+    const p = wordToSyncPatch(w, bank);
+    if (!p) continue;
+    if ('custom' in p && p.custom) custom.push(p);
+    else patches.push(p);
+  }
+  return { patches, custom };
+}
+
+function applyPatchFields(local: Word, patch: WordSyncPatch): Word {
+  const next: Word = { ...local };
+  if (patch.m !== undefined) next.mnemonic = patch.m;
+  if (patch.syn !== undefined) next.synonyms = unpackRelated(patch.syn);
+  if (patch.sim !== undefined) next.similars = unpackRelated(patch.sim);
+  if (patch.col !== undefined) next.collocations = unpackColo(patch.col);
+  if (patch.cat !== undefined) next.category = normalizeCategories(patch.cat);
+  if (patch.star !== undefined) next.starred = !!patch.star;
+  if (patch.x !== undefined) next.crossedOut = !!patch.x;
+  if (patch.ease !== undefined) next.ease = patch.ease;
+  if (patch.iv !== undefined) next.interval = patch.iv;
+  if (patch.st !== undefined) next.streak = patch.st;
+  if (patch.nr !== undefined) next.nextReview = patch.nr;
+  if (patch.tr !== undefined) next.totalReviews = patch.tr;
+  if (patch.cr !== undefined) next.correctReviews = patch.cr;
+  if (patch.ca !== undefined) next.createdAt = patch.ca;
+  return next;
+}
+
+function customToWord(c: CustomWordSync): Word {
+  return applyPatchFields(
+    makeNewWord({
+      id: c.id,
+      word: c.w,
+      translation: c.trl || '',
+      phoneticUs: c.pus || '',
+      phoneticUk: c.puk || '',
+      partOfSpeech: c.pos || '',
+      examples: [],
+    }),
+    c
+  );
+}
+
+/**
+ * Merge cloud patches into the current local word list.
+ * Does not remove local words that are absent from the cloud.
+ */
+export function mergeSyncIntoWords(
+  localWords: Word[],
+  patches: WordSyncPatch[],
+  customs: CustomWordSync[]
+): { words: Word[]; patched: number; added: number } {
+  const byId = new Map<string, number>();
+  const byKey = new Map<string, number>();
+  const out = localWords.map((w) => ({ ...w }));
+  out.forEach((w, i) => {
+    if (w.id) byId.set(w.id, i);
+    const k = lettersKey(w.word);
+    if (k && !byKey.has(k)) byKey.set(k, i);
+  });
+
+  let patched = 0;
+  let added = 0;
+
+  const applyOne = (patch: WordSyncPatch, createIfMissing: () => Word | null) => {
+    let idx = -1;
+    if (patch.id && byId.has(patch.id)) {
+      idx = byId.get(patch.id)!;
+    } else {
+      const k = lettersKey(patch.w);
+      if (k && byKey.has(k)) idx = byKey.get(k)!;
+    }
+    if (idx >= 0) {
+      out[idx] = applyPatchFields(out[idx], patch);
+      patched++;
+      return;
+    }
+    const created = createIfMissing();
+    if (!created) return;
+    const next = applyPatchFields(created, patch);
+    idx = out.length;
+    out.push(next);
+    if (next.id) byId.set(next.id, idx);
+    const k = lettersKey(next.word);
+    if (k) byKey.set(k, idx);
+    added++;
+  };
+
+  for (const p of patches) {
+    applyOne(p, () => {
+      // Bank word missing locally — create a minimal shell so progress can attach.
+      // Learner should import bank for full translation / bank lexis.
+      const entry = getBankMap().get(lettersKey(p.w));
+      if (entry) {
+        return makeNewWord({
+          id: p.id,
+          word: entry.word || p.w,
+          translation: entry.translation || '',
+          phoneticUs: entry.phoneticUs || '',
+          phoneticUk: entry.phoneticUk || '',
+          partOfSpeech: entry.pos || '',
+          category: bankCats(entry),
+          synonyms: entry.synonyms || [],
+          similars: entry.similars || [],
+          derivatives: entry.derivatives || [],
+          collocations: entry.collocations || [],
+          dictCollocations: entry.dictCollocations || [],
+          examples: [],
+        });
+      }
+      return makeNewWord({
+        id: p.id,
+        word: p.w,
+        translation: '',
+        examples: [],
+      });
+    });
+  }
+
+  for (const c of customs) {
+    applyOne(c, () => customToWord(c));
+  }
+
+  return { words: out, patched, added };
+}

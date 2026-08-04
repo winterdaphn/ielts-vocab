@@ -1,16 +1,25 @@
 /**
- * Cloud sync v2.6 — direct COS upload/download (bypass Worker 1MB limit).
+ * Cloud sync v2.12 — POST/GET base64 gzipped JSON via Worker.
  *
- * Push: POST /api/upload-url → gzip JSON → PUT to COS
- * Pull: GET  /api/download-url → GET COS → ungzip JSON
+ * Push: gzip JSON → base64 → POST /api/upload { data }
+ * Pull: GET /api/download → { data: base64 } → ungzip JSON
+ *
+ * Payload may be compact patches (v3) or legacy full words[].
  */
 
 import { gzip, ungzip } from 'pako';
 import type { Settings } from '@/types/settings';
 import type { Word } from '@/types/word';
+import type { CustomWordSync, WordSyncPatch } from '@/utils/wordSyncPatch';
 
 export interface SyncPayload {
-  words: Word[];
+  /** 3 = compact patches (notes / lexis edits / SRS only) */
+  v?: number;
+  /** @deprecated legacy full word dump; pull still merges as overlays */
+  words?: Word[];
+  patches?: WordSyncPatch[];
+  custom?: CustomWordSync[];
+  customCategories?: string[];
   state: Record<string, unknown>;
   meta?: Record<string, unknown>;
   encrypted?: { iv: string; data: string; v?: number } | null;
@@ -43,7 +52,33 @@ async function readJsonSafe(resp: Response): Promise<Record<string, unknown>> {
   }
 }
 
-/** 推：拿预签名 URL → gzip → PUT 到 COS */
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]!);
+  return btoa(binary);
+}
+
+function base64ToBytes(b64: string): Uint8Array {
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+function payloadToJson(payload: SyncPayload): string {
+  return JSON.stringify({
+    v: payload.v || 3,
+    patches: payload.patches || [],
+    custom: payload.custom || [],
+    customCategories: payload.customCategories || [],
+    words: payload.words || [],
+    state: payload.state || {},
+    meta: { ...(payload.meta || {}), lastSyncAt: Date.now() },
+    encrypted: payload.encrypted || null,
+  });
+}
+
+/** 推：gzip → base64 → POST /api/upload */
 export async function uploadAll(
   settings: Settings,
   username: string,
@@ -51,39 +86,24 @@ export async function uploadAll(
 ): Promise<void> {
   if (!settings.workerUrl) throw new CloudError('未设置 Worker URL', 0);
 
-  const signResp = await fetch(getBase(settings.workerUrl) + '/api/upload-url', {
-    method: 'POST',
-    headers: authHeaders(settings, username),
-  });
-  const signData = await readJsonSafe(signResp);
-  if (!signResp.ok) {
-    throw new CloudError(
-      String(signData.error || '获取上传地址失败'),
-      signResp.status
-    );
-  }
-  const url = String(signData.url || '');
-  const cosHeaders = (signData.headers || {}) as Record<string, string>;
-  if (!url) throw new CloudError('上传地址为空', 0);
+  const gz = gzip(payloadToJson(payload));
+  const b64 = bytesToBase64(gz);
 
-  const json = JSON.stringify({
-    words: payload.words || [],
-    state: payload.state || {},
-    meta: { ...(payload.meta || {}), lastSyncAt: Date.now() },
-    encrypted: payload.encrypted || null,
+  const resp = await fetch(getBase(settings.workerUrl) + '/api/upload', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...authHeaders(settings, username),
+    },
+    body: JSON.stringify({ data: b64 }),
   });
-  const gz = gzip(json);
-  const put = await fetch(url, {
-    method: 'PUT',
-    body: gz,
-    headers: cosHeaders,
-  });
-  if (!put.ok) {
-    throw new CloudError(`COS 上传失败: ${put.status}`, put.status);
+  const data = await readJsonSafe(resp);
+  if (!resp.ok) {
+    throw new CloudError(String(data.error || `上传失败: ${resp.status}`), resp.status);
   }
 }
 
-/** 拉：拿预签名 URL → GET COS → 解压 */
+/** 拉：GET /api/download → base64 → ungzip */
 export async function downloadAll(
   settings: Settings,
   username: string
@@ -91,25 +111,22 @@ export async function downloadAll(
   if (!settings.workerUrl) return null;
 
   try {
-    const signResp = await fetch(
-      getBase(settings.workerUrl) + '/api/download-url',
-      { headers: authHeaders(settings, username) }
-    );
-    if (!signResp.ok) return null;
-    const signData = await readJsonSafe(signResp);
-    if (!signData.hasBackup) return null;
-    const url = String(signData.url || '');
-    if (!url) return null;
+    const resp = await fetch(getBase(settings.workerUrl) + '/api/download', {
+      headers: authHeaders(settings, username),
+    });
+    if (!resp.ok) return null;
+    const body = await readJsonSafe(resp);
+    const b64 = typeof body.data === 'string' ? body.data : '';
+    if (!b64) return null;
 
-    const buf = await (await fetch(url)).arrayBuffer();
-    const text = ungzip(new Uint8Array(buf), { toText: true });
+    const text = ungzip(base64ToBytes(b64), { toText: true });
     return JSON.parse(text) as SyncPayload;
   } catch {
     return null;
   }
 }
 
-/** 备份元信息（可选） */
+/** 备份元信息 */
 export async function getInfo(
   settings: Settings,
   username: string
@@ -126,6 +143,6 @@ export async function getInfo(
   }
 }
 
-/** Aliases matching FRONTEND_MIGRATION.md naming */
+/** Aliases matching FRONTEND_MIGRATION_V2 naming */
 export const pushAll = uploadAll;
 export const fetchAll = downloadAll;
