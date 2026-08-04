@@ -539,13 +539,6 @@ function DataSettings() {
           description="改笔记、近义词、搭配、复习进度会防抖后自动写入服务器，一般无需手动推送。"
         />
         <Form layout="vertical">
-          <Form.Item label="API Base URL">
-            <Input
-              value={settings.workerUrl}
-              onChange={(e) => update({ workerUrl: e.target.value })}
-              placeholder="留空=同源 /api；生产填 http://服务器"
-            />
-          </Form.Item>
           <Form.Item
             label="JWT（登录后自动写入）"
             extra={<span style={{ fontSize: 12, color: 'var(--text-light)' }}>一般无需手改</span>}

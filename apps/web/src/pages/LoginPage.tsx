@@ -1,20 +1,16 @@
 import { useState } from 'react';
-import { Form, Input, Button, App, Alert } from 'antd';
+import { Form, Input, Button, App } from 'antd';
 import { LockOutlined, UserOutlined } from '@ant-design/icons';
 import { useAuth } from '@/store/useAuth';
-import { useSettings } from '@/store/useSettings';
 import { authLogin, authRegister, isValidUsername, AuthError } from '@/api/auth';
 import { pullOnLogin } from '@/api/realtimeSync';
 
 export default function LoginPage() {
   const { message } = App.useApp();
   const setAuth = useAuth((s) => s.setAuth);
-  const settings = useSettings();
-  const updateSettings = useSettings((s) => s.update);
 
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [workerUrl, setWorkerUrl] = useState(settings.workerUrl);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -23,11 +19,10 @@ export default function LoginPage() {
     if (!username) return setError('请输入用户名');
     if (!password) return setError('请输入密码');
     if (!isValidUsername(username)) return setError('用户名只能包含中文、英文、数字、下划线、连字符');
-    if (workerUrl) updateSettings({ workerUrl: workerUrl.trim() });
 
     setLoading(true);
     try {
-      await authLogin(username, password, settings.workerUrl || workerUrl.trim());
+      await authLogin(username, password, '');
       await onAuthSuccess(username, password);
       message.success(`欢迎回来，${username}！`);
     } catch (e) {
@@ -58,7 +53,7 @@ export default function LoginPage() {
 
     setLoading(true);
     try {
-      await authRegister(usernameVal, passwordVal, settings.workerUrl || workerUrl.trim());
+      await authRegister(usernameVal, passwordVal, '');
       await onAuthSuccess(usernameVal, passwordVal);
       message.success(`账号「${usernameVal}」注册成功！`);
     } catch (e) {
@@ -73,10 +68,7 @@ export default function LoginPage() {
   }
 
   async function onAuthSuccess(u: string, p: string) {
-    // Must set auth first so replaceAll can scope IndexedDB by username
     setAuth(u, p);
-    const url = (workerUrl.trim() || settings.workerUrl || '').replace(/\/$/, '');
-    if (url) updateSettings({ workerUrl: url });
     try {
       const result = await pullOnLogin();
       if (result.merged > 0) {
@@ -97,23 +89,6 @@ export default function LoginPage() {
             自动增量同步 · 改笔记/近义即上云
           </p>
         </div>
-
-        {!settings.workerUrl && (
-          <Alert
-            type="info"
-            showIcon
-            style={{ marginBottom: 16 }}
-            message="API Base（本地开发可留空，走 Vite 代理）"
-            description={
-              <Input
-                size="small"
-                value={workerUrl}
-                onChange={(e) => setWorkerUrl(e.target.value)}
-                placeholder="http://127.0.0.1:3000 或 http://你的服务器"
-              />
-            }
-          />
-        )}
 
         <Form layout="vertical" onFinish={doLogin}>
           <Form.Item label="用户名">
