@@ -2,17 +2,27 @@ services:
   db:
     image: postgres:16-alpine
     restart: unless-stopped
+    env_file:
+      - ./apps/api/.env
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-ielts_user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-ielts}
     volumes:
-      - ./db-data:/var/lib/postgresql/data
+      - db-data:/var/lib/postgresql/data
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB']
       interval: 5s
       timeout: 5s
       retries: 10
+    networks:
+      - ielts-net
+
+  web:
+    build: ./apps/web
+    restart: "no"
+    volumes:
+      - web_dist:/out
     networks:
       - ielts-net
 
@@ -39,13 +49,18 @@ services:
       - '443:443'
     volumes:
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
-      - ./dist:/usr/share/nginx/html:ro
+      - web_dist:/usr/share/nginx/html:ro
       - ./nginx/certs:/etc/nginx/certs:ro
     depends_on:
       - api
+      - web
     networks:
       - ielts-net
 
 networks:
   ielts-net:
     driver: bridge
+
+volumes:
+  db-data:
+  web_dist:
