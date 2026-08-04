@@ -17,7 +17,7 @@ import {
   type TranslateHints,
 } from '@/api/llm';
 import { applyReview, isNew, formatNextReview } from '@/utils/scheduler';
-import { getRelatedFromBank, mergeSynonymSources, getBankLexisExtras } from '@/utils/vocabBankRelated';
+import { getRelatedFromBank, mergeSynonymSources, getBankLexisExtras, ensureVocabBankRelated } from '@/utils/vocabBankRelated';
 import { setLS, getLS, todayKey } from '@/utils/date';
 import type { RelatedWord, Word, Derivative } from '@/types/word';
 import {
@@ -300,25 +300,28 @@ export function usePracticeSession() {
     const word = current.word;
     const cachedSyn = Array.isArray(word.synonyms) ? word.synonyms : [];
     const cachedSim = Array.isArray(word.similars) ? word.similars : [];
-    const bankExtras = getBankLexisExtras(word.word);
-    const deriv =
-      Array.isArray(word.derivatives) && word.derivatives.length
-        ? word.derivatives
-        : bankExtras.derivatives;
-    setDerivativesTip(deriv);
-
-    if (cachedSyn.length || cachedSim.length) {
-      setSynonymsTip(cachedSyn);
-      setSimilarsTip(cachedSim);
-      setRelatedLoading(false);
-      return;
-    }
 
     let cancelled = false;
     setRelatedLoading(true);
-    setSynonymsTip([]);
-    setSimilarsTip([]);
-    (async () => {
+    void (async () => {
+      await ensureVocabBankRelated();
+      if (cancelled) return;
+      const bankExtras = getBankLexisExtras(word.word);
+      const deriv =
+        Array.isArray(word.derivatives) && word.derivatives.length
+          ? word.derivatives
+          : bankExtras.derivatives;
+      setDerivativesTip(deriv);
+
+      if (cachedSyn.length || cachedSim.length) {
+        setSynonymsTip(cachedSyn);
+        setSimilarsTip(cachedSim);
+        setRelatedLoading(false);
+        return;
+      }
+
+      setSynonymsTip([]);
+      setSimilarsTip([]);
       try {
         const fromBank = getRelatedFromBank(word.word, word.translation || '');
         let youdaoSyn = fromBank.synonyms;

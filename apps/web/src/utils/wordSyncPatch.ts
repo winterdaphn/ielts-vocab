@@ -7,8 +7,9 @@
  * Local-only fields (never uploaded): synonymDiff (AI 近义辨析缓存).
  */
 
-import type { Word, RelatedWord, Collocation } from '@/types/word';
-import { allVocabBank, type VocabBankEntry } from '@/json/vocab';
+import { loadAllVocabBank, type VocabBankEntry } from '@/json/vocab';
+import type { Word } from '@/types/word';
+import type { RelatedWord, Collocation } from '@/types/word';
 import { normalizeCategories } from '@/config/categories';
 import { makeNewWord } from '@/store/useWords';
 import { wordToId, withCanonicalWordId } from '@/utils/wordId';
@@ -75,6 +76,7 @@ export function lettersKey(s: string): string {
 }
 
 let bankMapCache: Map<string, VocabBankEntry> | null = null;
+let bankMapPromise: Promise<Map<string, VocabBankEntry>> | null = null;
 
 function mergeBankEntries(
   a: VocabBankEntry,
@@ -104,22 +106,39 @@ function mergeBankEntries(
   };
 }
 
-export function getBankMap(): Map<string, VocabBankEntry> {
-  if (bankMapCache) return bankMapCache;
+function buildBankMap(all: VocabBankEntry[]): Map<string, VocabBankEntry> {
   const m = new Map<string, VocabBankEntry>();
-  for (const e of allVocabBank) {
+  for (const e of all) {
     const k = lettersKey(e.word);
     if (!k) continue;
     const prev = m.get(k);
     m.set(k, prev ? mergeBankEntries(prev, e) : e);
   }
-  bankMapCache = m;
   return m;
+}
+
+/** Sync accessor — empty until ensureBankMap() resolves. */
+export function getBankMap(): Map<string, VocabBankEntry> {
+  return bankMapCache || new Map();
+}
+
+/** Load vocab JSON chunks once and cache the map. */
+export async function ensureBankMap(): Promise<Map<string, VocabBankEntry>> {
+  if (bankMapCache) return bankMapCache;
+  if (!bankMapPromise) {
+    bankMapPromise = loadAllVocabBank().then((all) => {
+      bankMapCache = buildBankMap(all);
+      return bankMapCache;
+    });
+  }
+  return bankMapPromise;
 }
 
 /** True if headword is not in the built-in IELTS/kaoyan bank (hand-added). */
 export function isCustomWord(word: string, bank = getBankMap()): boolean {
   const k = lettersKey(word);
+  // Until bank loads, avoid marking everything as custom
+  if (!bankMapCache) return false;
   return !!k && !bank.has(k);
 }
 
@@ -307,11 +326,11 @@ export function wordToSyncPatch(
   return hasOverlay ? patch : null;
 }
 
-export function buildSyncPatches(words: Word[]): {
+export async function buildSyncPatches(words: Word[]): Promise<{
   patches: WordSyncPatch[];
   custom: CustomWordSync[];
-} {
-  const bank = getBankMap();
+}> {
+  const bank = await ensureBankMap();
   const patches: WordSyncPatch[] = [];
   const custom: CustomWordSync[] = [];
   for (const w of words) {
@@ -366,11 +385,12 @@ function customToWord(c: CustomWordSync): Word {
  * Merge cloud patches into the current local word list.
  * Does not remove local words that are absent from the cloud.
  */
-export function mergeSyncIntoWords(
+export async function mergeSyncIntoWords(
   localWords: Word[],
   patches: WordSyncPatch[],
   customs: CustomWordSync[]
-): { words: Word[]; patched: number; added: number } {
+): Promise<{ words: Word[]; patched: number; added: number }> {
+  await ensureBankMap();
   const byId = new Map<string, number>();
   const byKey = new Map<string, number>();
   const out = localWords.map((w) => ({ ...w }));

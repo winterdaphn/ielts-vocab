@@ -69,7 +69,7 @@ export async function mergeLocalFromPatches(
   customs: CustomWordSync[]
 ): Promise<{ added: number; patched: number }> {
   const local = await loadLocalWordsFallback();
-  const { words, patched, added } = mergeSyncIntoWords(local, patches, customs);
+  const { words, patched, added } = await mergeSyncIntoWords(local, patches, customs);
   if (patched > 0 || added > 0) {
     await useWordsStore.getState().replaceAll(words);
   }
@@ -197,7 +197,7 @@ export async function buildSyncPayload(
   username: string
 ): Promise<SyncPayload> {
   const practice = getPracticeSyncSnapshot();
-  const { patches, custom } = buildSyncPatches(words);
+  const { patches, custom } = await buildSyncPatches(words);
   const customCategories = useCategories
     .getState()
     .custom.filter(Boolean);

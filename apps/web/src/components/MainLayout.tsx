@@ -9,6 +9,9 @@ import {
 import { useAuth } from '@/store/useAuth';
 import { useSettings } from '@/store/useSettings';
 import { flushSyncQueue, pullIncremental, pushPrefsNow } from '@/api/realtimeSync';
+import { prefetchVocabBank } from '@/json/vocab';
+import { ensureBankMap } from '@/utils/wordSyncPatch';
+import { ensureVocabBankRelated } from '@/utils/vocabBankRelated';
 
 const NAV_ITEMS = [
   { path: '/today', label: '今日', icon: <HomeOutlined /> },
@@ -26,6 +29,14 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
   const isWordDetail = /^\/words\/[^/]+$/.test(location.pathname);
   const isWordsList = location.pathname === '/words';
   const hideMainNav = isPractice || isWordDetail;
+
+  // Prefetch vocab banks after login (keeps login JS small)
+  useEffect(() => {
+    if (!username) return;
+    prefetchVocabBank();
+    void ensureBankMap();
+    void ensureVocabBankRelated();
+  }, [username]);
 
   // Pull incremental when tab becomes visible; periodic soft pull
   useEffect(() => {

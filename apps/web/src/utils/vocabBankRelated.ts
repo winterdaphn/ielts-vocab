@@ -3,12 +3,10 @@
  * (prefer precomputed fields; otherwise compute in-bank matches).
  * Synonyms can be merged with AI results by callers.
  */
-import { allVocabBank, type VocabBankEntry } from '@/json/vocab';
+import { loadAllVocabBank, type VocabBankEntry } from '@/json/vocab';
 import type { RelatedWord, Collocation, Derivative } from '@/types/word';
 
 export type { VocabBankEntry };
-
-const bank = allVocabBank;
 
 function lettersOnly(s: string): string {
   return String(s || '')
@@ -128,12 +126,27 @@ function normalizeRelated(items: RelatedWord[] | undefined, self: string): Relat
 }
 
 const byKey = new Map<string, VocabBankEntry>();
-for (const e of bank) {
-  const k = lettersOnly(e.word);
-  if (k && !byKey.has(k)) byKey.set(k, e);
-}
+let allKeys: string[] = [];
+let bankReady = false;
+let bankPromise: Promise<void> | null = null;
 
-const allKeys = [...byKey.keys()];
+/** Populate lookup maps from lazy-loaded vocab JSON. */
+export async function ensureVocabBankRelated(): Promise<void> {
+  if (bankReady) return;
+  if (!bankPromise) {
+    bankPromise = loadAllVocabBank().then((bank) => {
+      byKey.clear();
+      for (const e of bank) {
+        const k = lettersOnly(e.word);
+        if (k && !byKey.has(k)) byKey.set(k, e);
+      }
+      allKeys = [...byKey.keys()];
+      inverted = null;
+      bankReady = true;
+    });
+  }
+  return bankPromise;
+}
 
 let inverted: Map<string, Set<string>> | null = null;
 function getInverted(): Map<string, Set<string>> {

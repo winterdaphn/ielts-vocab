@@ -37,6 +37,7 @@ import {
   mergeSynonymSources,
   resolveBankGloss,
   getBankLexisExtras,
+  ensureVocabBankRelated,
 } from '@/utils/vocabBankRelated';
 import RelatedWordsList from '@/components/RelatedWordsList';
 import CollocationsList from '@/components/CollocationsList';
@@ -73,6 +74,7 @@ export default function WordDetailPage() {
 
   const [tipTab, setTipTab] = useState<TipTab>('mnemonic');
   const [coloTab, setColoTab] = useState<ColoTab>('dict');
+  const [bankTick, setBankTick] = useState(0);
   const [busyRelated, setBusyRelated] = useState(false);
   const [busyMnemonic, setBusyMnemonic] = useState(false);
   const [busyCollocations, setBusyCollocations] = useState(false);
@@ -114,21 +116,33 @@ export default function WordDetailPage() {
     setColoTab('dict');
   }, [id]);
 
+  useEffect(() => {
+    void ensureVocabBankRelated().then(() => setBankTick((n) => n + 1));
+  }, []);
+
   // 旧导入词：从内置词库补上派生词 / 词典搭配（不覆盖已有）
   useEffect(() => {
     if (!word) return;
-    const bank = getBankLexisExtras(word.word);
-    const needDeriv =
-      !(word.derivatives && word.derivatives.length) && bank.derivatives.length > 0;
-    const needDict =
-      !(word.dictCollocations && word.dictCollocations.length) &&
-      bank.dictCollocations.length > 0;
-    if (!needDeriv && !needDict) return;
-    void updateWord({
-      ...word,
-      ...(needDeriv ? { derivatives: bank.derivatives } : {}),
-      ...(needDict ? { dictCollocations: bank.dictCollocations } : {}),
-    });
+    let cancelled = false;
+    void (async () => {
+      await ensureVocabBankRelated();
+      if (cancelled) return;
+      const bank = getBankLexisExtras(word.word);
+      const needDeriv =
+        !(word.derivatives && word.derivatives.length) && bank.derivatives.length > 0;
+      const needDict =
+        !(word.dictCollocations && word.dictCollocations.length) &&
+        bank.dictCollocations.length > 0;
+      if (!needDeriv && !needDict) return;
+      await updateWord({
+        ...word,
+        ...(needDeriv ? { derivatives: bank.derivatives } : {}),
+        ...(needDict ? { dictCollocations: bank.dictCollocations } : {}),
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [word?.id, word?.word]);
 
   // 旧 UUID 书签 → 规范 /words/lemma
@@ -152,7 +166,12 @@ export default function WordDetailPage() {
   }
 
   const stage = getWordStage(word);
-  const bankExtras = getBankLexisExtras(word.word);
+  const bankExtras = useMemo(
+    () => (word ? getBankLexisExtras(word.word) : { derivatives: [], dictCollocations: [] }),
+    // bankTick refreshes after lazy vocab load
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [word?.word, bankTick]
+  );
   const synonyms = word.synonyms || [];
   const similars = word.similars || [];
   const derivatives =
@@ -174,6 +193,7 @@ export default function WordDetailPage() {
   async function fillRelated() {
     setBusyRelated(true);
     try {
+      await ensureVocabBankRelated();
       const fromBank = getRelatedFromBank(word!.word, word!.translation || '');
       // 形近：仅词库；若用户已改过（有列表），补全时不覆盖，避免删掉的又回来
       const existingSim = word!.similars || [];

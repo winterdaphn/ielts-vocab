@@ -16,7 +16,7 @@ import PhoneticDisplay from '@/components/PhoneticDisplay';
 import LetterIndexBar from '@/components/LetterIndexBar';
 import { categoryLabel, normalizeCategories, TOPIC_CATEGORIES, FUNCTION_CATEGORIES } from '@/config/categories';
 import { readWordsListUi, writeWordsListUi } from '@/utils/wordsListUi';
-import { isCustomWord } from '@/utils/wordSyncPatch';
+import { isCustomWord, ensureBankMap } from '@/utils/wordSyncPatch';
 
 type Filter =
   | 'all'
@@ -163,6 +163,11 @@ export default function WordsPage() {
   const pendingMeasurements = useRef(savedUi.measurements);
   const didRestoreScroll = useRef(false);
   const [scrolling, setScrolling] = useState(false);
+  const [bankReady, setBankReady] = useState(false);
+
+  useEffect(() => {
+    void ensureBankMap().then(() => setBankReady(true));
+  }, []);
 
   const counts = useMemo(() => {
     let neu = 0;
@@ -194,7 +199,7 @@ export default function WordsPage() {
       custom,
       crossed,
     };
-  }, [words]);
+  }, [words, bankReady]);
 
   const FILTERS: { key: Filter; label: string }[] = [
     { key: 'all', label: `全部 (${counts.all})` },
