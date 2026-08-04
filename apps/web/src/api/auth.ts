@@ -4,7 +4,7 @@
  * Successful auth returns JWT stored as settings.syncToken.
  */
 
-import { arrayToBase64 } from './crypto';
+import { arrayToBase64, sha256Bytes } from './crypto';
 import { useSettings } from '@/store/useSettings';
 
 const USERNAME_RE = /^[\u4e00-\u9fa5a-zA-Z0-9_\-]+$/;
@@ -20,10 +20,11 @@ export function isValidUsername(u: string): boolean {
 
 export async function hashAuthPassword(password: string, username: string): Promise<string> {
   // SHA-256 of "auth:{username}:{password}", truncated to 16 bytes
+  // Uses pure-JS fallback on http://IP (crypto.subtle only on https/localhost)
   const enc = new TextEncoder();
   const data = enc.encode('auth:' + username + ':' + password);
-  const hash = await crypto.subtle.digest('SHA-256', data);
-  return arrayToBase64(new Uint8Array(hash).slice(0, 16));
+  const hash = await sha256Bytes(data);
+  return arrayToBase64(hash.slice(0, 16));
 }
 
 export class AuthError extends Error {
