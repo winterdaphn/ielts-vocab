@@ -11,6 +11,7 @@ import {
   isMastered,
 } from '@/utils/scheduler';
 import type { Word } from '@/types/word';
+import { wordDetailPath } from '@/utils/wordId';
 import PhoneticDisplay from '@/components/PhoneticDisplay';
 import LetterIndexBar from '@/components/LetterIndexBar';
 import { categoryLabel, normalizeCategories, TOPIC_CATEGORIES, FUNCTION_CATEGORIES } from '@/config/categories';
@@ -365,7 +366,7 @@ export default function WordsPage() {
           lane: m.lane,
         })),
       });
-      navigate(`/words/${id}`);
+      navigate(wordDetailPath(id));
     },
     [navigate, filter, categoryFilter, search, virtualizer]
   );

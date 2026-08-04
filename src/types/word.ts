@@ -54,6 +54,7 @@ export interface StoredSynonymDiff extends SynonymDiffResult {
 }
 
 export interface Word {
+  /** Primary key — canonical lowercase lemma (same as route /words/:id). */
   id: string;
   word: string;
   translation: string;

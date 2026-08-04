@@ -1,19 +1,15 @@
 /**
- * Cloud sync payload build/apply.
+ * Cloud sync payload build/apply (v3 patch format only).
  *
- * Cloud shape (v3+):
- *   - patches[] / custom[] — compact user overlays (笔记/近义/形近/搭配/分组/星标/SRS)
- *   - state     — streak / lastDay / todayDone / practice / customCategories
- *   - encrypted — sensitive settings + practice session (password-gated)
- *
- * Legacy backups may still have full words[]; pull merges overlays instead of replace-all.
+ *   - patches[] / custom[] — user overlays + SRS
+ *   - state / encrypted — streak, practice, settings
  */
 
 import type { Settings } from '@/types/settings';
 import type { Word } from '@/types/word';
 import { decryptJSON, encryptJSON, type EncryptedPayload } from '@/api/crypto';
-import { downloadAll, uploadAll, type SyncPayload } from '@/api/cloud';
-import { useWordsStore, makeNewWord } from '@/store/useWords';
+import { downloadAll, uploadAll, type SyncPayload, type UploadResult } from '@/api/cloud';
+import { useWordsStore } from '@/store/useWords';
 import { useSettings } from '@/store/useSettings';
 import { useCategories } from '@/store/useCategories';
 import { getLS, setLS, lsKey } from '@/utils/date';
@@ -25,7 +21,6 @@ import {
 import {
   SYNC_FORMAT_VERSION,
   buildSyncPatches,
-  legacyWordToPatch,
   mergeSyncIntoWords,
   type CustomWordSync,
   type WordSyncPatch,
@@ -41,53 +36,6 @@ export interface ApplySyncResult {
   needsPassword: boolean;
   decrypted: boolean;
   practiceRestored: boolean;
-}
-
-function normalizeCloudWord(raw: Partial<Word> & { word?: string }): Word | null {
-  if (!raw || !raw.word) return null;
-  return makeNewWord({
-    id: raw.id,
-    word: String(raw.word),
-    translation: String(raw.translation || ''),
-    phoneticUs: raw.phoneticUs || '',
-    phoneticUk: raw.phoneticUk || '',
-    phonetic: raw.phonetic || '',
-    partOfSpeech: raw.partOfSpeech || '',
-    category: Array.isArray(raw.category)
-      ? raw.category
-      : raw.category
-        ? [String(raw.category)]
-        : [],
-    mnemonic: raw.mnemonic || '',
-    synonyms: Array.isArray(raw.synonyms) ? raw.synonyms : [],
-    similars: Array.isArray(raw.similars) ? raw.similars : [],
-    derivatives: Array.isArray(raw.derivatives) ? raw.derivatives : [],
-    collocations: Array.isArray(raw.collocations) ? raw.collocations : [],
-    dictCollocations: Array.isArray(raw.dictCollocations)
-      ? raw.dictCollocations
-      : [],
-    examples: Array.isArray(raw.examples) ? raw.examples : [],
-    crossedOut: raw.crossedOut ?? false,
-    starred: raw.starred ?? false,
-    ease: raw.ease ?? 2.5,
-    interval: raw.interval ?? 0,
-    streak: raw.streak ?? 0,
-    nextReview: raw.nextReview ?? Date.now(),
-    totalReviews: raw.totalReviews ?? 0,
-    correctReviews: raw.correctReviews ?? 0,
-    createdAt: raw.createdAt ?? Date.now(),
-  });
-}
-
-/** Full restore used only when local is empty and cloud is a legacy full dump. */
-async function replaceLocalWordsFull(cloudWords: unknown[]): Promise<number> {
-  const normalized: Word[] = [];
-  for (const item of cloudWords) {
-    const w = normalizeCloudWord(item as Partial<Word> & { word?: string });
-    if (w) normalized.push(w);
-  }
-  await useWordsStore.getState().replaceAll(normalized);
-  return normalized.length;
 }
 
 function applyPracticeFromSources(
@@ -137,24 +85,6 @@ async function loadLocalWordsFallback(): Promise<Word[]> {
   return (await db.words.where('userId').equals(userId).toArray()) as Word[];
 }
 
-function patchesFromLegacyWords(cloudWords: unknown[]): {
-  patches: WordSyncPatch[];
-  custom: CustomWordSync[];
-} {
-  const patches: WordSyncPatch[] = [];
-  const custom: CustomWordSync[] = [];
-  for (const item of cloudWords) {
-    const p = legacyWordToPatch(item as Partial<Word> & { word?: string });
-    if (!p) continue;
-    if ('custom' in p && (p as CustomWordSync).custom) {
-      custom.push(p as CustomWordSync);
-    } else {
-      patches.push(p);
-    }
-  }
-  return { patches, custom };
-}
-
 export async function applySyncPayload(
   data: SyncPayload | null,
   password: string,
@@ -194,30 +124,12 @@ export async function applySyncPayload(
   let added = 0;
   let patched = 0;
 
-  const hasPatchFormat =
-    data.v === SYNC_FORMAT_VERSION ||
-    Array.isArray(data.patches) ||
-    Array.isArray(data.custom);
-
-  if (hasPatchFormat) {
-    const result = await mergeLocalFromPatches(
-      Array.isArray(data.patches) ? data.patches : [],
-      Array.isArray(data.custom) ? (data.custom as CustomWordSync[]) : []
-    );
-    added = result.added;
-    patched = result.patched;
-  } else if (Array.isArray(data.words) && data.words.length > 0) {
-    const local = await loadLocalWordsFallback();
-    if (local.length === 0) {
-      // Empty device + legacy full backup → one-time full restore
-      added = await replaceLocalWordsFull(data.words);
-    } else {
-      const { patches, custom } = patchesFromLegacyWords(data.words);
-      const result = await mergeLocalFromPatches(patches, custom);
-      added = result.added;
-      patched = result.patched;
-    }
-  }
+  const result = await mergeLocalFromPatches(
+    Array.isArray(data.patches) ? data.patches : [],
+    Array.isArray(data.custom) ? (data.custom as CustomWordSync[]) : []
+  );
+  added = result.added;
+  patched = result.patched;
 
   if (data.state && typeof data.state === 'object') {
     const st = data.state as Record<string, unknown>;
@@ -330,7 +242,7 @@ export async function buildSyncPayload(
     patches,
     custom,
     customCategories,
-    // Keep empty words[] so older clients don't crash on missing field
+    // Empty words[] for backward-compatible payload shape
     words: [],
     state: { ...stateObj, todayDone },
     meta: {
@@ -371,15 +283,20 @@ export async function pullFromCloud(
   return result;
 }
 
+export interface PushToCloudResult {
+  payload: SyncPayload;
+  upload: UploadResult;
+}
+
 /** Build compact payload and push to cloud. */
 export async function pushToCloud(
   words: Word[],
   settings: Settings,
   username: string,
   password: string
-): Promise<SyncPayload> {
+): Promise<PushToCloudResult> {
   const payload = await buildSyncPayload(words, settings, password, username);
-  await uploadAll(settings, username, payload);
+  const upload = await uploadAll(settings, username, payload);
   useSettings.getState().update({ lastSyncAt: Date.now() });
-  return payload;
+  return { payload, upload };
 }

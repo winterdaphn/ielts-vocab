@@ -2,13 +2,15 @@
  * Words store — wraps Dexie + provides imperative helpers.
  * Words are scoped to current user; switching users clears the in-memory list.
  */
+import { useEffect, useState } from 'react';
 import { create } from 'zustand';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db, dbClearForUser, dbPut, dbDelete, newId, type WordRow } from '@/db/ieltsDb';
+import { useLiveQuery } from 'dexie-react-hooks';import { db, dbClearForUser, dbPut, dbDelete, type WordRow } from '@/db/ieltsDb';
 import type { Word } from '@/types/word';
 import { useAuth } from './useAuth';
 import { normalizeCategories } from '@/config/categories';
 import { migratePhoneticFields } from '@/utils/phonetic';
+import { migrateUserWordIdsIfNeeded } from '@/utils/migrateWordIds';
+import { wordToId, withCanonicalWordId } from '@/utils/wordId';
 
 interface WordsState {
   words: Word[];
@@ -32,24 +34,36 @@ export const useWordsStore = create<WordsState>((set) => ({
   loaded: false,
   setWords: (words) => set({ words, loaded: true }),
   addWord: async (w) => {
-    const row: WordRow = { ...w, userId: useAuth.getState().username };
+    const row: WordRow = {
+      ...withCanonicalWordId(w),
+      userId: useAuth.getState().username,
+    };
     await dbPut(row);
   },
   addWords: async (words) => {
     const userId = useAuth.getState().username;
     if (!userId || words.length === 0) return;
-    const rows: WordRow[] = words.map((w) => ({ ...w, userId }));
+    const rows: WordRow[] = words.map((w) => ({
+      ...withCanonicalWordId(w),
+      userId,
+    }));
     await db.words.bulkPut(rows);
   },
   /** Bulk overwrite existing rows (same ids). */
   updateWords: async (words) => {
     const userId = useAuth.getState().username;
     if (!userId || words.length === 0) return;
-    const rows: WordRow[] = words.map((w) => ({ ...w, userId }));
+    const rows: WordRow[] = words.map((w) => ({
+      ...withCanonicalWordId(w),
+      userId,
+    }));
     await db.words.bulkPut(rows);
   },
   updateWord: async (w) => {
-    const row: WordRow = { ...w, userId: useAuth.getState().username };
+    const row: WordRow = {
+      ...withCanonicalWordId(w),
+      userId: useAuth.getState().username,
+    };
     await dbPut(row);
   },
   removeWord: async (id) => {
@@ -63,7 +77,10 @@ export const useWordsStore = create<WordsState>((set) => ({
     const userId = useAuth.getState().username;
     if (!userId) return;
     await dbClearForUser(userId);
-    const rows: WordRow[] = words.map((w) => ({ ...w, userId }));
+    const rows: WordRow[] = words.map((w) => ({
+      ...withCanonicalWordId(w),
+      userId,
+    }));
     if (rows.length > 0) {
       await db.words.bulkPut(rows);
     }
@@ -74,12 +91,30 @@ export const useWordsStore = create<WordsState>((set) => ({
 
 export function useUserWords(): Word[] {
   const username = useAuth((s) => s.username);
+  /** Gate liveQuery until one-time id migration finishes (must not write inside liveQuery). */
+  const [idMigrationReady, setIdMigrationReady] = useState(false);
+
+  useEffect(() => {
+    if (!username) {
+      setIdMigrationReady(false);
+      return;
+    }
+    let cancelled = false;
+    setIdMigrationReady(false);
+    void migrateUserWordIdsIfNeeded(username).finally(() => {
+      if (!cancelled) setIdMigrationReady(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [username]);
+
   const rows = useLiveQuery(
     async () => {
-      if (!username) return [];
+      if (!username || !idMigrationReady) return [];
       return db.words.where('userId').equals(username).toArray();
     },
-    [username],
+    [username, idMigrationReady],
     []
   );
   return (rows || []) as Word[];
@@ -87,9 +122,11 @@ export function useUserWords(): Word[] {
 
 export function makeNewWord(input: Partial<Word> & { word: string; translation?: string }): Word {
   const { phoneticUs, phoneticUk } = migratePhoneticFields(input);
+  const word = input.word.trim();
+  const id = wordToId(word);
   return {
-    id: input.id || newId(),
-    word: input.word.trim(),
+    id,
+    word,
     translation: (input.translation || '').trim(),
     phoneticUs,
     phoneticUk,

@@ -48,6 +48,7 @@ import { useSynonymDiffAssist } from '@/components/SynonymDiffAssist';
 import type { Collocation, RelatedWord } from '@/types/word';
 import WordCategoryEditor from '@/components/WordCategoryEditor';
 import { normalizeCategories } from '@/config/categories';
+import { findWordIndex, wordDetailPath, decodeWordRouteId } from '@/utils/wordId';
 
 type TipTab = 'mnemonic' | 'synonyms' | 'similars' | 'derivatives';
 type ColoTab = 'dict' | 'mine';
@@ -61,7 +62,11 @@ export default function WordDetailPage() {
   const removeWord = useWordsStore((s) => s.removeWord);
   const settings = useSettings();
 
-  const idx = useMemo(() => words.findIndex((w) => w.id === id), [words, id]);
+  const routeId = id ?? '';
+  const idx = useMemo(
+    () => findWordIndex(words, routeId),
+    [words, routeId]
+  );
   const word = idx >= 0 ? words[idx] : undefined;
   const prevWord = idx > 0 ? words[idx - 1] : null;
   const nextWord = idx >= 0 && idx < words.length - 1 ? words[idx + 1] : null;
@@ -92,7 +97,7 @@ export default function WordDetailPage() {
     sentence: (word?.examples || []).find((ex) => ex?.en)?.en || '',
     stored: word?.synonymDiff,
     onSave: async (diff) => {
-      const latest = words.find((w) => w.id === id);
+      const latest = words.find((w) => w.id === word?.id);
       if (!latest) return;
       await updateWord({ ...latest, synonymDiff: diff });
     },
@@ -125,6 +130,14 @@ export default function WordDetailPage() {
       ...(needDict ? { dictCollocations: bank.dictCollocations } : {}),
     });
   }, [word?.id, word?.word]);
+
+  // 旧 UUID 书签 → 规范 /words/lemma
+  useEffect(() => {
+    if (!word || !routeId) return;
+    const decoded = decodeWordRouteId(routeId);
+    if (word.id === decoded) return;
+    navigate(wordDetailPath(word), { replace: true });
+  }, [word, routeId, navigate]);
 
   if (!id || !word) {
     return (
@@ -529,16 +542,16 @@ export default function WordDetailPage() {
     const goId = nextWord?.id || prevWord?.id;
     await removeWord(word!.id);
     message.success('已删除');
-    if (goId) navigate(`/words/${goId}`, { replace: true });
+    if (goId) navigate(wordDetailPath(goId), { replace: true });
     else navigate('/words', { replace: true });
   }
 
   function goPrev() {
-    if (prevWord) navigate(`/words/${prevWord.id}`);
+    if (prevWord) navigate(wordDetailPath(prevWord));
   }
 
   function goNext() {
-    if (nextWord) navigate(`/words/${nextWord.id}`);
+    if (nextWord) navigate(wordDetailPath(nextWord));
   }
 
   return (

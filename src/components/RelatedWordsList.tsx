@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useUserWords } from '@/store/useWords';
 import type { RelatedWord } from '@/types/word';
+import { wordToId, wordDetailPath } from '@/utils/wordId';
 
 interface Props {
   items: RelatedWord[];
@@ -44,7 +45,7 @@ export default function RelatedWordsList({
     const m = new Map<string, string>();
     for (const w of words) {
       const k = lettersKey(w.word);
-      if (k && !m.has(k)) m.set(k, w.id);
+      if (k && !m.has(k)) m.set(k, w.id || wordToId(w.word));
     }
     return m;
   }, [words]);
@@ -79,7 +80,7 @@ export default function RelatedWordsList({
                   type="button"
                   className="related-word-en is-link"
                   title={`查看「${it.word}」详情`}
-                  onClick={() => navigate(`/words/${targetId}`)}
+                  onClick={() => navigate(wordDetailPath(targetId))}
                 >
                   {it.word}
                 </button>

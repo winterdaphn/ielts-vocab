@@ -11,6 +11,12 @@ import type { Word, RelatedWord, Collocation } from '@/types/word';
 import { allVocabBank, type VocabBankEntry } from '@/json/vocab';
 import { normalizeCategories } from '@/config/categories';
 import { makeNewWord } from '@/store/useWords';
+import { wordToId, withCanonicalWordId } from '@/utils/wordId';
+import {
+  mergeCollocations,
+  mergeDerivatives,
+  mergeRelatedWords,
+} from '@/utils/mergeBankLexis';
 
 export const SYNC_FORMAT_VERSION = 3;
 
@@ -24,9 +30,8 @@ export type SyncColo = { p: string; g: string };
  * Short keys keep gzip payload small.
  */
 export interface WordSyncPatch {
-  /** Headword spelling as stored locally */
+  /** Headword spelling as stored locally; merge key is wordToId(w). */
   w: string;
-  id?: string;
   /** mnemonic / 笔记 */
   m?: string;
   syn?: SyncRelated[];
@@ -71,12 +76,42 @@ export function lettersKey(s: string): string {
 
 let bankMapCache: Map<string, VocabBankEntry> | null = null;
 
+function mergeBankEntries(
+  a: VocabBankEntry,
+  b: VocabBankEntry
+): VocabBankEntry {
+  const pickTr =
+    String(a.translation || '').length >= String(b.translation || '').length
+      ? a.translation
+      : b.translation;
+  return {
+    ...a,
+    word: a.word || b.word,
+    translation: pickTr || a.translation || b.translation,
+    synonyms: mergeRelatedWords(a.synonyms, b.synonyms, 12),
+    similars: mergeRelatedWords(a.similars, b.similars, 12),
+    collocations: mergeCollocations(a.collocations, b.collocations, 16),
+    derivatives: mergeDerivatives(a.derivatives, b.derivatives, 12),
+    dictCollocations: mergeCollocations(
+      a.dictCollocations,
+      b.dictCollocations,
+      16
+    ),
+    category:
+      (Array.isArray(a.category) && a.category.length
+        ? a.category
+        : b.category) || a.category,
+  };
+}
+
 export function getBankMap(): Map<string, VocabBankEntry> {
   if (bankMapCache) return bankMapCache;
   const m = new Map<string, VocabBankEntry>();
   for (const e of allVocabBank) {
     const k = lettersKey(e.word);
-    if (k && !m.has(k)) m.set(k, e);
+    if (!k) continue;
+    const prev = m.get(k);
+    m.set(k, prev ? mergeBankEntries(prev, e) : e);
   }
   bankMapCache = m;
   return m;
@@ -132,30 +167,34 @@ function unpackColo(list: SyncColo[] | undefined): Collocation[] {
     .filter((it) => it.phrase);
 }
 
-function relatedEqual(
+function relatedLemmaSetEqual(
   a: RelatedWord[] | undefined,
   b: RelatedWord[] | undefined
 ): boolean {
-  const pa = packRelated(a);
-  const pb = packRelated(b);
-  if (pa.length !== pb.length) return false;
-  return pa.every(
-    (x, i) =>
-      x.w.toLowerCase() === pb[i].w.toLowerCase() && x.g === pb[i].g
-  );
+  const sa = new Set<string>();
+  const sb = new Set<string>();
+  for (const it of a || []) {
+    const k = lettersKey(it.word);
+    if (k) sa.add(k);
+  }
+  for (const it of b || []) {
+    const k = lettersKey(it.word);
+    if (k) sb.add(k);
+  }
+  if (sa.size !== sb.size) return false;
+  for (const k of sa) if (!sb.has(k)) return false;
+  return true;
 }
 
-function coloEqual(
+function coloPhraseSetEqual(
   a: Collocation[] | undefined,
   b: Collocation[] | undefined
 ): boolean {
-  const pa = packColo(a);
-  const pb = packColo(b);
-  if (pa.length !== pb.length) return false;
-  return pa.every(
-    (x, i) =>
-      x.p.toLowerCase() === pb[i].p.toLowerCase() && x.g === pb[i].g
-  );
+  const sa = new Set(packColo(a).map((x) => x.p.toLowerCase()));
+  const sb = new Set(packColo(b).map((x) => x.p.toLowerCase()));
+  if (sa.size !== sb.size) return false;
+  for (const p of sa) if (!sb.has(p)) return false;
+  return true;
 }
 
 function catsEqual(a: string[] | undefined, b: string[] | undefined): boolean {
@@ -202,18 +241,17 @@ export function wordToSyncPatch(
   const isCustom = !entry;
 
   const patch: WordSyncPatch = { w: w.word.trim() };
-  if (w.id) patch.id = w.id;
 
   const mnemonic = String(w.mnemonic || '').trim();
   if (mnemonic) patch.m = mnemonic.slice(0, 500);
 
-  if (!relatedEqual(w.synonyms, entry?.synonyms)) {
+  if (!relatedLemmaSetEqual(w.synonyms, entry?.synonyms)) {
     patch.syn = packRelated(w.synonyms);
   }
-  if (!relatedEqual(w.similars, entry?.similars)) {
+  if (!relatedLemmaSetEqual(w.similars, entry?.similars)) {
     patch.sim = packRelated(w.similars);
   }
-  if (!coloEqual(w.collocations, entry?.collocations)) {
+  if (!coloPhraseSetEqual(w.collocations, entry?.collocations)) {
     patch.col = packColo(w.collocations);
   }
   if (!catsEqual(w.category, bankCats(entry))) {
@@ -231,7 +269,6 @@ export function wordToSyncPatch(
     if (w.totalReviews) patch.tr = w.totalReviews;
     if (w.correctReviews) patch.cr = w.correctReviews;
   }
-  if (w.createdAt) patch.ca = w.createdAt;
 
   const hasOverlay =
     patch.m !== undefined ||
@@ -268,38 +305,6 @@ export function wordToSyncPatch(
   }
 
   return hasOverlay ? patch : null;
-}
-
-/** Extract overlay fields from a legacy full Word (cloud v1/v2). */
-export function legacyWordToPatch(raw: Partial<Word> & { word?: string }): WordSyncPatch | null {
-  if (!raw?.word) return null;
-  const w = makeNewWord({
-    id: raw.id,
-    word: String(raw.word),
-    translation: String(raw.translation || ''),
-    phoneticUs: raw.phoneticUs || '',
-    phoneticUk: raw.phoneticUk || '',
-    phonetic: raw.phonetic || '',
-    partOfSpeech: raw.partOfSpeech || '',
-    category: raw.category,
-    mnemonic: raw.mnemonic || '',
-    synonyms: Array.isArray(raw.synonyms) ? raw.synonyms : [],
-    similars: Array.isArray(raw.similars) ? raw.similars : [],
-    collocations: Array.isArray(raw.collocations) ? raw.collocations : [],
-    examples: [],
-    crossedOut: raw.crossedOut ?? false,
-    starred: raw.starred ?? false,
-    ease: raw.ease ?? 2.5,
-    interval: raw.interval ?? 0,
-    streak: raw.streak ?? 0,
-    nextReview: raw.nextReview ?? Date.now(),
-    totalReviews: raw.totalReviews ?? 0,
-    correctReviews: raw.correctReviews ?? 0,
-    createdAt: raw.createdAt ?? Date.now(),
-  });
-  // Force include lexis from legacy backup (may predate bank merge) as overlay
-  // by comparing to bank — wordToSyncPatch already diffs.
-  return wordToSyncPatch(w);
 }
 
 export function buildSyncPatches(words: Word[]): {
@@ -339,7 +344,6 @@ function applyPatchFields(local: Word, patch: WordSyncPatch): Word {
 
 function customToWord(c: CustomWordSync): Word {
   const base = makeNewWord({
-    id: c.id,
     word: c.w,
     translation: c.trl || '',
     phoneticUs: c.pus || '',
@@ -381,20 +385,21 @@ export function mergeSyncIntoWords(
 
   const applyOne = (patch: WordSyncPatch, createIfMissing: () => Word | null) => {
     let idx = -1;
-    if (patch.id && byId.has(patch.id)) {
-      idx = byId.get(patch.id)!;
+    const canonId = wordToId(patch.w);
+    if (canonId && byId.has(canonId)) {
+      idx = byId.get(canonId)!;
     } else {
       const k = lettersKey(patch.w);
       if (k && byKey.has(k)) idx = byKey.get(k)!;
     }
     if (idx >= 0) {
-      out[idx] = applyPatchFields(out[idx], patch);
+      out[idx] = withCanonicalWordId(applyPatchFields(out[idx], patch));
       patched++;
       return;
     }
     const created = createIfMissing();
     if (!created) return;
-    const next = applyPatchFields(created, patch);
+    const next = withCanonicalWordId(applyPatchFields(created, patch));
     idx = out.length;
     out.push(next);
     if (next.id) byId.set(next.id, idx);
@@ -410,7 +415,6 @@ export function mergeSyncIntoWords(
       const entry = getBankMap().get(lettersKey(p.w));
       if (entry) {
         return makeNewWord({
-          id: p.id,
           word: entry.word || p.w,
           translation: entry.translation || '',
           phoneticUs: entry.phoneticUs || '',
@@ -426,7 +430,6 @@ export function mergeSyncIntoWords(
         });
       }
       return makeNewWord({
-        id: p.id,
         word: p.w,
         translation: '',
         examples: [],

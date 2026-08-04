@@ -366,7 +366,7 @@ function DataSettings() {
     if (!password) return message.error('请先登录');
     setPushing(true);
     try {
-      const payload = await pushToCloud(words, settings, username, password);
+      const { payload, upload } = await pushToCloud(words, settings, username, password);
       const practice = payload.state?.practice as
         | { idx?: number; wordIds?: string[]; mode?: string }
         | null
@@ -385,6 +385,7 @@ function DataSettings() {
         bits.push('无未完成练习');
       }
       if (payload.encrypted) bits.push('配置已加密');
+      if (upload.chunked) bits.push(`分包 ${upload.parts} 段`);
       message.success(bits.join(' · '));
     } catch (e) {
       message.error('推送失败：' + (e instanceof Error ? e.message : '未知错误'));
@@ -568,6 +569,7 @@ function DataSettings() {
               : '尚未同步'}
             <br />
             推送只上传你改过的内容：笔记、近义/形近、固定搭配、分组、星标、划掉与复习进度，以及自建词；词库原文不重复上传。
+            备份过大时会自动分包上传（需云函数支持 uploadId/part/parts，见 scripts/cloudbase-upload-chunks-snippet.js）。
             <br />
             拉取会合并到本地（不覆盖整表）。新设备请先「导入雅思/考研词汇」，再拉取云端进度。
             <br />

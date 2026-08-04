@@ -17,7 +17,7 @@ class IeltsDb extends Dexie {
   constructor() {
     super('ielts-vocab');
     this.version(1).stores({
-      // primary key: id; indexes: userId, word (for lookups)
+      // primary key: canonical lemma id; indexes: userId, word (display spelling)
       words: 'id, userId, word',
     });
   }

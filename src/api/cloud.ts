@@ -1,16 +1,24 @@
 /**
- * Cloud sync v2.12 — POST/GET base64 gzipped JSON via Worker.
+ * Cloud sync v2.12+ — POST/GET base64 gzipped JSON via Worker / 云函数.
  *
- * Push: gzip JSON → base64 → POST /api/upload { data }
+ * Push (single): gzip JSON → base64 → POST /api/upload { data }
+ * Push (chunked): same gzip, split base64 when body > ~900KB (1MB 云函数上限)
+ *   → POST /api/upload { data, uploadId, part, parts }
+ *
  * Pull: GET /api/download → { data: base64 } → ungzip JSON
  *
- * Payload may be compact patches (v3) or legacy full words[].
+ * Server merge snippet: scripts/cloudbase-upload-chunks-snippet.js
  */
 
 import { gzip, ungzip } from 'pako';
 import type { Settings } from '@/types/settings';
 import type { Word } from '@/types/word';
 import type { CustomWordSync, WordSyncPatch } from '@/utils/wordSyncPatch';
+
+/** ~1MB 云函数 body 上限；留 JSON 字段与转义余量 */
+const MAX_SINGLE_UPLOAD_JSON_CHARS = 920_000;
+/** 每段 base64 字符数（分包上传） */
+const UPLOAD_CHUNK_B64_CHARS = 720_000;
 
 export interface SyncPayload {
   /** 3 = compact patches (notes / lexis edits / SRS only) */
@@ -23,6 +31,13 @@ export interface SyncPayload {
   state: Record<string, unknown>;
   meta?: Record<string, unknown>;
   encrypted?: { iv: string; data: string; v?: number } | null;
+}
+
+export interface UploadResult {
+  chunked: boolean;
+  parts: number;
+  /** gzip 后 base64 总长度（调试） */
+  bytesApprox: number;
 }
 
 export class CloudError extends Error {
@@ -65,6 +80,13 @@ function base64ToBytes(b64: string): Uint8Array {
   return bytes;
 }
 
+function newUploadId(): string {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return crypto.randomUUID();
+  }
+  return `up-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 function payloadToJson(payload: SyncPayload): string {
   return JSON.stringify({
     v: payload.v || 3,
@@ -78,29 +100,55 @@ function payloadToJson(payload: SyncPayload): string {
   });
 }
 
-/** 推：gzip → base64 → POST /api/upload */
-export async function uploadAll(
+async function postUploadBody(
   settings: Settings,
   username: string,
-  payload: SyncPayload
+  body: Record<string, unknown>
 ): Promise<void> {
-  if (!settings.workerUrl) throw new CloudError('未设置 Worker URL', 0);
-
-  const gz = gzip(payloadToJson(payload));
-  const b64 = bytesToBase64(gz);
-
   const resp = await fetch(getBase(settings.workerUrl) + '/api/upload', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       ...authHeaders(settings, username),
     },
-    body: JSON.stringify({ data: b64 }),
+    body: JSON.stringify(body),
   });
   const data = await readJsonSafe(resp);
   if (!resp.ok) {
     throw new CloudError(String(data.error || `上传失败: ${resp.status}`), resp.status);
   }
+}
+
+/** 推：gzip → base64 → POST /api/upload（过大则自动分包） */
+export async function uploadAll(
+  settings: Settings,
+  username: string,
+  payload: SyncPayload
+): Promise<UploadResult> {
+  if (!settings.workerUrl) throw new CloudError('未设置 Worker URL', 0);
+
+  const gz = gzip(payloadToJson(payload));
+  const b64 = bytesToBase64(gz);
+
+  const singleBody = JSON.stringify({ data: b64 });
+  if (singleBody.length <= MAX_SINGLE_UPLOAD_JSON_CHARS) {
+    await postUploadBody(settings, username, { data: b64 });
+    return { chunked: false, parts: 1, bytesApprox: b64.length };
+  }
+
+  const uploadId = newUploadId();
+  const parts = Math.ceil(b64.length / UPLOAD_CHUNK_B64_CHARS);
+  for (let part = 0; part < parts; part++) {
+    const start = part * UPLOAD_CHUNK_B64_CHARS;
+    const slice = b64.slice(start, start + UPLOAD_CHUNK_B64_CHARS);
+    await postUploadBody(settings, username, {
+      data: slice,
+      uploadId,
+      part,
+      parts,
+    });
+  }
+  return { chunked: true, parts, bytesApprox: b64.length };
 }
 
 /** 拉：GET /api/download → base64 → ungzip */

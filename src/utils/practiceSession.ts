@@ -9,6 +9,7 @@
 
 import { getLS, setLS, delLS } from '@/utils/date';
 import type { Word, WordExample } from '@/types/word';
+import { resolveSessionWordId } from '@/utils/migrateWordIds';
 
 export type PracticeMode = 'cloze' | 'choice' | 'translate';
 export type StudyScope = 'new' | 'review' | 'mixed' | 'starred';
@@ -339,28 +340,40 @@ export function hydratePracticeSession(
   judgeResult: SavedPracticeSession['judgeResult'];
 } | null {
   const idToWord = new Map(allWords.map((w) => [w.id, w]));
-  const sessionWords = saved.wordIds.map((id) => idToWord.get(id)).filter(Boolean) as Word[];
+  const sessionWords: Word[] = [];
+  const savedIdForWord: string[] = [];
+  for (const savedId of saved.wordIds) {
+    const resolved = resolveSessionWordId(savedId, allWords);
+    if (!resolved) continue;
+    const w = idToWord.get(resolved);
+    if (!w || sessionWords.some((x) => x.id === w.id)) continue;
+    sessionWords.push(w);
+    savedIdForWord.push(savedId);
+  }
   if (!sessionWords.length) return null;
 
   const idSet = new Set(sessionWords.map((w) => w.id));
   let newIdx = 0;
   let found = false;
+  const savedIdx = saved.idx || 0;
   for (let i = 0; i < saved.wordIds.length; i++) {
-    const id = saved.wordIds[i];
-    if (!idSet.has(id)) continue;
-    if (i < (saved.idx || 0)) {
+    const savedId = saved.wordIds[i];
+    const resolved = resolveSessionWordId(savedId, allWords);
+    if (!resolved || !idSet.has(resolved)) continue;
+    if (i < savedIdx) {
       newIdx++;
       continue;
     }
-    newIdx = sessionWords.findIndex((w) => w.id === id);
+    newIdx = sessionWords.findIndex((w) => w.id === resolved);
     found = true;
     break;
   }
   if (!found) newIdx = sessionWords.length;
   if (newIdx < 0 || newIdx >= sessionWords.length) return null;
 
-  const queue = sessionWords.map((w) => {
-    const ex = saved.examples?.[w.id];
+  const queue = sessionWords.map((w, wi) => {
+    const savedId = savedIdForWord[wi] || w.id;
+    const ex = saved.examples?.[w.id] || saved.examples?.[savedId];
     return ex
       ? {
           word: w,
