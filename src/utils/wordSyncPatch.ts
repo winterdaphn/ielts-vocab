@@ -3,6 +3,8 @@
  *
  * Push: diff local words against vocab bank; skip untouched bank copies.
  * Pull: merge patches into existing local rows (never wipe the whole list).
+ *
+ * Local-only fields (never uploaded): synonymDiff (AI 近义辨析缓存).
  */
 
 import type { Word, RelatedWord, Collocation } from '@/types/word';
@@ -13,7 +15,7 @@ import { makeNewWord } from '@/store/useWords';
 export const SYNC_FORMAT_VERSION = 3;
 
 /** Compact related item in sync JSON */
-export type SyncRelated = { w: string; g: string };
+export type SyncRelated = { w: string; g: string; s?: string };
 /** Compact collocation in sync JSON */
 export type SyncColo = { p: string; g: string };
 
@@ -55,6 +57,10 @@ export interface CustomWordSync extends WordSyncPatch {
   pus?: string;
   puk?: string;
   pos?: string;
+  /** derivatives */
+  der?: Array<{ w: string; g: string; pos?: string }>;
+  /** dictCollocations */
+  dcol?: SyncColo[];
 }
 
 export function lettersKey(s: string): string {
@@ -76,21 +82,35 @@ export function getBankMap(): Map<string, VocabBankEntry> {
   return m;
 }
 
+/** True if headword is not in the built-in IELTS/kaoyan bank (hand-added). */
+export function isCustomWord(word: string, bank = getBankMap()): boolean {
+  const k = lettersKey(word);
+  return !!k && !bank.has(k);
+}
+
 function packRelated(list: RelatedWord[] | undefined): SyncRelated[] {
   return (list || [])
     .map((it) => ({
       w: String(it.word || '').trim(),
       g: String(it.gloss || '').trim().slice(0, 40),
+      ...(it.source ? { s: it.source } : {}),
     }))
     .filter((it) => it.w);
 }
 
 function unpackRelated(list: SyncRelated[] | undefined): RelatedWord[] {
+  const allowed = new Set(['youdao', 'ai', 'bank', 'manual', 'both']);
   return (list || [])
-    .map((it) => ({
-      word: String(it.w || '').trim(),
-      gloss: String(it.g || '').trim().slice(0, 40),
-    }))
+    .map((it) => {
+      const source = String(it.s || '');
+      return {
+        word: String(it.w || '').trim(),
+        gloss: String(it.g || '').trim().slice(0, 40),
+        ...(allowed.has(source)
+          ? { source: source as RelatedWord['source'] }
+          : {}),
+      };
+    })
     .filter((it) => it.word);
 }
 
@@ -235,6 +255,15 @@ export function wordToSyncPatch(
       pus: w.phoneticUs || '',
       puk: w.phoneticUk || '',
       pos: w.partOfSpeech || '',
+      der: (w.derivatives || [])
+        .map((d) => ({
+          w: String(d.word || '').trim(),
+          g: String(d.gloss || '').trim().slice(0, 40),
+          ...(d.pos ? { pos: String(d.pos).trim() } : {}),
+        }))
+        .filter((d) => d.w)
+        .slice(0, 12),
+      dcol: packColo(w.dictCollocations).slice(0, 12),
     };
   }
 
@@ -309,18 +338,24 @@ function applyPatchFields(local: Word, patch: WordSyncPatch): Word {
 }
 
 function customToWord(c: CustomWordSync): Word {
-  return applyPatchFields(
-    makeNewWord({
-      id: c.id,
-      word: c.w,
-      translation: c.trl || '',
-      phoneticUs: c.pus || '',
-      phoneticUk: c.puk || '',
-      partOfSpeech: c.pos || '',
-      examples: [],
-    }),
-    c
-  );
+  const base = makeNewWord({
+    id: c.id,
+    word: c.w,
+    translation: c.trl || '',
+    phoneticUs: c.pus || '',
+    phoneticUk: c.puk || '',
+    partOfSpeech: c.pos || '',
+    examples: [],
+    derivatives: (c.der || [])
+      .map((d) => ({
+        word: String(d.w || '').trim(),
+        gloss: String(d.g || '').trim().slice(0, 40),
+        ...(d.pos ? { pos: String(d.pos).trim() } : {}),
+      }))
+      .filter((d) => d.word),
+    dictCollocations: unpackColo(c.dcol),
+  });
+  return applyPatchFields(base, c);
 }
 
 /**

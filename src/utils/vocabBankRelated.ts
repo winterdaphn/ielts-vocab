@@ -203,30 +203,83 @@ export function resolveBankGloss(word: string): { word: string; gloss: string } 
   return { word: entry.word, gloss: shortGloss(entry.translation) };
 }
 
-/** Merge lists; first list wins on duplicates. */
+/** Merge lists; first list wins on duplicates. Preserves source. */
 export function mergeRelatedLists(
   primary: RelatedWord[],
   secondary: RelatedWord[],
   max = 6
 ): RelatedWord[] {
-  const out: RelatedWord[] = [];
-  const seen = new Set<string>();
-  for (const it of [...primary, ...secondary]) {
-    const k = lettersOnly(it.word) || it.word.toLowerCase().trim();
-    if (!k || seen.has(k)) continue;
-    seen.add(k);
-    out.push({
-      word: it.word.trim(),
-      gloss: String(it.gloss || '').trim().slice(0, 40),
-    });
-    if (out.length >= max) break;
+  return mergeSynonymSources([primary, secondary], max);
+}
+
+/**
+ * Merge synonym lists from multiple sources.
+ * Same lemma from youdao + AI → source "both".
+ */
+export function mergeSynonymSources(
+  lists: RelatedWord[][],
+  max = 10
+): RelatedWord[] {
+  const byKey = new Map<string, RelatedWord>();
+  for (const list of lists) {
+    for (const it of list || []) {
+      const k = lettersOnly(it.word) || it.word.toLowerCase().trim();
+      if (!k) continue;
+      const word = String(it.word || '').trim();
+      const gloss = String(it.gloss || '').trim().slice(0, 40);
+      const prev = byKey.get(k);
+      if (!prev) {
+        byKey.set(k, {
+          word,
+          gloss,
+          ...(it.source ? { source: it.source } : {}),
+        });
+        continue;
+      }
+      const source = combineRelatedSource(prev.source, it.source);
+      const nextGloss =
+        gloss.length > String(prev.gloss || '').length ? gloss : prev.gloss;
+      byKey.set(k, {
+        word: prev.word || word,
+        gloss: nextGloss,
+        ...(source ? { source } : {}),
+      });
+    }
   }
-  return out;
+  return [...byKey.values()].slice(0, max);
+}
+
+function combineRelatedSource(
+  a?: RelatedWord['source'],
+  b?: RelatedWord['source']
+): RelatedWord['source'] | undefined {
+  if (!a) return b;
+  if (!b) return a;
+  if (a === b) return a;
+  if (a === 'both' || b === 'both') return 'both';
+  if (
+    (a === 'youdao' && b === 'ai') ||
+    (a === 'ai' && b === 'youdao')
+  ) {
+    return 'both';
+  }
+  return a;
+}
+
+export function tagRelatedSource(
+  list: RelatedWord[] | undefined,
+  source: NonNullable<RelatedWord['source']>
+): RelatedWord[] {
+  return (list || []).map((it) => ({
+    word: String(it.word || '').trim(),
+    gloss: String(it.gloss || '').trim().slice(0, 40),
+    source: it.source || source,
+  }));
 }
 
 /**
  * Related words from the built-in bank.
- * Similars: bank only. Synonyms: bank (AI merge is done by callers).
+ * Similars: bank only. Synonyms: bank (AI/Youdao merge is done by callers).
  */
 export function getRelatedFromBank(
   word: string,
@@ -246,7 +299,10 @@ export function getRelatedFromBank(
     similars = computeSimilars(key);
   }
 
-  return { synonyms, similars };
+  return {
+    synonyms: tagRelatedSource(synonyms, 'bank'),
+    similars,
+  };
 }
 
 /**

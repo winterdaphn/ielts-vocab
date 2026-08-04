@@ -4,9 +4,18 @@
  */
 
 import type { Settings } from '@/types/settings';
-import type { Collocation, RelatedWord, Word } from '@/types/word';
+import type {
+  Collocation,
+  RelatedWord,
+  SynonymDiffItem,
+  SynonymDiffResult,
+  Word,
+} from '@/types/word';
+
+export type { SynonymDiffItem, SynonymDiffResult };
 import { PROVIDERS } from '@/config/providers';
-import { areInflectionVariants, findInflectedFormInSentence } from '@/utils/inflections';
+import { areInflectionVariants, findInflectedFormInSentence, resolveLemma } from '@/utils/inflections';
+import { categoryLabel, normalizeCategories } from '@/config/categories';
 
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
@@ -484,6 +493,113 @@ Output ONLY valid JSON.`;
   }
 }
 
+/**
+ * Lightweight lemma restore only (no gloss / synonyms).
+ * Prefer this before Youdao lookup so inflected forms hit the right headword.
+ */
+export async function resolveLemmaWithAI(
+  word: string,
+  settings: Settings
+): Promise<{ lemma: string; formNote: string }> {
+  const raw = word.trim();
+  const fallback = {
+    lemma: resolveLemma(raw),
+    formNote: '',
+  };
+  if (!raw || !settings.apiKey) return fallback;
+
+  const text = await callLLM(
+    [
+      {
+        role: 'user',
+        content: `Reduce the English word to its dictionary HEADWORD (lemma) for a learner word list.
+Input may be plural, -ing, -ed, 3rd-person -s, comparative, etc.
+
+Examples: ingredients→ingredient, possesses→possess, running→run, studied→study, better→good (only if clearly of good).
+
+Input: "${raw}"
+
+Return JSON ONLY:
+{"lemma":"lowercase headword","formNote":"中文词形如「复数」「现在分词」「过去式」「第三人称单数」；若已是原形则空字符串"}`,
+      },
+    ],
+    settings,
+    { temperature: 0, jsonMode: true, maxTokens: 120 }
+  );
+
+  try {
+    const parsed = parseJsonLoose<{ lemma?: string; formNote?: string }>(text);
+    const lemma = String(parsed.lemma || '')
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z'-]/g, '');
+    if (!lemma) return fallback;
+    return {
+      lemma: resolveLemma(raw, lemma),
+      formNote: String(parsed.formNote || '').trim().slice(0, 20),
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+/**
+ * Pick topic / function tags from our category scheme for a new headword.
+ * Returns normalized ids like "03_教育学习"; only from `allowed`.
+ */
+export async function suggestCategoriesWithAI(
+  word: string,
+  translation: string,
+  settings: Settings,
+  allowed: string[]
+): Promise<string[]> {
+  const head = word.trim();
+  const allow = [...new Set(allowed.map((c) => String(c || '').trim()).filter(Boolean))];
+  if (!head || !settings.apiKey || allow.length === 0) return [];
+
+  const catalog = allow
+    .map((id) => `${id}（${categoryLabel(id)}）`)
+    .join('\n');
+
+  const text = await callLLM(
+    [
+      {
+        role: 'user',
+        content: `你是雅思词汇助教。根据单词与中文释义，从「允许的分组」里打标。
+
+单词: "${head}"
+释义: "${(translation || '').trim().slice(0, 160) || 'N/A'}"
+
+允许的分组（必须原样返回左侧 id，不要改写）:
+${catalog}
+
+规则:
+- 必选 1 个话题桶（id 以数字开头，如 03_教育学习）；拿不准用 11_通用基础
+- 可选 0–2 个功能标签（id 以 F 开头）；不合适就空着
+- 不要发明列表外的分组
+- 自定义分组（非预置）仅当释义明显契合时才选
+
+Return JSON ONLY:
+{"categories":["03_教育学习","F2_描述评价"]}`,
+      },
+    ],
+    settings,
+    { temperature: 0.1, jsonMode: true, maxTokens: 200 }
+  );
+
+  try {
+    const parsed = parseJsonLoose<{ categories?: unknown }>(text);
+    const raw = Array.isArray(parsed.categories) ? parsed.categories : [];
+    const allowSet = new Set(allow);
+    const picked = raw
+      .map((x) => String(x || '').trim())
+      .filter((id) => allowSet.has(id));
+    return normalizeCategories(picked);
+  } catch {
+    return [];
+  }
+}
+
 export async function lookupWordInfo(word: string, settings: Settings): Promise<{
   /** Dictionary headword / lemma (prefer this when saving) */
   lemma?: string;
@@ -561,7 +677,7 @@ If US and UK phonetics are the same, still fill both. Output ONLY valid JSON.`,
       partOfSpeech: parsed.partOfSpeech ? String(parsed.partOfSpeech).trim() : undefined,
       translation: parsed.translation ? String(parsed.translation).trim() : undefined,
       mnemonic: parsed.mnemonic ? String(parsed.mnemonic).trim() : undefined,
-      synonyms: normalizeRelatedList(parsed.synonyms, lemma),
+      synonyms: normalizeRelatedList(parsed.synonyms, lemma, 'ai'),
       similars: normalizeSimilarsList(parsed.similars, lemma),
     };
   } catch {
@@ -569,7 +685,11 @@ If US and UK phonetics are the same, still fill both. Output ONLY valid JSON.`,
   }
 }
 
-function normalizeRelatedList(raw: unknown, selfWord: string): RelatedWord[] {
+function normalizeRelatedList(
+  raw: unknown,
+  selfWord: string,
+  source?: RelatedWord['source']
+): RelatedWord[] {
   if (!Array.isArray(raw)) return [];
   const self = selfWord.toLowerCase().trim();
   const out: RelatedWord[] = [];
@@ -585,8 +705,9 @@ function normalizeRelatedList(raw: unknown, selfWord: string): RelatedWord[] {
     out.push({
       word: w,
       gloss: String(o.gloss || '').trim().slice(0, 40),
+      ...(source ? { source } : {}),
     });
-    if (out.length >= 4) break;
+    if (out.length >= 6) break;
   }
   return out;
 }
@@ -704,7 +825,7 @@ Rules:
   try {
     const parsed = parseJsonLoose<{ synonyms?: unknown; similars?: unknown }>(text);
     return {
-      synonyms: normalizeRelatedList(parsed.synonyms, word),
+      synonyms: normalizeRelatedList(parsed.synonyms, word, 'ai'),
       similars: normalizeSimilarsList(parsed.similars, word),
     };
   } catch {
@@ -799,6 +920,151 @@ Rules:
     };
   } catch {
     return fallback;
+  }
+}
+
+/**
+ * Explain nuance / usage differences among a headword and its near-synonyms.
+ * When `sentence` is given, also judge whether each synonym can replace the
+ * headword in that sentence.
+ */
+export async function explainSynonymDifferences(
+  headword: string,
+  translation: string,
+  synonyms: RelatedWord[],
+  settings: Settings,
+  options?: { sentence?: string }
+): Promise<SynonymDiffResult> {
+  const head = headword.trim();
+  const empty: SynonymDiffResult = { summary: '', items: [], contrasts: [] };
+  if (!head || !settings.apiKey) return empty;
+
+  const peers = synonyms
+    .map((s) => ({
+      word: String(s.word || '')
+        .trim()
+        .toLowerCase(),
+      gloss: String(s.gloss || '').trim().slice(0, 24),
+    }))
+    .filter((s) => s.word && s.word !== head.toLowerCase())
+    .slice(0, 8);
+
+  if (!peers.length) return empty;
+
+  const peerLines = peers
+    .map((p) => `- ${p.word}${p.gloss ? `（${p.gloss}）` : ''}`)
+    .join('\n');
+  const gloss = (translation || '').trim().slice(0, 100);
+  const sentence = String(options?.sentence || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 280);
+  const peerNames = peers.map((p) => p.word).join(', ');
+
+  const sentenceBlock = sentence
+    ? `
+Context sentence (学习者刚做到的句子；中心词「${head}」是该句目标词，可能以变形出现，或在填空题里被挖空):
+"${sentence}"
+
+CRITICAL — sentence substitution:
+For EACH near-synonym (${peerNames}), judge whether it can REPLACE 「${head}」 in THIS sentence:
+- same slot / inflection as needed, grammar OK, natural IELTS English, meaning still fits
+- replaceOk=true only if a native-like rewrite would still work in this exact context
+- replaceOk=false if wrong collocation, wrong register, wrong nuance, or grammar break
+- replaceNote: ≤28字中文，点明「为何可/不可」；可写建议变形如 replaced→replacing
+- Headword item ("${head}"): do NOT set replaceOk / replaceNote
+`
+    : '';
+
+  const itemPeerExample = sentence
+    ? `{"word":"peer","focus":"…","usage":"…","replaceOk":true,"replaceNote":"本句可替换：…"}`
+    : `{"word":"peer","focus":"…","usage":"…"}`;
+
+  const prompt = `你是雅思词汇教练。请帮助学习者区分中心词与下列近义词的用法差异（用中文讲解，可夹短英文例句词/搭配）。
+
+中心词: "${head}"
+中心词中文释义提示: "${gloss || 'N/A'}"
+近义词列表:
+${peerLines}
+${sentenceBlock}
+Return JSON ONLY:
+{
+  "summary": "一句话概括这组词的共同点与总体差异方向${sentence ? '；可顺带说本句里谁更合适' : ''}",
+  "items": [
+    {"word":"${head}","focus":"该词语义侧重","usage":"语域/搭配/场景，≤30字"},
+    ${itemPeerExample}
+  ],
+  "contrasts": [
+    "A vs B：关键差异（何时用哪个）"
+  ]
+}
+
+Rules:
+- items 必须包含中心词 + 列表中每个近义词（按给定拼写，勿改成别的词）
+- focus / usage / contrasts / summary 均为中文；usage 可含短英文搭配
+- contrasts 2–4 条，挑最容易混的对比；勿空话
+- 面向雅思/学术英语，点明语域（正式/口语）、情感色彩、搭配限制
+- 不要编造离谱词源；不确定就写「语感上更…」
+- 每条 focus≤20字，usage≤36字，contrast≤48字，summary≤70字
+${sentence ? '- 每个近义词 item 必须有 replaceOk (boolean) 与 replaceNote；中心词不要带这两项' : ''}`;
+
+  const text = await callLLM([{ role: 'user', content: prompt }], settings, {
+    temperature: 0.35,
+    jsonMode: true,
+    maxTokens: sentence ? 1600 : 1200,
+  });
+
+  try {
+    const parsed = parseJsonLoose<{
+      summary?: string;
+      items?: unknown;
+      contrasts?: unknown;
+    }>(text);
+    const allowed = new Set([head.toLowerCase(), ...peers.map((p) => p.word)]);
+    const peerSet = new Set(peers.map((p) => p.word));
+    const itemsRaw = Array.isArray(parsed.items) ? parsed.items : [];
+    const items: SynonymDiffItem[] = [];
+    for (const raw of itemsRaw) {
+      if (!raw || typeof raw !== 'object') continue;
+      const o = raw as Record<string, unknown>;
+      const w = String(o.word || '')
+        .trim()
+        .toLowerCase();
+      if (!w || !allowed.has(w)) continue;
+      if (items.some((it) => it.word === w)) continue;
+      const item: SynonymDiffItem = {
+        word: w,
+        focus: String(o.focus || '')
+          .trim()
+          .slice(0, 40),
+        usage: String(o.usage || '')
+          .trim()
+          .slice(0, 60),
+      };
+      if (sentence && peerSet.has(w) && typeof o.replaceOk === 'boolean') {
+        item.replaceOk = o.replaceOk;
+        item.replaceNote = String(o.replaceNote || '')
+          .trim()
+          .slice(0, 48);
+      }
+      items.push(item);
+    }
+    const contrasts = Array.isArray(parsed.contrasts)
+      ? parsed.contrasts
+          .map((c) => String(c || '').trim().slice(0, 80))
+          .filter(Boolean)
+          .slice(0, 6)
+      : [];
+    return {
+      summary: String(parsed.summary || '')
+        .trim()
+        .slice(0, 140),
+      items,
+      contrasts,
+      ...(sentence ? { sentence } : {}),
+    };
+  } catch {
+    return empty;
   }
 }
 

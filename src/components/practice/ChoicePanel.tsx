@@ -3,6 +3,7 @@ import type { CSSProperties } from 'react';
 import MarkableSentence from '@/components/MarkableSentence';
 import SentenceStructureTip from '@/components/practice/SentenceStructureTip';
 import CollapsibleTip from '@/components/practice/CollapsibleTip';
+import SynonymTipBlock from '@/components/practice/SynonymTipBlock';
 import RelatedWordsList from '@/components/RelatedWordsList';
 import DerivativesList from '@/components/DerivativesList';
 import { resolveClozeChinese, type SentenceStructureAnalysis } from '@/api/llm';
@@ -116,19 +117,15 @@ export default function ChoicePanel({
             </CollapsibleTip>
           )}
           {(relatedLoading || synonymsTip.length > 0) && (
-            <CollapsibleTip
-              title="近义词"
+            <SynonymTipBlock
+              wordId={current.word.id}
+              headword={current.word.word}
+              translation={current.word.translation}
+              synonyms={synonymsTip}
+              sentence={current.example.en}
               sectionKey={`synonyms:${current.word.id}`}
-              defaultOpen={false}
-            >
-              {relatedLoading && !synonymsTip.length ? (
-                <span className="text-light" style={{ fontSize: 12 }}>
-                  加载中…
-                </span>
-              ) : (
-                <RelatedWordsList items={synonymsTip} emptyText="暂无近义词" />
-              )}
-            </CollapsibleTip>
+              loading={relatedLoading}
+            />
           )}
           {(relatedLoading || similarsTip.length > 0) && (
             <CollapsibleTip

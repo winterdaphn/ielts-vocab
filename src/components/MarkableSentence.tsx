@@ -4,8 +4,11 @@ import { useUserWords, useWordsStore, makeNewWord } from '@/store/useWords';
 import { useSettings } from '@/store/useSettings';
 import { areInflectionVariants, resolveLemma } from '@/utils/inflections';
 import { isMarkableToken, normalizeMarkWord } from '@/utils/markWords';
-import { lookupWordInfo } from '@/api/llm';
-import type { RelatedWord } from '@/types/word';
+import { resolveLemmaWithAI, suggestCategoriesWithAI, generateRelatedWords } from '@/api/llm';
+import { lookupYoudaoWord, canUseYoudao } from '@/api/youdao';
+import type { Collocation, Derivative, RelatedWord } from '@/types/word';
+import { useCategories } from '@/store/useCategories';
+import { mergeSynonymSources } from '@/utils/vocabBankRelated';
 
 interface Props {
   text: string;
@@ -39,6 +42,7 @@ export default function MarkableSentence({
   const addWord = useWordsStore((s) => s.addWord);
   const updateWord = useWordsStore((s) => s.updateWord);
   const settings = useSettings();
+  const allCategories = useCategories((s) => s.all);
   const [justMarked, setJustMarked] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -64,7 +68,6 @@ export default function MarkableSentence({
       return;
     }
 
-    // Pre-check against clicked form OR local lemma guess
     const localLemma = resolveLemma(clicked);
     const relatedEarly =
       findRelated(clicked) ||
@@ -91,24 +94,36 @@ export default function MarkableSentence({
       let partOfSpeech = '';
       let synonyms: RelatedWord[] = [];
       let similars: RelatedWord[] = [];
+      let derivatives: Derivative[] = [];
+      let dictCollocations: Collocation[] = [];
 
+      const canYoudao = canUseYoudao(settings);
       if (settings.apiKey) {
         try {
-          const info = await lookupWordInfo(clicked, settings);
-          lemma = resolveLemma(clicked, info.lemma);
-          formNote = info.formNote || '';
+          const ai = await resolveLemmaWithAI(clicked, settings);
+          lemma = ai.lemma || lemma;
+          formNote = ai.formNote || '';
+        } catch {
+          /* keep local lemma */
+        }
+      }
+      if (canYoudao) {
+        try {
+          const info = await lookupYoudaoWord(lemma, settings);
+          lemma = resolveLemma(lemma, info.lemma);
+          if (!formNote && info.formNote) formNote = info.formNote;
           if (info.translation) translation = info.translation;
           if (info.phoneticUs) phoneticUs = info.phoneticUs;
           if (info.phoneticUk) phoneticUk = info.phoneticUk;
           if (info.partOfSpeech) partOfSpeech = info.partOfSpeech;
           synonyms = info.synonyms || [];
-          similars = info.similars || [];
+          derivatives = info.derivatives || [];
+          dictCollocations = info.dictCollocations || [];
         } catch {
           /* fall through to free dict */
         }
       }
 
-      // Free dictionary on lemma (better than inflected form)
       if (!translation || !phoneticUs || !phoneticUk) {
         try {
           const resp = await fetch(
@@ -141,6 +156,29 @@ export default function MarkableSentence({
 
       if (!translation) translation = '（待补充释义）';
 
+      if (settings.apiKey) {
+        try {
+          const fromAi = await generateRelatedWords(lemma, translation, settings);
+          synonyms = mergeSynonymSources([synonyms, fromAi.synonyms || []], 10);
+        } catch {
+          /* keep youdao syn */
+        }
+      }
+
+      let category: string[] = [];
+      if (settings.apiKey) {
+        try {
+          category = await suggestCategoriesWithAI(
+            lemma,
+            translation,
+            settings,
+            allCategories()
+          );
+        } catch {
+          category = [];
+        }
+      }
+
       const related =
         findRelated(lemma) ||
         (lemma !== clicked ? findRelated(clicked) : null) ||
@@ -162,8 +200,15 @@ export default function MarkableSentence({
           phoneticUs: phoneticUs || related.entry.phoneticUs,
           phoneticUk: phoneticUk || related.entry.phoneticUk,
           partOfSpeech: partOfSpeech || related.entry.partOfSpeech,
+          category: category.length ? category : related.entry.category,
           synonyms: synonyms.length ? synonyms : related.entry.synonyms,
           similars: similars.length ? similars : related.entry.similars,
+          derivatives: derivatives.length
+            ? derivatives
+            : related.entry.derivatives,
+          dictCollocations: dictCollocations.length
+            ? dictCollocations
+            : related.entry.dictCollocations,
           nextReview: Date.now(),
         });
       } else {
@@ -174,8 +219,11 @@ export default function MarkableSentence({
             phoneticUs,
             phoneticUk,
             partOfSpeech,
+            category,
             synonyms,
             similars,
+            derivatives,
+            dictCollocations,
           })
         );
       }

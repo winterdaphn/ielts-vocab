@@ -9,6 +9,8 @@ interface Props {
   /** Show remove control (e.g. for editable 形近词) */
   onRemove?: (word: string) => void;
   removeTitle?: string;
+  /** Show 有道 / AI source chips (default: when any item has source) */
+  showSource?: boolean;
 }
 
 function lettersKey(s: string): string {
@@ -17,12 +19,24 @@ function lettersKey(s: string): string {
     .replace(/[^a-z]/g, '');
 }
 
+export function relatedSourceLabel(
+  source?: RelatedWord['source']
+): string | null {
+  if (source === 'youdao') return '有道';
+  if (source === 'ai') return 'AI';
+  if (source === 'both') return '有道·AI';
+  if (source === 'bank') return '词库';
+  if (source === 'manual') return '手加';
+  return null;
+}
+
 /** Compact list for synonyms / similars in practice & detail */
 export default function RelatedWordsList({
   items,
   emptyText = '暂无',
   onRemove,
   removeTitle = '移除',
+  showSource,
 }: Props) {
   const navigate = useNavigate();
   const words = useUserWords();
@@ -35,16 +49,31 @@ export default function RelatedWordsList({
     return m;
   }, [words]);
 
+  const showBadge =
+    showSource ?? items.some((it) => !!relatedSourceLabel(it.source));
+
   if (!items.length) {
-    return <span className="text-light" style={{ fontSize: 12 }}>{emptyText}</span>;
+    return (
+      <span className="text-light" style={{ fontSize: 12 }}>
+        {emptyText}
+      </span>
+    );
   }
   return (
     <ul className="related-words-list">
       {items.map((it) => {
         const targetId = idByKey.get(lettersKey(it.word));
+        const src = showBadge ? relatedSourceLabel(it.source) : null;
         return (
           <li key={it.word} className={onRemove ? 'related-word-row' : undefined}>
             <span className="related-word-main">
+              {src ? (
+                <span
+                  className={`related-source-tag source-${it.source || 'unknown'}`}
+                >
+                  {src}
+                </span>
+              ) : null}
               {targetId ? (
                 <button
                   type="button"
@@ -57,7 +86,9 @@ export default function RelatedWordsList({
               ) : (
                 <b className="related-word-en">{it.word}</b>
               )}
-              {it.gloss ? <span className="related-word-gloss"> — {it.gloss}</span> : null}
+              {it.gloss ? (
+                <span className="related-word-gloss"> — {it.gloss}</span>
+              ) : null}
             </span>
             {onRemove ? (
               <button

@@ -1179,6 +1179,8 @@ input, textarea, select {
   display: flex;
   gap: 2px;
   flex-shrink: 0;
+  margin-left: auto;
+  align-self: center;
 }
 
 .word-list-item .actions button {
@@ -1218,6 +1220,31 @@ input, textarea, select {
 .word-list-item .actions button.danger:hover {
   background: var(--error-light);
   color: var(--error);
+}
+
+@media (max-width: 480px) {
+  .word-list-item {
+    align-items: flex-start;
+  }
+
+  .word-list-item .word-main {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .word-list-item .actions {
+    width: 100%;
+    justify-content: flex-end;
+    gap: 4px;
+    margin-top: 2px;
+    padding-top: 6px;
+    border-top: 1px solid var(--border);
+  }
+
+  .word-list-item .actions button {
+    padding: 8px 12px;
+    font-size: 16px;
+  }
 }
 
 .word-list-item.crossed {
@@ -1301,6 +1328,13 @@ input, textarea, select {
   line-height: 1.4;
 }
 
+.tip-section-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
 .tip-section-toggle.ant-btn {
   flex-shrink: 0;
   padding: 0 4px !important;
@@ -1308,6 +1342,98 @@ input, textarea, select {
   font-size: 12px;
   color: inherit !important;
   opacity: 0.85;
+}
+
+.synonym-diff-assist {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
+}
+
+.synonym-diff-panel {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent, #3b6b5a) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent, #3b6b5a) 18%, transparent);
+  font-size: 13px;
+  line-height: 1.55;
+  word-break: break-word;
+}
+
+.synonym-diff-sentence {
+  margin: 0 0 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-light);
+}
+
+.synonym-diff-sentence-label {
+  display: inline-block;
+  margin-right: 6px;
+  font-size: 11px;
+  color: var(--text);
+  opacity: 0.75;
+}
+
+.synonym-diff-summary {
+  margin: 0 0 8px;
+  color: var(--text);
+}
+
+.synonym-diff-replace {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.synonym-diff-replace.is-ok {
+  color: color-mix(in srgb, #2f7d4a 85%, var(--text));
+}
+
+.synonym-diff-replace.is-no {
+  color: color-mix(in srgb, #a85a3a 85%, var(--text));
+}
+
+.synonym-diff-replace-hint {
+  margin: 8px 0 0;
+  font-size: 11px;
+  color: var(--text-light);
+}
+
+.synonym-diff-items {
+  margin: 0;
+  padding-left: 1.1em;
+}
+
+.synonym-diff-items li + li {
+  margin-top: 6px;
+}
+
+.synonym-diff-word {
+  font-weight: 600;
+}
+
+.synonym-diff-focus {
+  color: var(--text);
+}
+
+.synonym-diff-usage {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-light);
+}
+
+.synonym-diff-contrasts {
+  margin: 10px 0 0;
+  padding-left: 1.1em;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.synonym-diff-contrasts li + li {
+  margin-top: 4px;
 }
 
 .tip-section-toggle.ant-btn:hover {
@@ -1394,6 +1520,43 @@ button.related-word-en.is-link:hover {
 
 .related-word-gloss {
   color: var(--text);
+}
+
+.related-source-tag {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 0 5px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.6;
+  vertical-align: 1px;
+  letter-spacing: 0.02em;
+}
+
+.related-source-tag.source-youdao {
+  color: #0b6e4f;
+  background: rgba(11, 110, 79, 0.1);
+}
+
+.related-source-tag.source-ai {
+  color: #2f5aa8;
+  background: rgba(47, 90, 168, 0.1);
+}
+
+.related-source-tag.source-both {
+  color: #6b4f1d;
+  background: rgba(212, 160, 23, 0.16);
+}
+
+.related-source-tag.source-bank {
+  color: var(--text-light);
+  background: var(--border-light, rgba(0, 0, 0, 0.05));
+}
+
+.related-source-tag.source-manual {
+  color: var(--text);
+  background: var(--accent-light, rgba(0, 0, 0, 0.06));
 }
 
 .derivative-pos {
@@ -1773,22 +1936,20 @@ button.related-word-en.is-link:hover {
 .wd-bar-btn {
   flex: 1;
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 2px;
   border: none;
   background: transparent;
   color: var(--text);
-  font-size: 11px;
-  padding: 6px 2px;
+  padding: 12px 2px;
   cursor: pointer;
   min-width: 0;
-  line-height: 1.2;
+  line-height: 1;
+  border-radius: 8px;
 }
 
 .wd-bar-btn .anticon {
-  font-size: 18px;
+  font-size: 20px;
 }
 
 .wd-bar-btn:disabled {
@@ -1810,20 +1971,21 @@ button.related-word-en.is-link:hover {
 }
 
 .wd-bar-primary {
-  flex: 1.35;
+  flex: 1.15;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
   border: none;
   border-radius: 22px;
   background: var(--accent);
   color: #fff;
-  font-size: 14px;
-  font-weight: 600;
   padding: 12px 14px;
   cursor: pointer;
-  white-space: nowrap;
+  min-width: 0;
+}
+
+.wd-bar-primary .anticon {
+  font-size: 18px;
 }
 
 .wd-bar-primary:active {

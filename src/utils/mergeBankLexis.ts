@@ -39,6 +39,7 @@ export function mergeRelatedWords(
     out.push({
       word: String(it.word || '').trim(),
       gloss,
+      ...(it.source ? { source: it.source } : {}),
     });
     if (out.length >= max) return out;
   }
@@ -49,6 +50,7 @@ export function mergeRelatedWords(
     out.push({
       word: String(it.word || '').trim(),
       gloss: String(it.gloss || '').trim().slice(0, 40),
+      source: it.source || 'bank',
     });
     if (out.length >= max) break;
   }

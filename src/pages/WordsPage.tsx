@@ -9,17 +9,23 @@ import {
   isDue,
   isNew,
   isMastered,
-  getWordStage,
-  wordStageLabel,
-  wordStageClass,
 } from '@/utils/scheduler';
 import type { Word } from '@/types/word';
 import PhoneticDisplay from '@/components/PhoneticDisplay';
 import LetterIndexBar from '@/components/LetterIndexBar';
 import { categoryLabel, normalizeCategories, TOPIC_CATEGORIES, FUNCTION_CATEGORIES } from '@/config/categories';
 import { readWordsListUi, writeWordsListUi } from '@/utils/wordsListUi';
+import { isCustomWord } from '@/utils/wordSyncPatch';
 
-type Filter = 'all' | 'due' | 'new' | 'learning' | 'mastered' | 'starred' | 'crossed';
+type Filter =
+  | 'all'
+  | 'due'
+  | 'new'
+  | 'learning'
+  | 'mastered'
+  | 'starred'
+  | 'custom'
+  | 'crossed';
 
 const FILTER_KEYS: Filter[] = [
   'all',
@@ -28,6 +34,7 @@ const FILTER_KEYS: Filter[] = [
   'learning',
   'mastered',
   'starred',
+  'custom',
   'crossed',
 ];
 
@@ -43,6 +50,7 @@ function matchesFilter(w: Word, filter: Filter): boolean {
   if (filter === 'all') return true;
   if (filter === 'crossed') return !!w.crossedOut;
   if (filter === 'starred') return !!w.starred;
+  if (filter === 'custom') return isCustomWord(w.word);
   if (w.crossedOut) return false;
   if (filter === 'new') return isNew(w);
   if (filter === 'due') return !isNew(w) && isDue(w);
@@ -77,8 +85,6 @@ const WordListRow = memo(function WordListRow({
   onToggleCrossed: (w: Word, e: React.MouseEvent) => void;
   onDelete: (id: string) => void;
 }) {
-  const stage = getWordStage(w);
-
   return (
     <div
       className={`word-list-item ${w.crossedOut ? 'crossed' : ''}${w.starred ? ' is-starred' : ''}`}
@@ -106,37 +112,32 @@ const WordListRow = memo(function WordListRow({
           {w.translation || '暂无翻译'}
         </div>
       </div>
-      <div className="meta">
-        <div className="tags">
-          <span className={wordStageClass(stage)}>{wordStageLabel(stage)}</span>
-        </div>
-        <div className="actions" onClick={(e) => e.stopPropagation()}>
-          <button
-            type="button"
-            className={w.starred ? 'star active' : 'star'}
-            title={w.starred ? '取消星标' : '加星标'}
-            onClick={(e) => onToggleStarred(w, e)}
-          >
-            {w.starred ? '★' : '☆'}
+      <div className="actions" onClick={(e) => e.stopPropagation()}>
+        <button
+          type="button"
+          className={w.starred ? 'star active' : 'star'}
+          title={w.starred ? '取消星标' : '加星标'}
+          onClick={(e) => onToggleStarred(w, e)}
+        >
+          {w.starred ? '★' : '☆'}
+        </button>
+        <button
+          type="button"
+          title={w.crossedOut ? '恢复' : '划掉'}
+          onClick={(e) => onToggleCrossed(w, e)}
+        >
+          {w.crossedOut ? '↩' : '−'}
+        </button>
+        <Popconfirm
+          title="确定删除？"
+          onConfirm={() => onDelete(w.id)}
+          okText="确定"
+          cancelText="取消"
+        >
+          <button type="button" className="delete" title="删除">
+            ✕
           </button>
-          <button
-            type="button"
-            title={w.crossedOut ? '恢复' : '划掉'}
-            onClick={(e) => onToggleCrossed(w, e)}
-          >
-            {w.crossedOut ? '↩' : '−'}
-          </button>
-          <Popconfirm
-            title="确定删除？"
-            onConfirm={() => onDelete(w.id)}
-            okText="确定"
-            cancelText="取消"
-          >
-            <button type="button" className="delete" title="删除">
-              ✕
-            </button>
-          </Popconfirm>
-        </div>
+        </Popconfirm>
       </div>
     </div>
   );
@@ -169,7 +170,9 @@ export default function WordsPage() {
     let mastered = 0;
     let crossed = 0;
     let starred = 0;
+    let custom = 0;
     for (const w of words) {
+      if (isCustomWord(w.word)) custom++;
       if (w.starred) starred++;
       if (w.crossedOut) {
         crossed++;
@@ -187,6 +190,7 @@ export default function WordsPage() {
       learning,
       mastered,
       starred,
+      custom,
       crossed,
     };
   }, [words]);
@@ -198,6 +202,7 @@ export default function WordsPage() {
     { key: 'learning', label: `学习中 (${counts.learning})` },
     { key: 'mastered', label: `已掌握 (${counts.mastered})` },
     { key: 'starred', label: `星标 (${counts.starred})` },
+    { key: 'custom', label: `自建词 (${counts.custom})` },
     { key: 'crossed', label: `已划掉 (${counts.crossed})` },
   ];
 

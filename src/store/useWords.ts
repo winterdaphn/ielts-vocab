@@ -97,6 +97,7 @@ export function makeNewWord(input: Partial<Word> & { word: string; translation?:
     mnemonic: input.mnemonic || '',
     category: normalizeCategories(input.category),
     synonyms: Array.isArray(input.synonyms) ? input.synonyms : [],
+    ...(input.synonymDiff ? { synonymDiff: input.synonymDiff } : {}),
     similars: Array.isArray(input.similars) ? input.similars : [],
     derivatives: Array.isArray(input.derivatives) ? input.derivatives : [],
     collocations: Array.isArray(input.collocations) ? input.collocations : [],

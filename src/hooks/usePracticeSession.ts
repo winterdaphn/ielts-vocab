@@ -17,7 +17,7 @@ import {
   type TranslateHints,
 } from '@/api/llm';
 import { applyReview, isNew, formatNextReview } from '@/utils/scheduler';
-import { getRelatedFromBank, mergeRelatedLists, getBankLexisExtras } from '@/utils/vocabBankRelated';
+import { getRelatedFromBank, mergeSynonymSources, getBankLexisExtras } from '@/utils/vocabBankRelated';
 import { setLS, getLS, todayKey } from '@/utils/date';
 import type { RelatedWord, Word, Derivative } from '@/types/word';
 import {
@@ -44,6 +44,7 @@ import {
   type Question,
 } from '@/utils/practiceSelect';
 import { recordLearningEvent } from '@/utils/learningLog';
+import { lookupYoudaoWord, canUseYoudao } from '@/api/youdao';
 
 export type Phase = 'selecting' | 'loading' | 'asking' | 'judging' | 'waiting' | 'done';
 
@@ -320,8 +321,17 @@ export function usePracticeSession() {
     (async () => {
       try {
         const fromBank = getRelatedFromBank(word.word, word.translation || '');
-        let synonyms = fromBank.synonyms;
+        let youdaoSyn = fromBank.synonyms;
         const similars = fromBank.similars;
+        if (canUseYoudao(settings)) {
+          try {
+            const yd = await lookupYoudaoWord(word.word, settings);
+            if (yd.synonyms?.length) youdaoSyn = yd.synonyms;
+          } catch {
+            /* keep bank */
+          }
+        }
+        let aiSyn: RelatedWord[] = [];
         if (settings.apiKey) {
           try {
             const fromAi = await generateRelatedWords(
@@ -329,11 +339,12 @@ export function usePracticeSession() {
               word.translation || '',
               settings
             );
-            synonyms = mergeRelatedLists(fromBank.synonyms, fromAi.synonyms, 6);
+            aiSyn = fromAi.synonyms || [];
           } catch {
-            /* keep bank */
+            /* keep youdao/bank */
           }
         }
+        const synonyms = mergeSynonymSources([youdaoSyn, aiSyn], 10);
         if (cancelled) return;
         setSynonymsTip(synonyms);
         setSimilarsTip(similars);

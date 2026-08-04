@@ -4,8 +4,9 @@ import { Button, App, Popconfirm, Input, Space } from 'antd';
 import {
   LeftOutlined,
   RightOutlined,
-  StopOutlined,
-  DeleteOutlined,
+  MinusOutlined,
+  UndoOutlined,
+  CloseOutlined,
   ReadOutlined,
   PlusOutlined,
   EditOutlined,
@@ -30,13 +31,20 @@ import {
   lookupWordInfo,
   judgeSynonymCandidate,
 } from '@/api/llm';
-import { getRelatedFromBank, mergeRelatedLists, resolveBankGloss, getBankLexisExtras } from '@/utils/vocabBankRelated';
+import { lookupYoudaoWord, canUseYoudao } from '@/api/youdao';
+import {
+  getRelatedFromBank,
+  mergeSynonymSources,
+  resolveBankGloss,
+  getBankLexisExtras,
+} from '@/utils/vocabBankRelated';
 import RelatedWordsList from '@/components/RelatedWordsList';
 import CollocationsList from '@/components/CollocationsList';
 import DerivativesList from '@/components/DerivativesList';
 import MarkableSentence from '@/components/MarkableSentence';
 import PhoneticDisplay from '@/components/PhoneticDisplay';
 import CollapsibleTip from '@/components/practice/CollapsibleTip';
+import { useSynonymDiffAssist } from '@/components/SynonymDiffAssist';
 import type { Collocation, RelatedWord } from '@/types/word';
 import WordCategoryEditor from '@/components/WordCategoryEditor';
 import { normalizeCategories } from '@/config/categories';
@@ -76,6 +84,19 @@ export default function WordDetailPage() {
   const [editingMnemonic, setEditingMnemonic] = useState(false);
   const [mnemonicDraft, setMnemonicDraft] = useState('');
   const [busySaveMnemonic, setBusySaveMnemonic] = useState(false);
+
+  const synonymDiff = useSynonymDiffAssist({
+    headword: word?.word || '',
+    translation: word?.translation || '',
+    synonyms: word?.synonyms || [],
+    sentence: (word?.examples || []).find((ex) => ex?.en)?.en || '',
+    stored: word?.synonymDiff,
+    onSave: async (diff) => {
+      const latest = words.find((w) => w.id === id);
+      if (!latest) return;
+      await updateWord({ ...latest, synonymDiff: diff });
+    },
+  });
 
   // 切换词条时退出编辑态
   useEffect(() => {
@@ -141,11 +162,21 @@ export default function WordDetailPage() {
     setBusyRelated(true);
     try {
       const fromBank = getRelatedFromBank(word!.word, word!.translation || '');
-      let synonyms = fromBank.synonyms;
       // 形近：仅词库；若用户已改过（有列表），补全时不覆盖，避免删掉的又回来
       const existingSim = word!.similars || [];
       const similars = existingSim.length ? existingSim : fromBank.similars;
 
+      let youdaoSyn = fromBank.synonyms;
+      if (canUseYoudao(settings)) {
+        try {
+          const yd = await lookupYoudaoWord(word!.word, settings);
+          if (yd.synonyms?.length) youdaoSyn = yd.synonyms;
+        } catch {
+          /* keep bank */
+        }
+      }
+
+      let aiSyn: RelatedWord[] = [];
       if (settings.apiKey) {
         try {
           const fromAi = await generateRelatedWords(
@@ -153,11 +184,13 @@ export default function WordDetailPage() {
             word!.translation || '',
             settings
           );
-          synonyms = mergeRelatedLists(fromBank.synonyms, fromAi.synonyms, 6);
+          aiSyn = fromAi.synonyms || [];
         } catch {
-          /* keep bank synonyms */
+          /* keep youdao/bank */
         }
       }
+
+      const synonyms = mergeSynonymSources([youdaoSyn, aiSyn], 10);
 
       await updateWord({
         ...word!,
@@ -167,14 +200,13 @@ export default function WordDetailPage() {
 
       if (!synonyms.length && !similars.length) {
         message.warning(
-          settings.apiKey
+          settings.apiKey || canUseYoudao(settings)
             ? '暂未补全到近义 / 形近'
-            : '词库暂无；配置 API Key 后可再抓近义词'
+            : '词库暂无；配置 API Key / Worker 后可再抓近义词'
         );
       } else {
-        const aiNote = settings.apiKey ? '（近义含 AI）' : '（仅词库；配 Key 可加强近义）';
         message.success(
-          `已补全 · 近义 ${synonyms.length} · 形近 ${similars.length} ${aiNote}`
+          `已补全 · 近义 ${synonyms.length}（有道+AI）· 形近 ${similars.length}`
         );
       }
     } catch (e) {
@@ -298,7 +330,7 @@ export default function WordDetailPage() {
 
       await updateWord({
         ...word!,
-        synonyms: [...existing, { word: lemma, gloss }],
+        synonyms: [...existing, { word: lemma, gloss, source: 'manual' }],
       });
       setSynonymInput('');
       setShowSynonymAdd(false);
@@ -650,9 +682,10 @@ export default function WordDetailPage() {
             <>
               <div className="tip-section-head" style={{ marginBottom: 8 }}>
                 <span className="text-light" style={{ fontSize: 12 }}>
-                  近义词（可增删 · 添加时 AI 把关）
+                  近义词（有道+AI · 可增删）
                 </span>
                 <Space size={8}>
+                  {synonymDiff.trigger}
                   <Button
                     size="small"
                     icon={<PlusOutlined />}
@@ -673,6 +706,7 @@ export default function WordDetailPage() {
                 onRemove={removeSynonym}
                 removeTitle="移除这个近义词"
               />
+              {synonymDiff.panel}
               {showSynonymAdd && (
                 <Space.Compact style={{ width: '100%', marginTop: 10 }}>
                   <Input
@@ -944,30 +978,38 @@ export default function WordDetailPage() {
           className="wd-bar-btn"
           disabled={!prevWord}
           onClick={goPrev}
+          title="上一个"
+          aria-label="上一个"
         >
           <LeftOutlined />
-          <span>上一个</span>
         </button>
         <button
           type="button"
           className="wd-bar-btn"
           disabled={!nextWord}
           onClick={goNext}
+          title="下一个"
+          aria-label="下一个"
         >
           <RightOutlined />
-          <span>下一个</span>
         </button>
         <button
           type="button"
           className={`wd-bar-btn${word.starred ? ' is-starred' : ''}`}
           onClick={toggleStarred}
+          title={word.starred ? '取消星标' : '加星标'}
+          aria-label={word.starred ? '取消星标' : '加星标'}
         >
           {word.starred ? <StarFilled /> : <StarOutlined />}
-          <span>{word.starred ? '已星标' : '星标'}</span>
         </button>
-        <button type="button" className="wd-bar-btn" onClick={toggleCrossed}>
-          <StopOutlined />
-          <span>{word.crossedOut ? '恢复' : '划掉'}</span>
+        <button
+          type="button"
+          className="wd-bar-btn"
+          onClick={toggleCrossed}
+          title={word.crossedOut ? '恢复' : '划掉'}
+          aria-label={word.crossedOut ? '恢复' : '划掉'}
+        >
+          {word.crossedOut ? <UndoOutlined /> : <MinusOutlined />}
         </button>
         <Popconfirm
           title="确定删除这个词？"
@@ -976,18 +1018,23 @@ export default function WordDetailPage() {
           okButtonProps={{ danger: true }}
           cancelText="取消"
         >
-          <button type="button" className="wd-bar-btn danger">
-            <DeleteOutlined />
-            <span>删除</span>
+          <button
+            type="button"
+            className="wd-bar-btn danger"
+            title="删除"
+            aria-label="删除"
+          >
+            <CloseOutlined />
           </button>
         </Popconfirm>
         <button
           type="button"
           className="wd-bar-primary"
           onClick={() => navigate('/today')}
+          title="去学习"
+          aria-label="去学习"
         >
           <ReadOutlined />
-          <span>去学习</span>
         </button>
       </nav>
     </div>

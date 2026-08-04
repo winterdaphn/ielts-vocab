@@ -23,5 +23,13 @@ export default defineConfig({
   server: {
     port: 5173,
     host: '0.0.0.0',
+    proxy: {
+      // Dev-only: browser → Vite → Youdao (avoids CORS without Worker)
+      '/youdao-proxy': {
+        target: 'https://dict.youdao.com',
+        changeOrigin: true,
+        rewrite: (p) => p.replace(/^\/youdao-proxy/, ''),
+      },
+    },
   },
 });
