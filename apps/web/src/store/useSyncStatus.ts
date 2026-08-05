@@ -1,20 +1,15 @@
 /**
- * Cloud pull status — so UI can show "正在同步" instead of an empty word list.
+ * In-flight cloud pull — for guards (e.g. avoid duplicate cold-start pull).
+ * No UI; background sync logs to console only.
  */
 import { create } from 'zustand';
 
 interface SyncStatusState {
   pulling: boolean;
-  pulledCount: number;
-  beginPull: () => void;
-  setPulledCount: (n: number) => void;
-  endPull: () => void;
+  setPulling: (v: boolean) => void;
 }
 
 export const useSyncStatus = create<SyncStatusState>((set) => ({
   pulling: false,
-  pulledCount: 0,
-  beginPull: () => set({ pulling: true, pulledCount: 0 }),
-  setPulledCount: (n) => set({ pulledCount: n }),
-  endPull: () => set({ pulling: false }),
+  setPulling: (v) => set({ pulling: v }),
 }));

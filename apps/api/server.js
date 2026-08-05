@@ -252,6 +252,40 @@ export async function ensureTables(pool) {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS practice_sessions (
+      session_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      status TEXT NOT NULL DEFAULT 'active'
+        CHECK (status IN ('active', 'completed', 'abandoned')),
+      mode TEXT NOT NULL,
+      scope TEXT NOT NULL DEFAULT 'mixed',
+      difficulty TEXT NOT NULL DEFAULT 'medium',
+      idx INTEGER NOT NULL DEFAULT 0,
+      stats JSONB NOT NULL DEFAULT '{"correct":0,"total":0}'::jsonb,
+      ui_state JSONB NOT NULL DEFAULT '{}'::jsonb,
+      revision INTEGER NOT NULL DEFAULT 1,
+      client_updated_at BIGINT NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS practice_sessions_one_active_per_user
+    ON practice_sessions (user_id) WHERE status = 'active';
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS practice_session_items (
+      session_id UUID NOT NULL REFERENCES practice_sessions(session_id) ON DELETE CASCADE,
+      ordinal INTEGER NOT NULL,
+      word_id TEXT NOT NULL,
+      example JSONB,
+      attempt JSONB,
+      was_new BOOLEAN NOT NULL DEFAULT FALSE,
+      client_updated_at BIGINT NOT NULL DEFAULT 0,
+      PRIMARY KEY (session_id, ordinal)
+    );
+  `);
 }
 
 export async function buildApp(pool, { logger = false } = {}) {
@@ -343,7 +377,7 @@ export async function buildApp(pool, { logger = false } = {}) {
     const limitRaw = Number(req.query?.limit);
     const limit =
       Number.isFinite(limitRaw) && limitRaw > 0
-        ? Math.min(Math.floor(limitRaw), 500)
+        ? Math.min(Math.floor(limitRaw), 2000)
         : null;
     const cursor = String(req.query?.cursor || '').trim();
 
@@ -566,6 +600,269 @@ export async function buildApp(pool, { logger = false } = {}) {
         updatedAt: new Date(row.updated_at).getTime(),
       },
     };
+  });
+
+  // --- Practice sessions (per-item cloud sync) ---
+
+  function mapPracticeSessionRow(row, items) {
+    return {
+      sessionId: row.session_id,
+      status: row.status,
+      mode: row.mode,
+      scope: row.scope,
+      difficulty: row.difficulty,
+      idx: row.idx,
+      stats: row.stats || { correct: 0, total: 0 },
+      uiState: row.ui_state || {},
+      revision: row.revision,
+      clientUpdatedAt: Number(row.client_updated_at) || 0,
+      createdAt: new Date(row.created_at).getTime(),
+      updatedAt: new Date(row.updated_at).getTime(),
+      items: (items || []).map((it) => ({
+        ordinal: it.ordinal,
+        wordId: it.word_id,
+        example: it.example || null,
+        attempt: it.attempt || null,
+        wasNew: !!it.was_new,
+        clientUpdatedAt: Number(it.client_updated_at) || 0,
+      })),
+    };
+  }
+
+  async function loadPracticeSession(pool, userId, sessionId) {
+    const sess = await pool.query(
+      `SELECT * FROM practice_sessions WHERE session_id = $1 AND user_id = $2`,
+      [sessionId, userId]
+    );
+    if (sess.rowCount === 0) return null;
+    const items = await pool.query(
+      `SELECT * FROM practice_session_items
+       WHERE session_id = $1 ORDER BY ordinal ASC`,
+      [sessionId]
+    );
+    return mapPracticeSessionRow(sess.rows[0], items.rows);
+  }
+
+  async function deleteActivePracticeSessions(pool, userId) {
+    await pool.query(
+      `DELETE FROM practice_sessions WHERE user_id = $1 AND status = 'active'`,
+      [userId]
+    );
+  }
+
+  app.post('/api/practice/sessions', { preHandler: requireAuth }, async (req, reply) => {
+    const body = req.body || {};
+    const mode = String(body.mode || 'cloze');
+    const scope = String(body.scope || 'mixed');
+    const difficulty = String(body.difficulty || 'medium');
+    const wordIds = Array.isArray(body.wordIds)
+      ? body.wordIds.map((id) => String(id).trim()).filter(Boolean)
+      : [];
+    if (!wordIds.length || wordIds.length > 200) {
+      return reply.code(400).send({ error: 'invalid_wordIds' });
+    }
+    const clientUpdatedAt = Number(body.clientUpdatedAt) || Date.now();
+    const wasNewMap =
+      body.wasNewByWordId && typeof body.wasNewByWordId === 'object'
+        ? body.wasNewByWordId
+        : {};
+
+    await deleteActivePracticeSessions(pool, req.user.id);
+
+    const ins = await pool.query(
+      `INSERT INTO practice_sessions (
+         user_id, status, mode, scope, difficulty, idx, stats, ui_state, revision, client_updated_at
+       ) VALUES ($1, 'active', $2, $3, $4, 0, '{"correct":0,"total":0}'::jsonb, '{}'::jsonb, 1, $5)
+       RETURNING *`,
+      [req.user.id, mode, scope, difficulty, clientUpdatedAt]
+    );
+    const row = ins.rows[0];
+    const sessionId = row.session_id;
+
+    for (let i = 0; i < wordIds.length; i++) {
+      const wid = wordIds[i];
+      await pool.query(
+        `INSERT INTO practice_session_items (session_id, ordinal, word_id, was_new, client_updated_at)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [sessionId, i, wid, !!wasNewMap[wid], clientUpdatedAt]
+      );
+    }
+
+    const full = await loadPracticeSession(pool, req.user.id, sessionId);
+    return { ok: true, session: full };
+  });
+
+  app.get('/api/practice/active', { preHandler: requireAuth }, async (req) => {
+    const sess = await pool.query(
+      `SELECT * FROM practice_sessions WHERE user_id = $1 AND status = 'active' LIMIT 1`,
+      [req.user.id]
+    );
+    if (sess.rowCount === 0) return { ok: true, session: null };
+    const sessionId = sess.rows[0].session_id;
+    const full = await loadPracticeSession(pool, req.user.id, sessionId);
+    return { ok: true, session: full };
+  });
+
+  app.get('/api/practice/sessions/:sessionId', { preHandler: requireAuth }, async (req, reply) => {
+    const sessionId = String(req.params.sessionId || '');
+    const full = await loadPracticeSession(pool, req.user.id, sessionId);
+    if (!full) return reply.code(404).send({ error: 'session_not_found' });
+    return { ok: true, session: full };
+  });
+
+  app.get('/api/practice/sessions/:sessionId/check', { preHandler: requireAuth }, async (req, reply) => {
+    const sessionId = String(req.params.sessionId || '');
+    const clientRevision = Number(req.query?.revision);
+    const result = await pool.query(
+      `SELECT revision, updated_at FROM practice_sessions
+       WHERE session_id = $1 AND user_id = $2 AND status = 'active'`,
+      [sessionId, req.user.id]
+    );
+    if (result.rowCount === 0) {
+      return { ok: true, match: false, serverRevision: null, serverUpdatedAt: null, gone: true };
+    }
+    const row = result.rows[0];
+    const serverRevision = Number(row.revision) || 0;
+    const match =
+      Number.isFinite(clientRevision) && clientRevision === serverRevision;
+    return {
+      ok: true,
+      match,
+      serverRevision,
+      serverUpdatedAt: new Date(row.updated_at).getTime(),
+      gone: false,
+    };
+  });
+
+  app.patch('/api/practice/sessions/:sessionId', { preHandler: requireAuth }, async (req, reply) => {
+    const sessionId = String(req.params.sessionId || '');
+    const body = req.body || {};
+    const clientUpdatedAt = Number(body.clientUpdatedAt) || Date.now();
+
+    const cur = await pool.query(
+      `SELECT * FROM practice_sessions
+       WHERE session_id = $1 AND user_id = $2 AND status = 'active'`,
+      [sessionId, req.user.id]
+    );
+    if (cur.rowCount === 0) return reply.code(404).send({ error: 'session_not_found' });
+
+    const row = cur.rows[0];
+    if (clientUpdatedAt < Number(row.client_updated_at || 0)) {
+      const full = await loadPracticeSession(pool, req.user.id, sessionId);
+      return { ok: true, applied: false, session: full };
+    }
+
+    const idx = body.idx !== undefined ? Number(body.idx) : row.idx;
+    const stats = body.stats !== undefined ? body.stats : row.stats;
+    const uiState = body.uiState !== undefined ? body.uiState : row.ui_state;
+
+    await pool.query(
+      `UPDATE practice_sessions SET
+         idx = $1,
+         stats = $2::jsonb,
+         ui_state = $3::jsonb,
+         revision = revision + 1,
+         client_updated_at = $4,
+         updated_at = NOW()
+       WHERE session_id = $5 AND user_id = $6`,
+      [idx, JSON.stringify(stats), JSON.stringify(uiState), clientUpdatedAt, sessionId, req.user.id]
+    );
+
+    const full = await loadPracticeSession(pool, req.user.id, sessionId);
+    return { ok: true, applied: true, session: full };
+  });
+
+  app.put('/api/practice/sessions/:sessionId/items/:ordinal', { preHandler: requireAuth }, async (req, reply) => {
+    const sessionId = String(req.params.sessionId || '');
+    const ordinal = Number(req.params.ordinal);
+    if (!Number.isFinite(ordinal) || ordinal < 0 || ordinal > 500) {
+      return reply.code(400).send({ error: 'invalid_ordinal' });
+    }
+    const body = req.body || {};
+    const clientUpdatedAt = Number(body.clientUpdatedAt) || Date.now();
+
+    const sess = await pool.query(
+      `SELECT session_id FROM practice_sessions
+       WHERE session_id = $1 AND user_id = $2 AND status = 'active'`,
+      [sessionId, req.user.id]
+    );
+    if (sess.rowCount === 0) return reply.code(404).send({ error: 'session_not_found' });
+
+    const existing = await pool.query(
+      `SELECT client_updated_at FROM practice_session_items
+       WHERE session_id = $1 AND ordinal = $2`,
+      [sessionId, ordinal]
+    );
+    if (existing.rowCount === 0) {
+      return reply.code(404).send({ error: 'item_not_found' });
+    }
+    if (clientUpdatedAt < Number(existing.rows[0].client_updated_at || 0)) {
+      return { ok: true, applied: false };
+    }
+
+    const example = body.example !== undefined ? body.example : undefined;
+    const attempt = body.attempt !== undefined ? body.attempt : undefined;
+    const wasNew = body.wasNew;
+
+    const sets = ['client_updated_at = $1'];
+    const vals = [clientUpdatedAt];
+    let i = 2;
+    if (example !== undefined) {
+      sets.push(`example = $${i++}::jsonb`);
+      vals.push(JSON.stringify(example));
+    }
+    if (attempt !== undefined) {
+      sets.push(`attempt = $${i++}::jsonb`);
+      vals.push(JSON.stringify(attempt));
+    }
+    if (wasNew !== undefined) {
+      sets.push(`was_new = $${i++}`);
+      vals.push(!!wasNew);
+    }
+    vals.push(sessionId, ordinal);
+    const sidParam = i;
+    const ordParam = i + 1;
+    await pool.query(
+      `UPDATE practice_session_items SET ${sets.join(', ')}
+       WHERE session_id = $${sidParam} AND ordinal = $${ordParam}`,
+      vals
+    );
+
+    await pool.query(
+      `UPDATE practice_sessions SET revision = revision + 1, updated_at = NOW()
+       WHERE session_id = $1 AND user_id = $2`,
+      [sessionId, req.user.id]
+    );
+
+    return { ok: true, applied: true };
+  });
+
+  async function endPracticeSession(pool, userId, sessionId) {
+    await pool.query(
+      `DELETE FROM practice_sessions WHERE session_id = $1 AND user_id = $2`,
+      [sessionId, userId]
+    );
+    return { ok: true };
+  }
+
+  app.post('/api/practice/sessions/:sessionId/complete', { preHandler: requireAuth }, async (req, reply) => {
+    const sessionId = String(req.params.sessionId || '');
+    const r = await pool.query(
+      `SELECT session_id FROM practice_sessions WHERE session_id = $1 AND user_id = $2`,
+      [sessionId, req.user.id]
+    );
+    if (r.rowCount === 0) return reply.code(404).send({ error: 'session_not_found' });
+    return endPracticeSession(pool, req.user.id, sessionId);
+  });
+
+  app.post('/api/practice/sessions/:sessionId/abandon', { preHandler: requireAuth }, async (req, reply) => {
+    const sessionId = String(req.params.sessionId || '');
+    const r = await pool.query(
+      `SELECT session_id FROM practice_sessions WHERE session_id = $1 AND user_id = $2`,
+      [sessionId, req.user.id]
+    );
+    if (r.rowCount === 0) return reply.code(404).send({ error: 'session_not_found' });
+    return endPracticeSession(pool, req.user.id, sessionId);
   });
 
   // CloudBase CORS fallback: server pulls blob, client decrypts/merges

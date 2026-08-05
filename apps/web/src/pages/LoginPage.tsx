@@ -71,11 +71,7 @@ export default function LoginPage() {
     setAuth(u, p);
     try {
       const result = await pullOnLogin();
-      if (result.merged > 0) {
-        message.success(`已从服务器同步 ${result.merged} 个词`);
-      } else {
-        message.info('同步完成：服务器暂无单词，可在「添加」或设置里导入');
-      }
+      console.info('[sync] login pull merged', result.merged);
     } catch (e) {
       message.warning(
         '登录成功，但词库同步失败：' + (e instanceof Error ? e.message : '请稍后在设置里手动拉取')
@@ -129,7 +125,7 @@ export default function LoginPage() {
           )}
 
           <Button type="primary" htmlType="submit" block loading={loading}>
-            {loading ? '登录并同步词库…' : '登录'}
+            {loading ? '登录中…' : '登录'}
           </Button>
           <Button type="text" block style={{ marginTop: 8 }} onClick={() => doRegister()} disabled={loading}>
             没账号？注册新账号

@@ -17,11 +17,22 @@ import {
   type TranslateHints,
 } from '@/api/llm';
 import { applyReview, isNew, formatNextReview } from '@/utils/scheduler';
+import {
+  clearPracticeProgress,
+} from '@/api/realtimeSync';
+import {
+  cloudSessionFromSaved,
+  loadActiveCloudPractice,
+  scheduleCloudSessionPatch,
+  startCloudPracticeSession,
+  syncCloudItemAttempt,
+  syncCloudItemExample,
+  readCloudMeta,
+} from '@/api/practiceCloudSync';
 import { getRelatedFromBank, mergeSynonymSources, getBankLexisExtras, ensureVocabBankRelated } from '@/utils/vocabBankRelated';
 import { setLS, getLS, todayKey } from '@/utils/date';
 import type { RelatedWord, Word, Derivative } from '@/types/word';
 import {
-  clearPracticeSession,
   hydratePracticeSession,
   readSavedPracticeSession,
   savePracticeSession,
@@ -111,6 +122,7 @@ export function usePracticeSession() {
   const [stats, setStats] = useState({ correct: 0, total: 0 });
 
   const sessionIdRef = useRef(0);
+  const cloudPracticeSessionIdRef = useRef<string | null>(readCloudMeta()?.sessionId ?? null);
   const inflightRef = useRef<Set<string>>(new Set());
   const prefetchRunningRef = useRef(false);
   const prefetchFromRef = useRef(0);
@@ -226,6 +238,27 @@ export function usePracticeSession() {
       judgeResult: overrides.judgeResult !== undefined ? overrides.judgeResult : judgeResult,
       phase: overrides.phase ?? phase,
     });
+    const cloudId = cloudPracticeSessionIdRef.current;
+    if (cloudId) {
+      scheduleCloudSessionPatch({
+        sessionId: cloudId,
+        idx: overrides.idx ?? idx,
+        stats: overrides.stats ?? stats,
+        uiState: {
+          showAnswer: overrides.showAnswer ?? showAnswer,
+          hintShown: overrides.hintShown ?? hintShown,
+          translateHintLevel: overrides.translateHintLevel ?? translateHintLevel,
+          translateHints:
+            overrides.translateHints !== undefined
+              ? overrides.translateHints
+              : translateHints,
+          picked: overrides.picked !== undefined ? overrides.picked : picked,
+          userText: overrides.userText ?? userText,
+          judgeResult:
+            overrides.judgeResult !== undefined ? overrides.judgeResult : judgeResult,
+        },
+      });
+    }
   }
 
   useEffect(() => {
@@ -248,7 +281,7 @@ export function usePracticeSession() {
     if (phase === 'asking' || phase === 'waiting' || phase === 'judging') {
       persist();
     } else if (phase === 'done') {
-      clearPracticeSession();
+      clearPracticeProgress({ completed: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase, idx, queue, showAnswer, hintShown, translateHintLevel, translateHints, picked, userText, judgeResult, stats]);
@@ -435,6 +468,17 @@ export function usePracticeSession() {
       queueRef.current = next;
       setQueue(next);
 
+      const cloudId = cloudPracticeSessionIdRef.current;
+      if (cloudId) {
+        for (const w of todo) {
+          const i = pool.findIndex((x) => x.id === w.id);
+          const q = next[i];
+          if (i >= 0 && q?.example) {
+            syncCloudItemExample(cloudId, i, q.example, !!q.wasNew);
+          }
+        }
+      }
+
       const failed = todo.filter((w) => !map[w.id]);
       for (const w of failed) prefetchFailedRef.current.add(w.id);
       if (failed.length) {
@@ -460,7 +504,12 @@ export function usePracticeSession() {
   }
 
   async function resumePractice() {
-    const saved = readSavedPracticeSession();
+    let saved = readSavedPracticeSession();
+    const remote = await loadActiveCloudPractice();
+    if (remote && remote.idx < remote.items.length) {
+      saved = cloudSessionFromSaved(remote);
+      cloudPracticeSessionIdRef.current = remote.sessionId;
+    }
     if (!saved) {
       message.info('没有可继续的进度');
       navigate('/today');
@@ -468,7 +517,7 @@ export function usePracticeSession() {
     }
     const hydrated = hydratePracticeSession(saved, words);
     if (!hydrated) {
-      clearPracticeSession();
+      clearPracticeProgress();
       message.info('进度已失效，请重新开始');
       navigate('/today');
       return;
@@ -581,7 +630,7 @@ export function usePracticeSession() {
     nextScope?: StudyScope,
     nextDifficulty?: SentenceDifficulty
   ) {
-    clearPracticeSession();
+    clearPracticeProgress();
     const s = nextScope ?? scope ?? initialScope;
     const d = nextDifficulty ?? difficulty ?? initialDifficulty;
     setScope(s);
@@ -603,6 +652,20 @@ export function usePracticeSession() {
     }
 
     wasNewRef.current = new Map(pool.map((w) => [w.id, isNew(w)]));
+
+    const wasNewByWordId: Record<string, boolean> = {};
+    for (const w of pool) {
+      wasNewByWordId[w.id] = wasNewRef.current.get(w.id) ?? isNew(w);
+    }
+    cloudPracticeSessionIdRef.current = null;
+    const cloud = await startCloudPracticeSession({
+      mode: m,
+      scope: s,
+      difficulty: d,
+      wordIds: pool.map((w) => w.id),
+      wasNewByWordId,
+    });
+    if (cloud) cloudPracticeSessionIdRef.current = cloud.sessionId;
 
     const { sid } = beginSessionWork();
 
@@ -847,6 +910,16 @@ export function usePracticeSession() {
         wasNew: !!current.wasNew,
         correct: !!wasCorrect,
       });
+      const cloudId = cloudPracticeSessionIdRef.current;
+      if (cloudId) {
+        syncCloudItemAttempt(cloudId, idx, {
+          correct: !!wasCorrect,
+          picked,
+          userText,
+          judgeResult,
+          answeredAt: Date.now(),
+        });
+      }
       const when = formatNextReview(updated.nextReview);
       message.info(
         wasCorrect ? `答对 · 下次复习：${when}` : `答错 · 已回退，${when}再练`
@@ -854,7 +927,7 @@ export function usePracticeSession() {
     }
     if (idx + 1 >= total) {
       setPhase('done');
-      clearPracticeSession();
+      clearPracticeProgress({ completed: true });
       setLS('done-' + todayKey(), '1');
       const lastDay = getLS('last-day');
       const today = new Date().toDateString();

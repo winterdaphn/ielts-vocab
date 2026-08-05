@@ -97,7 +97,38 @@ function parseWord(raw: unknown): Word | null {
   } as Word & { updatedAt: number };
 }
 
-const PULL_PAGE_SIZE = 200;
+const PULL_PAGE_SIZE = 2000;
+
+async function fetchWordsPage(
+  settings: Settings,
+  sinceMs: number | undefined,
+  cursor: string
+): Promise<{
+  page: Word[];
+  maxUpdatedAt: number;
+  nextCursor: string;
+}> {
+  const params = new URLSearchParams();
+  params.set('limit', String(PULL_PAGE_SIZE));
+  if (sinceMs && sinceMs > 0) params.set('since', String(sinceMs));
+  if (cursor) params.set('cursor', cursor);
+
+  const resp = await fetch(getBase(settings) + '/api/words?' + params.toString(), {
+    headers: authHeaders(settings),
+  });
+  const data = await readJson(resp);
+  if (!resp.ok) {
+    throw new WordsApiError(String(data.error || `拉取失败 ${resp.status}`), resp.status);
+  }
+  const list = Array.isArray(data.words) ? data.words : [];
+  const page = list.map(parseWord).filter(Boolean) as Word[];
+  const next = typeof data.nextCursor === 'string' ? data.nextCursor : '';
+  return {
+    page,
+    maxUpdatedAt: Number(data.maxUpdatedAt || 0),
+    nextCursor: next && page.length > 0 ? next : '',
+  };
+}
 
 export async function fetchWordsSince(
   settings: Settings,
@@ -109,30 +140,30 @@ export async function fetchWordsSince(
   const words: Word[] = [];
   let maxUpdatedAt = 0;
   let cursor = '';
+  let writeChain: Promise<void> = Promise.resolve();
+
+  // 预取下一页 HTTP，与 IndexedDB 写入重叠，减少「等写库再请求」的空档
+  let pending = fetchWordsPage(settings, sinceMs, '');
 
   for (;;) {
-    const params = new URLSearchParams();
-    params.set('limit', String(PULL_PAGE_SIZE));
-    if (sinceMs && sinceMs > 0) params.set('since', String(sinceMs));
-    if (cursor) params.set('cursor', cursor);
+    const batch = await pending;
+    maxUpdatedAt = Math.max(maxUpdatedAt, batch.maxUpdatedAt);
+    words.push(...batch.page);
 
-    const resp = await fetch(getBase(settings) + '/api/words?' + params.toString(), {
-      headers: authHeaders(settings),
-    });
-    const data = await readJson(resp);
-    if (!resp.ok) {
-      throw new WordsApiError(String(data.error || `拉取失败 ${resp.status}`), resp.status);
+    if (batch.page.length) {
+      const totalSoFar = words.length;
+      const pageCopy = batch.page;
+      writeChain = writeChain.then(async () => {
+        await onPage?.(pageCopy, totalSoFar);
+      });
     }
-    const list = Array.isArray(data.words) ? data.words : [];
-    const page = list.map(parseWord).filter(Boolean) as Word[];
-    words.push(...page);
-    maxUpdatedAt = Math.max(maxUpdatedAt, Number(data.maxUpdatedAt || 0));
-    if (page.length) await onPage?.(page, words.length);
 
-    const next = typeof data.nextCursor === 'string' ? data.nextCursor : '';
-    if (!next || page.length === 0) break;
-    cursor = next;
+    if (!batch.nextCursor) break;
+    cursor = batch.nextCursor;
+    pending = fetchWordsPage(settings, sinceMs, cursor);
   }
+
+  await writeChain;
 
   return {
     words,

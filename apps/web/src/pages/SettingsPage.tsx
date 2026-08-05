@@ -391,7 +391,7 @@ function DataSettings() {
     try {
       // Force full pull
       update({ lastSyncAt: 0 });
-      const result = await pullIncremental();
+      const result = await pullIncremental({ reason: 'manual', applyPracticePrefs: true });
       message.success(
         result.merged > 0 ? `已拉取并合并 ${result.merged} 个词` : '服务器无更新'
       );

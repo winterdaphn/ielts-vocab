@@ -8,9 +8,10 @@ import { useCategories } from '@/store/useCategories';
 import { getLS, setLS } from '@/utils/date';
 import {
   applyPracticeSyncSnapshot,
-  getPracticeSyncSnapshot,
+  clearPracticeSession,
   normalizePracticeSyncPayload,
 } from '@/utils/practiceSession';
+import { abandonCloudPracticeSession, endCloudPracticeSession } from '@/api/practiceCloudSync';
 import {
   batchPutWords,
   deleteWordRemote,
@@ -23,6 +24,23 @@ import {
 import { useSyncStatus } from '@/store/useSyncStatus';
 
 export type SyncKind = 'content' | 'progress' | 'delete';
+
+export type PullReason =
+  | 'login'
+  | 'cold-start'
+  | 'interval'
+  | 'manual'
+  | 'background';
+
+function syncLog(message: string, detail?: unknown) {
+  if (detail !== undefined) {
+    console.info('[sync]', message, detail);
+  } else {
+    console.info('[sync]', message);
+  }
+}
+
+let pullInFlight: Promise<{ merged: number }> | null = null;
 
 interface QueueItem {
   kind: SyncKind;
@@ -146,6 +164,7 @@ export async function flushSyncQueue(): Promise<void> {
       }
     }
     useSettings.getState().update({ lastSyncAt: Date.now() });
+    syncLog('push queue flushed', { count: items.length });
   } catch (e) {
     // re-queue failed items
     for (const item of items) {
@@ -164,14 +183,34 @@ export async function flushSyncQueue(): Promise<void> {
 }
 
 /** Pull remote changes since lastSyncAt and merge into Dexie (LWW by updatedAt). */
-export async function pullIncremental(): Promise<{ merged: number }> {
+export async function pullIncremental(opts?: {
+  reason?: PullReason;
+  /** 默认 false：避免切标签/定时拉取时用服务器旧练习进度覆盖本机 */
+  applyPracticePrefs?: boolean;
+}): Promise<{ merged: number }> {
+  if (pullInFlight) return pullInFlight;
+
+  const reason = opts?.reason ?? 'background';
+  const applyPracticePrefs = opts?.applyPracticePrefs ?? reason === 'login';
+
+  pullInFlight = pullIncrementalInner(reason, applyPracticePrefs).finally(() => {
+    pullInFlight = null;
+  });
+  return pullInFlight;
+}
+
+async function pullIncrementalInner(
+  reason: PullReason,
+  applyPracticePrefs: boolean
+): Promise<{ merged: number }> {
   const s = settings();
   if (!s.syncToken) return { merged: 0 };
 
   const sync = useSyncStatus.getState();
   const since = s.lastSyncAt > 0 ? s.lastSyncAt : undefined;
   const fullPull = !since;
-  sync.beginPull();
+  sync.setPulling(true);
+  syncLog(`pull start (${reason})`, { fullPull, since: since ?? 0 });
 
   try {
     const { db } = await import('@/db/ieltsDb');
@@ -179,7 +218,11 @@ export async function pullIncremental(): Promise<{ merged: number }> {
     const userId = useAuth.getState().username;
     if (!userId) return { merged: 0 };
 
-    const localRows = (await db.words.where('userId').equals(userId).toArray()) as Word[];
+    const localCount = await db.words.where('userId').equals(userId).count();
+    const localRows =
+      localCount > 0
+        ? ((await db.words.where('userId').equals(userId).toArray()) as Word[])
+        : [];
     const map = new Map(localRows.map((w) => [w.id, w]));
     let merged = 0;
     let maxUpdatedAt = 0;
@@ -206,49 +249,60 @@ export async function pullIncremental(): Promise<{ merged: number }> {
         if (fullPull && accepted.length) {
           await withSyncSuspended(async () => {
             if (!clearedForFullPull) {
-              // First page: wipe local then seed — UI 立刻有词
-              await useWordsStore.getState().replaceAll(accepted);
+              if (localCount === 0) {
+                await useWordsStore.getState().bulkMergeWords(accepted);
+              } else {
+                await useWordsStore.getState().replaceAll(accepted);
+              }
               clearedForFullPull = true;
             } else {
               await useWordsStore.getState().addWords(accepted);
             }
           });
         }
-        sync.setPulledCount(fullPull ? map.size : totalSoFar);
       }
     );
     maxUpdatedAt = remoteMax;
 
     if (remote.length === 0) {
       const prefs = await fetchPrefs(s);
-      if (prefs) applyPrefsLocally(prefs);
+      if (prefs) applyPrefsLocally(prefs, { applyPracticePrefs });
       if (maxUpdatedAt) useSettings.getState().update({ lastSyncAt: maxUpdatedAt });
+      syncLog(`pull done (${reason})`, { merged: 0 });
       return { merged: 0 };
     }
 
     if (!fullPull) {
-      await withSyncSuspended(() => useWordsStore.getState().replaceAll([...map.values()]));
+      await withSyncSuspended(() =>
+        useWordsStore.getState().bulkMergeWords([...map.values()])
+      );
     } else if (!clearedForFullPull) {
       await withSyncSuspended(() => useWordsStore.getState().replaceAll([...map.values()]));
+    } else if (localCount === 0 && map.size > 0) {
+      useWordsStore.getState().setWords([...map.values()]);
     }
 
     const prefs = await fetchPrefs(s);
-    if (prefs) applyPrefsLocally(prefs);
+    if (prefs) applyPrefsLocally(prefs, { applyPracticePrefs });
 
     useSettings.getState().update({
       lastSyncAt: Math.max(maxUpdatedAt, Date.now()),
     });
+    syncLog(`pull done (${reason})`, { merged });
     return { merged };
   } finally {
-    sync.endPull();
+    sync.setPulling(false);
   }
 }
 
-function applyPrefsLocally(prefs: {
-  customCategories: string[];
-  practice: unknown;
-  learningStreak: Record<string, unknown>;
-}) {
+function applyPrefsLocally(
+  prefs: {
+    customCategories: string[];
+    practice: unknown;
+    learningStreak: Record<string, unknown>;
+  },
+  opts?: { applyPracticePrefs?: boolean }
+) {
   if (prefs.customCategories.length) {
     const add = useCategories.getState().addCustom;
     for (const c of prefs.customCategories) {
@@ -258,8 +312,32 @@ function applyPrefsLocally(prefs: {
   const streak = prefs.learningStreak || {};
   if (streak.count != null) setLS('streak', String(streak.count));
   if (streak.lastDay != null) setLS('last-day', String(streak.lastDay));
-  const snap = normalizePracticeSyncPayload(prefs.practice);
-  if (snap) applyPracticeSyncSnapshot(snap);
+  if (opts?.applyPracticePrefs) {
+    const snap = normalizePracticeSyncPayload(prefs.practice);
+    if (snap) applyPracticeSyncSnapshot(snap);
+  }
+}
+
+let practicePrefsPushTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** @deprecated 练习会话改走 /api/practice；保留 prefs 仅同步 streak / 分组 */
+export function schedulePracticePrefsPush(): void {
+  if (practicePrefsPushTimer) clearTimeout(practicePrefsPushTimer);
+  practicePrefsPushTimer = setTimeout(() => {
+    practicePrefsPushTimer = null;
+    void pushPrefsNow();
+  }, 2500);
+}
+
+/** 清除本地未完成练习 + 云端 active 会话 */
+export function clearPracticeProgress(opts?: { completed?: boolean }): void {
+  clearPracticeSession();
+  if (practicePrefsPushTimer) {
+    clearTimeout(practicePrefsPushTimer);
+    practicePrefsPushTimer = null;
+  }
+  void (opts?.completed ? endCloudPracticeSession() : abandonCloudPracticeSession());
+  void pushPrefsNow();
 }
 
 export async function pushPrefsNow(): Promise<void> {
@@ -267,7 +345,7 @@ export async function pushPrefsNow(): Promise<void> {
   if (!s.syncToken) return;
   await putPrefs(s, {
     customCategories: useCategories.getState().custom.filter(Boolean),
-    practice: getPracticeSyncSnapshot(),
+    practice: null,
     learningStreak: {
       count: getLS('streak') || '0',
       lastDay: getLS('last-day') || '',
@@ -300,7 +378,7 @@ export async function pullOnLogin(): Promise<{ merged: number }> {
   const prev = s.lastSyncAt;
   useSettings.getState().update({ lastSyncAt: 0 });
   try {
-    return await pullIncremental();
+    return await pullIncremental({ reason: 'login', applyPracticePrefs: true });
   } catch (e) {
     useSettings.getState().update({ lastSyncAt: prev });
     throw e;

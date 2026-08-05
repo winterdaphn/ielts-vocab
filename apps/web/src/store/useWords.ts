@@ -27,6 +27,8 @@ interface WordsState {
   clearForUser: (userId: string) => Promise<void>;
   /** Clear current user's IndexedDB rows and write the new list (cloud pull). */
   replaceAll: (words: Word[]) => Promise<void>;
+  /** Upsert rows without clearing — for incremental cloud merge (avoids UI flash). */
+  bulkMergeWords: (words: Word[]) => Promise<void>;
   setLoaded: (v: boolean) => void;
 }
 
@@ -97,6 +99,15 @@ export const useWordsStore = create<WordsState>((set, _get) => ({
       await db.words.bulkPut(rows);
     }
     set({ words, loaded: true });
+  },
+  bulkMergeWords: async (words) => {
+    const userId = useAuth.getState().username;
+    if (!userId || words.length === 0) return;
+    const rows: WordRow[] = words.map((w) => ({
+      ...withCanonicalWordId(w),
+      userId,
+    }));
+    await db.words.bulkPut(rows);
   },
   setLoaded: (v) => set({ loaded: v }),
 }));

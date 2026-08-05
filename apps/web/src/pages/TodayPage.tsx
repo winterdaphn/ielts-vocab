@@ -1,16 +1,29 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { Button, App } from 'antd';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useUserWords } from '@/store/useWords';
+import { useSettings } from '@/store/useSettings';
 import { isDue, isNew, isMastered } from '@/utils/scheduler';
 import { useAuth } from '@/store/useAuth';
 import { getLS } from '@/utils/date';
+import { clearPracticeProgress } from '@/api/realtimeSync';
 import {
-  clearPracticeSession,
+  cloudSessionFromSaved,
+  isCloudPracticeInSync,
+  loadActiveCloudPractice,
+} from '@/api/practiceCloudSync';
+import {
   getSavedPracticeSummary,
   readSavedPracticeSession,
+  modeLabel,
+  scopeLabel,
+  difficultyLabel,
+  parsePracticeMode,
+  parseStudyScope,
+  parseSentenceDifficulty,
   type StudyScope,
   type SentenceDifficulty,
+  type PracticeSummary,
 } from '@/utils/practiceSession';
 import { countByScope } from '@/utils/practiceSelect';
 import { getLearningCurve } from '@/utils/learningLog';
@@ -37,16 +50,68 @@ export default function TodayPage() {
   const { message, modal } = App.useApp();
   const words = useUserWords();
   const username = useAuth((s) => s.username);
+  const settings = useSettings();
   const navigate = useNavigate();
+  const location = useLocation();
   const [savedTick, setSavedTick] = useState(0);
+  const [remoteSummary, setRemoteSummary] = useState<PracticeSummary | null>(null);
   const [scope, setScope] = useState<StudyScope>('mixed');
   const [difficulty, setDifficulty] = useState<SentenceDifficulty>('medium');
 
-  const saved = useMemo(() => getSavedPracticeSummary(), [savedTick, words.length]);
+  const localSaved = useMemo(() => getSavedPracticeSummary(), [savedTick, words.length]);
+  const saved = remoteSummary ?? localSaved;
   const curve = useMemo(() => getLearningCurve(14), [savedTick, words.length]);
   const scopeCounts = useMemo(() => countByScope(words), [words]);
 
-  const newCount = scopeCounts.newCount;
+  useEffect(() => {
+    if (location.pathname === '/today') {
+      setSavedTick((n) => n + 1);
+    }
+  }, [location.pathname, location.key]);
+
+  useEffect(() => {
+    if (location.pathname !== '/today' || !settings.syncToken) {
+      setRemoteSummary(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      await isCloudPracticeInSync();
+      const remote = await loadActiveCloudPractice();
+      if (cancelled) return;
+      if (!remote || remote.idx >= remote.items.length) {
+        setRemoteSummary(null);
+        return;
+      }
+      const snap = cloudSessionFromSaved(remote);
+      const total = snap.wordIds.length;
+      const idx = Math.min(snap.idx, total);
+      const mode = parsePracticeMode(snap.mode);
+      const sc = parseStudyScope(snap.scope);
+      const diff = parseSentenceDifficulty(snap.difficulty);
+      setRemoteSummary({
+        mode,
+        modeLabel: modeLabel(mode),
+        scope: sc,
+        scopeLabel: scopeLabel(sc),
+        difficulty: diff,
+        difficultyLabel: difficultyLabel(diff),
+        current: idx + 1,
+        total,
+        when: new Date(remote.updatedAt).toLocaleString('zh-CN', {
+          month: 'numeric',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+        }),
+        answered: snap.stats?.total ?? 0,
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [location.pathname, location.key, savedTick, settings.syncToken]);
+
   const dueCount = useMemo(
     () => words.filter((w) => !w.crossedOut && !isNew(w) && isDue(w)).length,
     [words]
@@ -73,6 +138,7 @@ export default function TodayPage() {
     [words]
   );
 
+  const newCount = scopeCounts.newCount;
   const total = words.length;
   const taskCount =
     scope === 'new'
@@ -99,7 +165,7 @@ export default function TodayPage() {
         okText: '确定',
         cancelText: '取消',
         onOk: () => {
-          clearPracticeSession();
+          clearPracticeProgress();
           setSavedTick((n) => n + 1);
           go();
         },
@@ -121,7 +187,7 @@ export default function TodayPage() {
       okButtonProps: { danger: true },
       cancelText: '取消',
       onOk: () => {
-        clearPracticeSession();
+        clearPracticeProgress();
         setSavedTick((n) => n + 1);
         message.success('已清除进度');
       },
