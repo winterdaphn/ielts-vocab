@@ -97,24 +97,46 @@ function parseWord(raw: unknown): Word | null {
   } as Word & { updatedAt: number };
 }
 
+const PULL_PAGE_SIZE = 200;
+
 export async function fetchWordsSince(
   settings: Settings,
-  sinceMs?: number
+  sinceMs?: number,
+  onPage?: (page: Word[], totalSoFar: number) => void | Promise<void>
 ): Promise<{ words: Word[]; maxUpdatedAt: number }> {
   if (!settings.syncToken) return { words: [], maxUpdatedAt: 0 };
-  const q = sinceMs && sinceMs > 0 ? `?since=${encodeURIComponent(String(sinceMs))}` : '';
-  const resp = await fetch(getBase(settings) + '/api/words' + q, {
-    headers: authHeaders(settings),
-  });
-  const data = await readJson(resp);
-  if (!resp.ok) {
-    throw new WordsApiError(String(data.error || `拉取失败 ${resp.status}`), resp.status);
+
+  const words: Word[] = [];
+  let maxUpdatedAt = 0;
+  let cursor = '';
+
+  for (;;) {
+    const params = new URLSearchParams();
+    params.set('limit', String(PULL_PAGE_SIZE));
+    if (sinceMs && sinceMs > 0) params.set('since', String(sinceMs));
+    if (cursor) params.set('cursor', cursor);
+
+    const resp = await fetch(getBase(settings) + '/api/words?' + params.toString(), {
+      headers: authHeaders(settings),
+    });
+    const data = await readJson(resp);
+    if (!resp.ok) {
+      throw new WordsApiError(String(data.error || `拉取失败 ${resp.status}`), resp.status);
+    }
+    const list = Array.isArray(data.words) ? data.words : [];
+    const page = list.map(parseWord).filter(Boolean) as Word[];
+    words.push(...page);
+    maxUpdatedAt = Math.max(maxUpdatedAt, Number(data.maxUpdatedAt || 0));
+    if (page.length) await onPage?.(page, words.length);
+
+    const next = typeof data.nextCursor === 'string' ? data.nextCursor : '';
+    if (!next || page.length === 0) break;
+    cursor = next;
   }
-  const list = Array.isArray(data.words) ? data.words : [];
-  const words = list.map(parseWord).filter(Boolean) as Word[];
+
   return {
     words,
-    maxUpdatedAt: Number(data.maxUpdatedAt || Date.now()),
+    maxUpdatedAt: maxUpdatedAt || Date.now(),
   };
 }
 

@@ -20,6 +20,7 @@ import {
   putPrefs,
   putWord,
 } from '@/api/wordsApi';
+import { useSyncStatus } from '@/store/useSyncStatus';
 
 export type SyncKind = 'content' | 'progress' | 'delete';
 
@@ -167,42 +168,80 @@ export async function pullIncremental(): Promise<{ merged: number }> {
   const s = settings();
   if (!s.syncToken) return { merged: 0 };
 
+  const sync = useSyncStatus.getState();
   const since = s.lastSyncAt > 0 ? s.lastSyncAt : undefined;
-  const { words: remote, maxUpdatedAt } = await fetchWordsSince(s, since);
-  if (remote.length === 0) {
+  const fullPull = !since;
+  sync.beginPull();
+
+  try {
+    const { db } = await import('@/db/ieltsDb');
+    const { useAuth } = await import('@/store/useAuth');
+    const userId = useAuth.getState().username;
+    if (!userId) return { merged: 0 };
+
+    const localRows = (await db.words.where('userId').equals(userId).toArray()) as Word[];
+    const map = new Map(localRows.map((w) => [w.id, w]));
+    let merged = 0;
+    let maxUpdatedAt = 0;
+    let clearedForFullPull = false;
+
+    const { words: remote, maxUpdatedAt: remoteMax } = await fetchWordsSince(
+      s,
+      since,
+      async (page, totalSoFar) => {
+        const accepted: Word[] = [];
+        for (const rw of page) {
+          const lw = map.get(rw.id);
+          const rUpdated = Number((rw as Word & { updatedAt?: number }).updatedAt || 0);
+          const lUpdated = Number(
+            (lw as (Word & { updatedAt?: number }) | undefined)?.updatedAt || 0
+          );
+          if (!lw || rUpdated >= lUpdated) {
+            const next = { ...lw, ...rw, id: rw.id } as Word;
+            map.set(rw.id, next);
+            accepted.push(next);
+            merged++;
+          }
+        }
+        if (fullPull && accepted.length) {
+          await withSyncSuspended(async () => {
+            if (!clearedForFullPull) {
+              // First page: wipe local then seed — UI 立刻有词
+              await useWordsStore.getState().replaceAll(accepted);
+              clearedForFullPull = true;
+            } else {
+              await useWordsStore.getState().addWords(accepted);
+            }
+          });
+        }
+        sync.setPulledCount(fullPull ? map.size : totalSoFar);
+      }
+    );
+    maxUpdatedAt = remoteMax;
+
+    if (remote.length === 0) {
+      const prefs = await fetchPrefs(s);
+      if (prefs) applyPrefsLocally(prefs);
+      if (maxUpdatedAt) useSettings.getState().update({ lastSyncAt: maxUpdatedAt });
+      return { merged: 0 };
+    }
+
+    if (!fullPull) {
+      await withSyncSuspended(() => useWordsStore.getState().replaceAll([...map.values()]));
+    } else if (!clearedForFullPull) {
+      await withSyncSuspended(() => useWordsStore.getState().replaceAll([...map.values()]));
+    }
+
     const prefs = await fetchPrefs(s);
     if (prefs) applyPrefsLocally(prefs);
-    if (maxUpdatedAt) useSettings.getState().update({ lastSyncAt: maxUpdatedAt });
-    return { merged: 0 };
+
+    useSettings.getState().update({
+      lastSyncAt: Math.max(maxUpdatedAt, Date.now()),
+    });
+    return { merged };
+  } finally {
+    sync.endPull();
   }
-
-  const { db } = await import('@/db/ieltsDb');
-  const { useAuth } = await import('@/store/useAuth');
-  const userId = useAuth.getState().username;
-  const localRows = userId
-    ? await db.words.where('userId').equals(userId).toArray()
-    : [];
-  const map = new Map((localRows as Word[]).map((w) => [w.id, w]));
-  let merged = 0;
-  for (const rw of remote) {
-    const lw = map.get(rw.id);
-    const rUpdated = Number((rw as Word & { updatedAt?: number }).updatedAt || 0);
-    const lUpdated = Number((lw as Word & { updatedAt?: number } | undefined)?.updatedAt || 0);
-    if (!lw || rUpdated >= lUpdated) {
-      map.set(rw.id, { ...lw, ...rw, id: rw.id });
-      merged++;
-    }
-  }
-  const next = [...map.values()];
-  await withSyncSuspended(() => useWordsStore.getState().replaceAll(next));
-
-  const prefs = await fetchPrefs(s);
-  if (prefs) applyPrefsLocally(prefs);
-
-  useSettings.getState().update({
-    lastSyncAt: Math.max(maxUpdatedAt, Date.now()),
-  });
-  return { merged };
 }
 
 function applyPrefsLocally(prefs: {

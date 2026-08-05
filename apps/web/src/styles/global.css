@@ -424,6 +424,42 @@ input, textarea, select {
   font-size: 14px;
 }
 
+.sync-banner {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--accent) 12%, var(--card));
+  color: var(--accent);
+  font-size: 12px;
+  text-align: center;
+}
+
+/* First-pull sync gate — avoid empty 0/0 looking like "no words" */
+.sync-gate {
+  min-height: 60vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 32px 20px;
+  text-align: center;
+}
+
+.sync-gate h2 {
+  margin: 8px 0 0;
+  font-size: 18px;
+  color: var(--text);
+}
+
+.sync-gate p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-light);
+  max-width: 280px;
+  line-height: 1.5;
+}
+
 /* Login screen */
 .login-screen {
   min-height: 100vh;

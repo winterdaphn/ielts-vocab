@@ -154,7 +154,8 @@ export async function applySyncPayload(
   if (decrypted) {
     const patch: Partial<Settings> = {};
     if (typeof decrypted.apiKey === 'string' && decrypted.apiKey) patch.apiKey = decrypted.apiKey;
-    if (typeof decrypted.syncToken === 'string') patch.syncToken = decrypted.syncToken;
+    // 勿用 CloudBase 里旧的 syncToken 覆盖当前 JWT，否则导入后推送到新服务器会失败，
+    // 本机看起来有进度，换设备拉取却是空的。
     if (typeof decrypted.apiBase === 'string' && decrypted.apiBase) patch.apiBase = decrypted.apiBase;
     if (typeof decrypted.model === 'string' && decrypted.model) patch.model = decrypted.model;
     if (

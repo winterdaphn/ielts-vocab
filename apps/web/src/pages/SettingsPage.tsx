@@ -577,7 +577,9 @@ function DataSettings() {
 
       <Card title="从 CloudBase 导入" style={{ marginTop: 12 }}>
         <p style={{ color: 'var(--text-mute)', fontSize: 13, marginBottom: 12 }}>
-          一次性把旧云函数整包迁到新关系库。需已登录新服务器，密码与当初加密同步时一致。
+          一次性把旧云函数数据迁到<strong>新服务器</strong>（先写入本机再上传）。
+          成功后其它电脑只需用同一账号登录拉取，不必再导一次 CloudBase。
+          若本机有进度、换设备没有，多半是上次没上传成功——请在本机点「立即同步」。
         </p>
         <Form layout="vertical">
           <Form.Item label="CloudBase Endpoint">
@@ -640,7 +642,9 @@ function AccountSettings() {
             <div style={{ fontSize: 18, fontWeight: 600, color: 'var(--accent)' }}>
               👤 {username || '未登录'}
             </div>
-            <div style={{ color: 'var(--text-light)', fontSize: 12 }}>数据已加密同步到云端</div>
+            <div style={{ color: 'var(--text-light)', fontSize: 12 }}>
+              学习进度存在服务器；换设备用同一账号登录即可拉取
+            </div>
           </div>
           <Button danger icon={<LogoutOutlined />} onClick={handleLogout}>退出登录</Button>
         </div>

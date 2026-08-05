@@ -32,6 +32,8 @@ export async function importFromCloudBase(opts: {
   if (!settings.syncToken) {
     throw new Error('请先登录新服务器以获取 JWT');
   }
+  // 导入过程可能改 settings；务必保住登录后的 JWT
+  const jwt = settings.syncToken;
 
   const payload = await downloadCloudBaseWithFallback(
     settings,
@@ -47,6 +49,8 @@ export async function importFromCloudBase(opts: {
     applySyncPayload(payload, opts.password, opts.username)
   );
 
+  useSettings.getState().update({ syncToken: jwt });
+
   // Ensure store mirrors Dexie after merge
   const userId = useAuth.getState().username;
   if (userId) {
@@ -54,7 +58,27 @@ export async function importFromCloudBase(opts: {
     useWordsStore.getState().setWords(rows as never);
   }
 
-  const uploaded = await pushAllWordsNow();
+  const localCount = userId
+    ? await db.words.where('userId').equals(userId).count()
+    : useWordsStore.getState().words.length;
+
+  let uploaded = 0;
+  try {
+    uploaded = await pushAllWordsNow();
+  } catch (e) {
+    throw new Error(
+      '本机已合并 CloudBase，但上传到新服务器失败：' +
+        (e instanceof Error ? e.message : '未知错误') +
+        '。请点「立即同步」重试，否则换设备看不到进度。'
+    );
+  }
+
+  if (localCount > 0 && uploaded === 0) {
+    throw new Error(
+      `本机有 ${localCount} 个词，但上传数为 0。请检查登录状态后点「立即同步」，否则换设备会是空的。`
+    );
+  }
+
   return {
     added: applied.added,
     patched: applied.patched,

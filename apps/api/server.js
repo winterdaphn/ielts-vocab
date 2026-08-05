@@ -340,12 +340,62 @@ export async function buildApp(pool, { logger = false } = {}) {
 
   app.get('/api/words', { preHandler: requireAuth }, async (req) => {
     const since = parseSince(req.query?.since);
+    const limitRaw = Number(req.query?.limit);
+    const limit =
+      Number.isFinite(limitRaw) && limitRaw > 0
+        ? Math.min(Math.floor(limitRaw), 500)
+        : null;
+    const cursor = String(req.query?.cursor || '').trim();
+
     let result;
     if (since) {
-      result = await pool.query(
-        `SELECT * FROM words WHERE user_id = $1 AND updated_at > $2 ORDER BY updated_at ASC`,
-        [req.user.id, since]
-      );
+      // cursor format for incremental: `${updatedAtMs}:${wordId}`
+      let cursorAt = null;
+      let cursorId = '';
+      if (cursor.includes(':')) {
+        const idx = cursor.indexOf(':');
+        const ms = Number(cursor.slice(0, idx));
+        cursorId = cursor.slice(idx + 1);
+        if (Number.isFinite(ms) && ms > 0) cursorAt = new Date(ms);
+      }
+      if (limit && cursorAt && cursorId) {
+        result = await pool.query(
+          `SELECT * FROM words
+           WHERE user_id = $1
+             AND (
+               updated_at > $2
+               OR (updated_at = $2 AND word_id > $3)
+             )
+           ORDER BY updated_at ASC, word_id ASC
+           LIMIT $4`,
+          [req.user.id, cursorAt, cursorId, limit]
+        );
+      } else if (limit) {
+        result = await pool.query(
+          `SELECT * FROM words
+           WHERE user_id = $1 AND updated_at > $2
+           ORDER BY updated_at ASC, word_id ASC
+           LIMIT $3`,
+          [req.user.id, since, limit]
+        );
+      } else {
+        result = await pool.query(
+          `SELECT * FROM words WHERE user_id = $1 AND updated_at > $2 ORDER BY updated_at ASC, word_id ASC`,
+          [req.user.id, since]
+        );
+      }
+    } else if (limit) {
+      if (cursor) {
+        result = await pool.query(
+          `SELECT * FROM words WHERE user_id = $1 AND word_id > $2 ORDER BY word_id ASC LIMIT $3`,
+          [req.user.id, cursor, limit]
+        );
+      } else {
+        result = await pool.query(
+          `SELECT * FROM words WHERE user_id = $1 ORDER BY word_id ASC LIMIT $2`,
+          [req.user.id, limit]
+        );
+      }
     } else {
       result = await pool.query(
         `SELECT * FROM words WHERE user_id = $1 ORDER BY word_id ASC`,
@@ -354,7 +404,21 @@ export async function buildApp(pool, { logger = false } = {}) {
     }
     const words = result.rows.map(rowToWord);
     const maxUpdated = words.reduce((m, w) => Math.max(m, w.updatedAt || 0), 0);
-    return { ok: true, words, serverTime: Date.now(), since: since ? since.getTime() : null, maxUpdatedAt: maxUpdated || Date.now() };
+    let nextCursor = null;
+    if (limit && words.length === limit) {
+      const last = words[words.length - 1];
+      nextCursor = since
+        ? `${last.updatedAt || 0}:${last.id}`
+        : last.id;
+    }
+    return {
+      ok: true,
+      words,
+      nextCursor,
+      serverTime: Date.now(),
+      since: since ? since.getTime() : null,
+      maxUpdatedAt: maxUpdated || Date.now(),
+    };
   });
 
   app.put('/api/words/:wordId', { preHandler: requireAuth }, async (req, reply) => {
