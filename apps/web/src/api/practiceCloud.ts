@@ -229,6 +229,36 @@ export async function putPracticeItem(
   return data.applied !== false;
 }
 
+/** 一次请求写多道题的 example / attempt */
+export async function putPracticeItemsBatch(
+  settings: Settings,
+  sessionId: string,
+  items: Array<{
+    ordinal: number;
+    example?: WordExample | null;
+    attempt?: Record<string, unknown> | null;
+    wasNew?: boolean;
+  }>
+): Promise<number> {
+  if (!items.length) return 0;
+  const resp = await fetch(
+    getBase(settings) +
+      '/api/practice/sessions/' +
+      encodeURIComponent(sessionId) +
+      '/items',
+    {
+      method: 'PUT',
+      headers: headers(settings),
+      body: JSON.stringify({
+        items: items.map((it) => ({ ...it, clientUpdatedAt: Date.now() })),
+      }),
+    }
+  );
+  if (!resp.ok) return 0;
+  const data = await readJson(resp);
+  return Number(data.applied) || 0;
+}
+
 export async function completePracticeSession(
   settings: Settings,
   sessionId: string

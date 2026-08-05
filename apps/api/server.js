@@ -761,12 +761,18 @@ export async function buildApp(pool, { logger = false } = {}) {
     const row = ins.rows[0];
     const sessionId = row.session_id;
 
-    for (let i = 0; i < wordIds.length; i++) {
-      const wid = wordIds[i];
+    if (wordIds.length) {
+      const values = [];
+      const params = [];
+      let p = 1;
+      for (let i = 0; i < wordIds.length; i++) {
+        values.push(`($${p++}, $${p++}, $${p++}, $${p++}, $${p++})`);
+        params.push(sessionId, i, wordIds[i], !!wasNewMap[wordIds[i]], clientUpdatedAt);
+      }
       await pool.query(
         `INSERT INTO practice_session_items (session_id, ordinal, word_id, was_new, client_updated_at)
-         VALUES ($1, $2, $3, $4, $5)`,
-        [sessionId, i, wid, !!wasNewMap[wid], clientUpdatedAt]
+         VALUES ${values.join(', ')}`,
+        params
       );
     }
 
@@ -917,6 +923,72 @@ export async function buildApp(pool, { logger = false } = {}) {
     );
 
     return { ok: true, applied: true };
+  });
+
+  /** 批量更新题目行，避免开练预取时 N 次 PUT */
+  app.put('/api/practice/sessions/:sessionId/items', { preHandler: requireAuth }, async (req, reply) => {
+    const sessionId = String(req.params.sessionId || '');
+    const list = Array.isArray(req.body?.items) ? req.body.items : null;
+    if (!list || !list.length) return reply.code(400).send({ error: 'missing_items' });
+    if (list.length > 200) return reply.code(413).send({ error: 'batch_too_large', max: 200 });
+
+    const sess = await pool.query(
+      `SELECT session_id FROM practice_sessions
+       WHERE session_id = $1 AND user_id = $2 AND status = 'active'`,
+      [sessionId, req.user.id]
+    );
+    if (sess.rowCount === 0) return reply.code(404).send({ error: 'session_not_found' });
+
+    let applied = 0;
+    for (const raw of list) {
+      const ordinal = Number(raw?.ordinal);
+      if (!Number.isFinite(ordinal) || ordinal < 0 || ordinal > 500) continue;
+      const clientUpdatedAt = Number(raw?.clientUpdatedAt) || Date.now();
+
+      const existing = await pool.query(
+        `SELECT client_updated_at FROM practice_session_items
+         WHERE session_id = $1 AND ordinal = $2`,
+        [sessionId, ordinal]
+      );
+      if (existing.rowCount === 0) continue;
+      if (clientUpdatedAt < Number(existing.rows[0].client_updated_at || 0)) continue;
+
+      const sets = ['client_updated_at = $1'];
+      const vals = [clientUpdatedAt];
+      let i = 2;
+      if (raw.example !== undefined) {
+        sets.push(`example = $${i++}::jsonb`);
+        vals.push(JSON.stringify(raw.example));
+      }
+      if (raw.attempt !== undefined) {
+        sets.push(`attempt = $${i++}::jsonb`);
+        vals.push(JSON.stringify(raw.attempt));
+      }
+      if (raw.wasNew !== undefined) {
+        sets.push(`was_new = $${i++}`);
+        vals.push(!!raw.wasNew);
+      }
+      if (sets.length === 1) continue;
+      vals.push(sessionId, ordinal);
+      const sidParam = i;
+      const ordParam = i + 1;
+      await pool.query(
+        `UPDATE practice_session_items SET ${sets.join(', ')}
+         WHERE session_id = $${sidParam} AND ordinal = $${ordParam}`,
+        vals
+      );
+      applied += 1;
+    }
+
+    if (applied > 0) {
+      await pool.query(
+        `UPDATE practice_sessions SET revision = revision + 1, updated_at = NOW()
+         WHERE session_id = $1 AND user_id = $2`,
+        [sessionId, req.user.id]
+      );
+    }
+
+    return { ok: true, applied };
   });
 
   async function endPracticeSession(pool, userId, sessionId) {

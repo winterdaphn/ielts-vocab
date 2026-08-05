@@ -400,14 +400,22 @@ export function schedulePracticePrefsPush(): void {
   }, 2500);
 }
 
-/** 清除本地未完成练习 + 云端 active 会话 */
-export function clearPracticeProgress(opts?: { completed?: boolean }): void {
+/** 清除本地未完成练习；默认同时处理云端会话。
+ * 新开一轮请传 `{ cloud: false }`：本机清掉即可，随后 POST /sessions 会删旧 active，避免 abandon + create 双请求。
+ */
+export function clearPracticeProgress(opts?: {
+  completed?: boolean;
+  /** 默认 true；新开练时应 false，交给 create 删旧会话 */
+  cloud?: boolean;
+}): void {
   clearPracticeSession();
   if (practicePrefsPushTimer) {
     clearTimeout(practicePrefsPushTimer);
     practicePrefsPushTimer = null;
   }
-  void (opts?.completed ? endCloudPracticeSession() : abandonCloudPracticeSession());
+  if (opts?.cloud !== false) {
+    void (opts?.completed ? endCloudPracticeSession() : abandonCloudPracticeSession());
+  }
   void pushPrefsNow();
 }
 

@@ -22,7 +22,7 @@ import { useUserWords } from '@/store/useWords';
 
 import { useSyncStatus } from '@/store/useSyncStatus';
 import { flushSyncQueue, pullIncremental, pullOnLogin, pushPrefsNow } from '@/api/realtimeSync';
-import { flushCloudSessionPatch } from '@/api/practiceCloudSync';
+import { flushCloudSessionPatch, flushCloudItemPatches } from '@/api/practiceCloudSync';
 
 import { prefetchVocabBank } from '@/json/vocab';
 
@@ -141,6 +141,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
       } else {
         // Leaving the tab: push practice progress before the page freezes.
         void flushCloudSessionPatch({ keepalive: true });
+        void flushCloudItemPatches();
       }
     };
 

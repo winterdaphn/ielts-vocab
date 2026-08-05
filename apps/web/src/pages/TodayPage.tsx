@@ -9,7 +9,6 @@ import { getLS } from '@/utils/date';
 import { clearPracticeProgress } from '@/api/realtimeSync';
 import {
   cloudSessionFromSaved,
-  isCloudPracticeInSync,
   loadActiveCloudPractice,
 } from '@/api/practiceCloudSync';
 import {
@@ -64,12 +63,14 @@ export default function TodayPage() {
   const curve = useMemo(() => getLearningCurve(14), [savedTick, words.length]);
   const scopeCounts = useMemo(() => countByScope(words), [words]);
 
+  // 回到今日：刷新本机续做摘要（不触发云端）
   useEffect(() => {
     if (location.pathname === '/today') {
       setSavedTick((n) => n + 1);
     }
   }, [location.pathname, location.key]);
 
+  // 云端续做：只跟路由/登录走，不要依赖 savedTick（否则会 check+active 打两遍）
   useEffect(() => {
     if (location.pathname !== '/today' || !settings.syncToken) {
       setRemoteSummary(null);
@@ -77,7 +78,7 @@ export default function TodayPage() {
     }
     let cancelled = false;
     void (async () => {
-      await isCloudPracticeInSync();
+      // 直接拉 active 即可，不必先 check revision（多一次请求）
       const remote = await loadActiveCloudPractice();
       if (cancelled) return;
       if (!remote || remote.idx >= remote.items.length) {
@@ -116,7 +117,7 @@ export default function TodayPage() {
     return () => {
       cancelled = true;
     };
-  }, [location.pathname, location.key, savedTick, settings.syncToken]);
+  }, [location.pathname, location.key, settings.syncToken]);
 
   const dueCount = useMemo(
     () => words.filter((w) => !w.crossedOut && !isNew(w) && isDue(w)).length,
@@ -171,7 +172,8 @@ export default function TodayPage() {
         okText: '确定',
         cancelText: '取消',
         onOk: () => {
-          clearPracticeProgress();
+          // 只清本机进度卡片；云端旧会话留给 startPractice → create 删除
+          clearPracticeProgress({ cloud: false });
           setSavedTick((n) => n + 1);
           go();
         },

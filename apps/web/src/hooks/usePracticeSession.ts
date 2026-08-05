@@ -12,7 +12,6 @@ import {
   generateRelatedWords,
   analyzeSentenceStructure,
   generateTranslateHints,
-  isLazyMetaSentence,
   type SentenceStructureAnalysis,
   type TranslateHints,
 } from '@/api/llm';
@@ -24,6 +23,7 @@ import {
   cloudSessionFromSaved,
   loadActiveCloudPractice,
   flushCloudSessionPatch,
+  flushCloudItemPatches,
   scheduleCloudSessionPatch,
   startCloudPracticeSession,
   syncCloudItemAttempt,
@@ -134,6 +134,8 @@ export function usePracticeSession() {
   const abortRef = useRef<AbortController | null>(null);
   const queueRef = useRef<(Question | null)[]>([]);
   const startedRef = useRef(false);
+  /** 主动退出时已 flush，卸载清理不要再打一遍 */
+  const exitingRef = useRef(false);
   /** Snapshot: word was new when this session started */
   const wasNewRef = useRef<Map<string, boolean>>(new Map());
   /** Sync copy for fillBatch / prefetch (avoids stale state after setDifficulty) */
@@ -230,6 +232,8 @@ export function usePracticeSession() {
     translateHints: TranslateHints | null;
     picked: string | null;
     judgeResult: JudgeResult;
+    /** 默认 true；预取改 queue 时只存本机，别狂打会话头 PATCH */
+    syncCloud?: boolean;
   }> = {}) {
     // Draft answers stay in the input only — no local/cloud persistence.
     savePracticeSession({
@@ -252,6 +256,7 @@ export function usePracticeSession() {
       judgeResult: overrides.judgeResult !== undefined ? overrides.judgeResult : judgeResult,
       phase: overrides.phase ?? phase,
     });
+    if (overrides.syncCloud === false) return;
     const cloudId = cloudPracticeSessionIdRef.current;
     if (cloudId) {
       scheduleCloudSessionPatch({
@@ -293,15 +298,23 @@ export function usePracticeSession() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasModeParam, wantResume, words.length > 0]);
 
-  // Auto-save progress while practicing
+  // 本机进度：含预取 queue（续做要用句）
   useEffect(() => {
     if (phase === 'asking' || phase === 'waiting' || phase === 'judging') {
-      persist();
+      persist({ syncCloud: false });
     } else if (phase === 'done') {
       clearPracticeProgress({ completed: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase, idx, queue, showAnswer, hintShown, translateHintLevel, translateHints, picked, judgeResult, stats]);
+
+  // 云端会话头：只跟「人在哪一题 / 揭晓状态」走，不跟预取 queue 刷屏
+  useEffect(() => {
+    if (phase === 'asking' || phase === 'waiting' || phase === 'judging') {
+      persist({ syncCloud: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, idx, showAnswer, hintShown, translateHintLevel, translateHints, picked, judgeResult, stats]);
 
   // 输入填空：提交后加载 / 生成助记提示（同 example.html）
   useEffect(() => {
@@ -430,7 +443,9 @@ export function usePracticeSession() {
     const saveNow = (keepalive = false) => {
       if (phase === 'asking' || phase === 'waiting' || phase === 'judging') {
         persist();
+        const cloudId = cloudPracticeSessionIdRef.current;
         void flushCloudSessionPatch(keepalive ? { keepalive: true } : undefined);
+        if (cloudId) void flushCloudItemPatches(cloudId);
       }
     };
     const onUnload = () => saveNow(true);
@@ -444,7 +459,7 @@ export function usePracticeSession() {
       window.removeEventListener('pagehide', onUnload);
       window.removeEventListener('beforeunload', onUnload);
       document.removeEventListener('visibilitychange', onVis);
-      saveNow(false);
+      if (!exitingRef.current) saveNow(false);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase, idx, queue, showAnswer, hintShown, translateHintLevel, translateHints, picked, judgeResult, stats, mode, sessionWords]);
@@ -471,52 +486,9 @@ export function usePracticeSession() {
     };
   }
 
-  function questionFromStoredCache(word: Word, m: Mode, pool: Word[]): Question | null {
-    const difficulty = difficultyRef.current;
-    const cached = word.examples?.find((example) => {
-      if (!example?.en || !example?.zh) return false;
-      if (isLazyMetaSentence(example.en, word.word)) return false;
-      return example.difficulty
-        ? example.difficulty === difficulty
-        : difficulty === 'medium';
-    });
-    if (!cached) return null;
-    return toQuestion(
-      word,
-      { en: cached.en, zh: cached.zh, source: 'cache' },
-      m,
-      pool
-    );
-  }
-
   /** Returns error message if generation failed hard (API / parse). */
   async function fillBatch(sid: number, list: Word[], m: Mode, pool: Word[]): Promise<string> {
-    const cachedNext = [...queueRef.current];
-    let cacheHit = false;
-    for (const word of list) {
-      const i = pool.findIndex((item) => item.id === word.id);
-      if (i < 0 || cachedNext[i]) continue;
-      const cached = questionFromStoredCache(word, m, pool);
-      if (cached) {
-        cachedNext[i] = cached;
-        cacheHit = true;
-      }
-    }
-    if (cacheHit) {
-      queueRef.current = cachedNext;
-      setQueue(cachedNext);
-      const cloudId = cloudPracticeSessionIdRef.current;
-      if (cloudId) {
-        for (const word of list) {
-          const i = pool.findIndex((item) => item.id === word.id);
-          const question = cachedNext[i];
-          if (i >= 0 && question?.source === 'cache') {
-            syncCloudItemExample(cloudId, i, question.example, !!question.wasNew);
-          }
-        }
-      }
-    }
-
+    // 词条 examples 只作收藏回忆，做题不复用；每题走 LLM / 本轮会话预取。
     const todo = list.filter(
       (w) =>
         !inflightRef.current.has(w.id) &&
@@ -622,6 +594,7 @@ export function usePracticeSession() {
         parseSentenceDifficulty(remoteSaved.difficulty) &&
       saved.wordIds.length === remoteSaved.wordIds.length &&
       saved.wordIds.every((id, i) => id === remoteSaved.wordIds[i]);
+    let createdFreshCloud = false;
     if (saved === local && (!remote || !sameRemoteRound)) {
       const wasNewByWordId: Record<string, boolean> = {};
       for (const word of hydrated.sessionWords) {
@@ -635,6 +608,7 @@ export function usePracticeSession() {
         wasNewByWordId,
       });
       cloudPracticeSessionIdRef.current = cloud?.sessionId || null;
+      createdFreshCloud = !!cloud;
     } else if (remote) {
       cloudPracticeSessionIdRef.current = remote.sessionId;
     }
@@ -657,8 +631,10 @@ export function usePracticeSession() {
     setUserText('');
     setJudgeResult(hydrated.judgeResult);
 
+    // 只有「本机进度 → 新建云端会话」才需要把已有例句推上去；
+    // 续做用的本来就是云端 items，再 PUT 一遍纯浪费。
     const cloudId = cloudPracticeSessionIdRef.current;
-    if (cloudId) {
+    if (createdFreshCloud && cloudId) {
       hydrated.queue.forEach((question, ordinal) => {
         if (question) {
           syncCloudItemExample(
@@ -751,7 +727,8 @@ export function usePracticeSession() {
     nextScope?: StudyScope,
     nextDifficulty?: SentenceDifficulty
   ) {
-    clearPracticeProgress();
+    // 只清本机：云端旧 active 由后面 createPracticeSession 一次性删掉，避免 abandon+create 重复
+    clearPracticeProgress({ cloud: false });
     const s = nextScope ?? scope ?? initialScope;
     const d = nextDifficulty ?? difficulty ?? initialDifficulty;
     setScope(s);
@@ -816,30 +793,11 @@ export function usePracticeSession() {
     setPhase('loading');
 
     const initial = pool.slice(0, Math.min(PREFETCH_INITIAL, pool.length));
-    const needLlm: Word[] = [];
+    const needLlm = [...initial];
     const prefilled = pool.map(() => null as Question | null);
-
-    for (const w of initial) {
-      const i = pool.findIndex((x) => x.id === w.id);
-      const cached = questionFromStoredCache(w, m, pool);
-      if (cached) {
-        prefilled[i] = cached;
-      } else {
-        needLlm.push(w);
-      }
-    }
 
     queueRef.current = prefilled;
     setQueue(prefilled);
-    const cloudId = cloudPracticeSessionIdRef.current;
-    if (cloudId) {
-      for (let i = 0; i < prefilled.length; i += 1) {
-        const question = prefilled[i];
-        if (question) {
-          syncCloudItemExample(cloudId, i, question.example, !!question.wasNew);
-        }
-      }
-    }
 
     let batchErr = '';
     if (needLlm.length) {
@@ -865,9 +823,12 @@ export function usePracticeSession() {
   }
 
   async function exitPractice() {
+    exitingRef.current = true;
     if (phase === 'asking' || phase === 'waiting' || phase === 'judging') {
       persist();
+      const cloudId = cloudPracticeSessionIdRef.current;
       await flushCloudSessionPatch();
+      if (cloudId) await flushCloudItemPatches(cloudId);
       message.info('进度已保存，可随时继续');
     }
     cancelSessionWork();

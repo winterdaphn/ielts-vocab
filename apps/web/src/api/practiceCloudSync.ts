@@ -20,7 +20,7 @@ import {
   createPracticeSession,
   fetchActivePracticeSession,
   patchPracticeSession,
-  putPracticeItem,
+  putPracticeItemsBatch,
   type CloudPracticeSession,
 } from '@/api/practiceCloud';
 import type { PracticeMode, SentenceDifficulty, StudyScope } from '@/utils/practiceSession';
@@ -205,13 +205,93 @@ export async function flushCloudSessionPatch(opts?: {
 }
 
 /**
- * 题目行：把「这一题的例句」写到云端 practice_session_items.example。
- *
- * 当前是 fire-and-forget：`void putPracticeItem(...)`，发出去就不管成功失败。
- * 好处：预取/换句不卡 UI。
- * 风险：弱网或立刻关页时，云端可能还没这条例句，另一台续做会缺句再调 LLM。
- *
- * 若以后要加强：出题/换句成功后 await；或退出时把未确认的 item 再补发一遍。
+ * 题目行补丁队列：同一 session 内按 ordinal 合并，批量一次发出。
+ * 避免开练预取时「一词一请求」把网络打爆。
+ */
+type ItemPatch = {
+  ordinal: number;
+  example?: WordExample | null;
+  attempt?: Record<string, unknown> | null;
+  wasNew?: boolean;
+};
+
+const pendingItemsBySession = new Map<string, Map<number, ItemPatch>>();
+const itemFlushPromises = new Map<string, Promise<void>>();
+/** 预取爆发时稍等再发，把多道题合成一批 */
+const itemFlushTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+function queueItemPatch(sessionId: string, patch: ItemPatch) {
+  let map = pendingItemsBySession.get(sessionId);
+  if (!map) {
+    map = new Map();
+    pendingItemsBySession.set(sessionId, map);
+  }
+  const prev = map.get(patch.ordinal) || { ordinal: patch.ordinal };
+  map.set(patch.ordinal, {
+    ordinal: patch.ordinal,
+    example: patch.example !== undefined ? patch.example : prev.example,
+    attempt: patch.attempt !== undefined ? patch.attempt : prev.attempt,
+    wasNew: patch.wasNew !== undefined ? patch.wasNew : prev.wasNew,
+  });
+}
+
+function scheduleItemsFlush(sessionId: string) {
+  const prev = itemFlushTimers.get(sessionId);
+  if (prev) clearTimeout(prev);
+  itemFlushTimers.set(
+    sessionId,
+    setTimeout(() => {
+      itemFlushTimers.delete(sessionId);
+      void ensureCloudItemsFlush(sessionId);
+    }, 120)
+  );
+}
+
+async function drainCloudItemPatches(sessionId: string): Promise<void> {
+  const s = settings();
+  const map = pendingItemsBySession.get(sessionId);
+  if (!s.syncToken || !map || map.size === 0) {
+    pendingItemsBySession.delete(sessionId);
+    return;
+  }
+  const items = [...map.values()];
+  map.clear();
+  pendingItemsBySession.delete(sessionId);
+  try {
+    const applied = await putPracticeItemsBatch(s, sessionId, items);
+    if (applied > 0) {
+      console.info('[practice-cloud] items batch', { sessionId, applied, queued: items.length });
+    }
+  } catch (e) {
+    console.warn('[practice-cloud] items batch failed', e);
+    for (const it of items) queueItemPatch(sessionId, it);
+  }
+}
+
+function ensureCloudItemsFlush(sessionId: string): Promise<void> {
+  const timer = itemFlushTimers.get(sessionId);
+  if (timer) {
+    clearTimeout(timer);
+    itemFlushTimers.delete(sessionId);
+  }
+  const existing = itemFlushPromises.get(sessionId);
+  if (existing) return existing;
+  const p = (async () => {
+    try {
+      await drainCloudItemPatches(sessionId);
+    } finally {
+      itemFlushPromises.delete(sessionId);
+      if ((pendingItemsBySession.get(sessionId)?.size || 0) > 0) {
+        void ensureCloudItemsFlush(sessionId);
+      }
+    }
+  })();
+  itemFlushPromises.set(sessionId, p);
+  return p;
+}
+
+/**
+ * 题目行：例句写入合并队列（~120ms 内多题合成 1 次批量请求）。
  */
 export function syncCloudItemExample(
   sessionId: string,
@@ -221,15 +301,12 @@ export function syncCloudItemExample(
 ) {
   const s = settings();
   if (!s.syncToken) return;
-  void putPracticeItem(s, sessionId, ordinal, { example, wasNew }).then((ok) => {
-    if (ok) console.info('[practice-cloud] item example', ordinal);
-  });
+  queueItemPatch(sessionId, { ordinal, example, wasNew });
+  scheduleItemsFlush(sessionId);
 }
 
 /**
- * 题目行：把「这一题的作答」写到 attempt（对错、选项等）。
- * 同样 fire-and-forget；目前只在点「下一题」时由 usePracticeSession.next() 调用。
- * 草稿输入不会走这里。
+ * 题目行：作答记录进同一批队列（点「下一题」时调用）。
  */
 export function syncCloudItemAttempt(
   sessionId: string,
@@ -238,13 +315,28 @@ export function syncCloudItemAttempt(
 ) {
   const s = settings();
   if (!s.syncToken) return;
-  void putPracticeItem(s, sessionId, ordinal, { attempt });
+  queueItemPatch(sessionId, { ordinal, attempt });
+  scheduleItemsFlush(sessionId);
 }
 
-/** 本轮练完：先 flush 会话头，再把云端会话标成 completed */
+/** 把未发出的题目行补丁发完 */
+export async function flushCloudItemPatches(sessionId?: string): Promise<void> {
+  if (sessionId) {
+    await ensureCloudItemsFlush(sessionId);
+    return;
+  }
+  const ids = new Set<string>([
+    ...pendingItemsBySession.keys(),
+    ...itemFlushPromises.keys(),
+  ]);
+  await Promise.all([...ids].map((id) => ensureCloudItemsFlush(id)));
+}
+
+/** 本轮练完：先 flush 会话头 + 题目行，再把云端会话删掉 */
 export async function endCloudPracticeSession(): Promise<void> {
-  await flushCloudSessionPatch();
   const meta = readCloudMeta();
+  await flushCloudSessionPatch();
+  if (meta?.sessionId) await flushCloudItemPatches(meta.sessionId);
   writeCloudMeta(null);
   const s = settings();
   if (!s.syncToken || !meta?.sessionId) return;
@@ -256,10 +348,11 @@ export async function endCloudPracticeSession(): Promise<void> {
   }
 }
 
-/** 放弃本轮：先 flush，再 abandon 云端会话 */
+/** 放弃本轮：先 flush，再删云端会话 */
 export async function abandonCloudPracticeSession(): Promise<void> {
-  await flushCloudSessionPatch();
   const meta = readCloudMeta();
+  await flushCloudSessionPatch();
+  if (meta?.sessionId) await flushCloudItemPatches(meta.sessionId);
   writeCloudMeta(null);
   const s = settings();
   if (!s.syncToken || !meta?.sessionId) return;
