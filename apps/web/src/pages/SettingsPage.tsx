@@ -129,11 +129,34 @@ function AISettings() {
               placeholder="https://api.openai.com/v1"
             />
           </Form.Item>
-          <Form.Item label="模型">
+          <Form.Item
+            label="低档模型（快、省）"
+            extra="词形还原、分类、翻译小提示、句法拆解、助记、连接测试"
+          >
             <Input
-              value={settings.model}
-              onChange={(e) => update({ model: e.target.value })}
-              placeholder="gpt-4o-mini"
+              value={settings.modelLow}
+              onChange={(e) => update({ modelLow: e.target.value })}
+              placeholder="如 glm-4-flash"
+            />
+          </Form.Item>
+          <Form.Item
+            label="中档模型（练习主力）"
+            extra="练习出题与判分、加词查词、搭配/相关词、近义候选"
+          >
+            <Input
+              value={settings.modelMid}
+              onChange={(e) => update({ modelMid: e.target.value, model: e.target.value })}
+              placeholder="如 glm-4-air"
+            />
+          </Form.Item>
+          <Form.Item
+            label="高档模型（质量优先）"
+            extra="词详情多例句+四选一、近义长辨析"
+          >
+            <Input
+              value={settings.modelHigh}
+              onChange={(e) => update({ modelHigh: e.target.value })}
+              placeholder="如 glm-4-plus"
             />
           </Form.Item>
           <Button type="primary" block onClick={handleTest} loading={testing} icon={<ApiOutlined />}>

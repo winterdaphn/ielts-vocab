@@ -188,34 +188,54 @@ export async function putWord(settings: Settings, word: Word): Promise<Word> {
   return (parseWord(data.word) || word) as Word;
 }
 
-export async function patchWordProgress(
+/**
+ * 字段级部分更新：body 里有什么就改什么。
+ * 404 时回退整词 PUT（远端还没有这行）。
+ */
+export async function patchWordFields(
   settings: Settings,
-  word: Word
-): Promise<Word> {
+  wordId: string,
+  fields: Record<string, unknown>,
+  fallbackWord?: Word
+): Promise<Word | null> {
   const resp = await fetch(
-    getBase(settings) + '/api/words/' + encodeURIComponent(word.id) + '/progress',
+    getBase(settings) + '/api/words/' + encodeURIComponent(wordId),
     {
       method: 'PATCH',
       headers: authHeaders(settings),
-      body: JSON.stringify({
-        ease: word.ease,
-        interval: word.interval,
-        streak: word.streak,
-        nextReview: word.nextReview,
-        totalReviews: word.totalReviews,
-        correctReviews: word.correctReviews,
-        crossedOut: word.crossedOut,
-        starred: !!word.starred,
-      }),
+      body: JSON.stringify({ ...fields, updatedAt: Date.now() }),
     }
   );
   const data = await readJson(resp);
   if (!resp.ok) {
-    // Row missing remotely — fall back to full put
-    if (resp.status === 404) return putWord(settings, word);
-    throw new WordsApiError(String(data.error || `进度同步失败 ${resp.status}`), resp.status);
+    if (resp.status === 404 && fallbackWord) {
+      return putWord(settings, fallbackWord);
+    }
+    throw new WordsApiError(String(data.error || `部分更新失败 ${resp.status}`), resp.status);
   }
-  return (parseWord(data.word) || word) as Word;
+  return parseWord(data.word);
+}
+
+export async function patchWordProgress(
+  settings: Settings,
+  word: Word
+): Promise<Word> {
+  const patched = await patchWordFields(
+    settings,
+    word.id,
+    {
+      ease: word.ease,
+      interval: word.interval,
+      streak: word.streak,
+      nextReview: word.nextReview,
+      totalReviews: word.totalReviews,
+      correctReviews: word.correctReviews,
+      crossedOut: word.crossedOut,
+      starred: !!word.starred,
+    },
+    word
+  );
+  return (patched || word) as Word;
 }
 
 export async function deleteWordRemote(settings: Settings, wordId: string): Promise<void> {

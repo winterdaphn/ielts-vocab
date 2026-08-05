@@ -100,6 +100,8 @@ export interface Word {
 export interface WordExample {
   en: string;
   zh: string;
+  /** 生成该例句时选择的难度；旧数据未标记时按 medium 处理 */
+  difficulty?: 'easy' | 'medium' | 'hard';
   blank?: string;          // the cloze target word
   highlighted?: string;    // pre-formatted HTML with <mark>
   choiceA?: string;        // 4 multiple choice options

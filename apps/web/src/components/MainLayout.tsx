@@ -138,6 +138,9 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
       if (document.visibilityState === 'visible') {
         void flushSyncQueue();
         void flushCloudSessionPatch();
+      } else {
+        // Leaving the tab: push practice progress before the page freezes.
+        void flushCloudSessionPatch({ keepalive: true });
       }
     };
 

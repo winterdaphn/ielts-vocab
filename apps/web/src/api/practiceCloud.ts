@@ -185,7 +185,8 @@ export async function patchPracticeSession(
     idx?: number;
     stats?: { correct: number; total: number };
     uiState?: Record<string, unknown>;
-  }
+  },
+  opts?: { keepalive?: boolean }
 ): Promise<CloudPracticeSession | null> {
   const resp = await fetch(
     getBase(settings) + '/api/practice/sessions/' + encodeURIComponent(sessionId),
@@ -193,6 +194,7 @@ export async function patchPracticeSession(
       method: 'PATCH',
       headers: headers(settings),
       body: JSON.stringify({ ...patch, clientUpdatedAt: Date.now() }),
+      keepalive: !!opts?.keepalive,
     }
   );
   const data = await readJson(resp);

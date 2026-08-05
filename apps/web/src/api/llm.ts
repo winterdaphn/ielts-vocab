@@ -3,7 +3,7 @@
  * Used for example generation and answer judging.
  */
 
-import type { Settings } from '@/types/settings';
+import type { Settings, ModelTier } from '@/types/settings';
 import type {
   Collocation,
   RelatedWord,
@@ -23,10 +23,28 @@ export interface ChatMessage {
 }
 
 export interface CallOptions {
+  /** 默认 mid；见各 export 函数注释 */
+  modelTier?: ModelTier;
   temperature?: number;
   maxTokens?: number;
   jsonMode?: boolean;
   signal?: AbortSignal;
+}
+
+export function resolveModel(settings: Settings, tier: ModelTier = 'mid'): string {
+  const trim = (s: string | undefined) => String(s || '').trim();
+  const preset = PROVIDERS[settings.provider];
+  const low = trim(settings.modelLow) || trim(preset?.modelLow) || trim(preset?.modelMid);
+  const mid = trim(settings.modelMid) || trim(settings.model) || trim(preset?.modelMid) || low;
+  const high = trim(settings.modelHigh) || trim(preset?.modelHigh) || mid;
+  switch (tier) {
+    case 'low':
+      return low || mid || high || 'gpt-4o-mini';
+    case 'high':
+      return high || mid || low || 'gpt-4o-mini';
+    default:
+      return mid || low || high || 'gpt-4o-mini';
+  }
 }
 
 export class LLMError extends Error {}
@@ -70,7 +88,8 @@ export async function callLLM(
   if (!settings.apiKey) throw new LLMError('未设置 API Key');
   if (!settings.apiBase) throw new LLMError('未设置 API Base URL');
 
-  const model = settings.model || PROVIDERS[settings.provider]?.model || 'gpt-4o-mini';
+  const model =
+    resolveModel(settings, options.modelTier ?? 'mid');
   const url = settings.apiBase.replace(/\/$/, '') + '/chat/completions';
 
   async function post(useJsonMode: boolean): Promise<Response> {
@@ -134,7 +153,7 @@ export async function testConnection(settings: Settings): Promise<string> {
   return callLLM(
     [{ role: 'user', content: 'Reply with just the word "ok" and nothing else.' }],
     settings,
-    { temperature: 0 }
+    { temperature: 0, modelTier: 'low' }
   );
 }
 
@@ -177,7 +196,7 @@ Part of speech: ${word.partOfSpeech || 'N/A'}`;
       { role: 'user', content },
     ],
     settings,
-    { temperature: 0.8, jsonMode: true }
+    { temperature: 0.8, jsonMode: true, modelTier: 'high' }
   );
 
   try {
@@ -258,6 +277,7 @@ Return JSON ONLY:
     const text = await callLLM([{ role: 'user', content: prompt }], settings, {
       temperature: 0.35,
       jsonMode: true,
+      modelTier: 'low',
     });
     const parsed = JSON.parse(text);
     const overview = String(parsed.overview || '').trim();
@@ -351,6 +371,7 @@ Return JSON ONLY:
     const text = await callLLM([{ role: 'user', content: prompt }], settings, {
       temperature: 0.3,
       jsonMode: true,
+      modelTier: 'mid',
     });
     const parsed = JSON.parse(text);
     return {
@@ -414,6 +435,7 @@ Return JSON ONLY:
   const text = await callLLM([{ role: 'user', content: prompt }], settings, {
     temperature: 0.4,
     jsonMode: true,
+    modelTier: 'low',
   });
 
   try {
@@ -442,6 +464,22 @@ export async function judgeTranslation(
   userTranslation: string,
   settings: Settings
 ): Promise<JudgeResult> {
+  const normalize = (text: string) =>
+    text
+      .normalize('NFKC')
+      .toLowerCase()
+      .replace(/[’‘]/g, "'")
+      .replace(/[^a-z0-9'\s]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  if (normalize(userTranslation) === normalize(referenceEn)) {
+    return {
+      score: 100,
+      correct: true,
+      feedback: '与参考译文一致，正确！',
+    };
+  }
+
   const prompt = `You are an English teacher evaluating a Chinese-to-English translation exercise.
 
 Word being practiced: "${targetWord}"
@@ -477,6 +515,7 @@ Output ONLY valid JSON.`;
   const text = await callLLM([{ role: 'user', content: prompt }], settings, {
     temperature: 0.2,
     jsonMode: true,
+    modelTier: 'mid',
   });
 
   try {
@@ -528,7 +567,7 @@ Return JSON ONLY:
       },
     ],
     settings,
-    { temperature: 0, jsonMode: true, maxTokens: 120 }
+    { temperature: 0, jsonMode: true, maxTokens: 120, modelTier: 'low' }
   );
 
   try {
@@ -592,7 +631,7 @@ Return JSON ONLY:
       },
     ],
     settings,
-    { temperature: 0.1, jsonMode: true, maxTokens: 200 }
+    { temperature: 0.1, jsonMode: true, maxTokens: 200, modelTier: 'low' }
   );
 
   try {
@@ -655,7 +694,7 @@ If US and UK phonetics are the same, still fill both. Output ONLY valid JSON.`,
       { role: 'user', content: word },
     ],
     settings,
-    { temperature: 0.1, jsonMode: true }
+    { temperature: 0.1, jsonMode: true, modelTier: 'mid' }
   );
 
   try {
@@ -828,6 +867,7 @@ Rules:
     temperature: 0.2,
     jsonMode: true,
     maxTokens: 900,
+    modelTier: 'mid',
   });
 
   try {
@@ -898,6 +938,7 @@ Rules:
     temperature: 0.1,
     jsonMode: true,
     maxTokens: 400,
+    modelTier: 'mid',
   });
 
   try {
@@ -1020,6 +1061,7 @@ ${sentence ? '- 每个近义词 item 必须有 replaceOk (boolean) 与 replaceNo
     temperature: 0.35,
     jsonMode: true,
     maxTokens: sentence ? 1600 : 1200,
+    modelTier: 'high',
   });
 
   try {
@@ -1142,6 +1184,7 @@ Rules:
     temperature: 0.35,
     jsonMode: true,
     maxTokens: 700,
+    modelTier: 'mid',
   });
 
   try {
@@ -1169,6 +1212,7 @@ Return JSON ONLY:
   const text = await callLLM([{ role: 'user', content: prompt }], settings, {
     temperature: 0.4,
     jsonMode: true,
+    modelTier: 'low',
   });
   try {
     const parsed = JSON.parse(text) as { mnemonic?: string };
@@ -1623,6 +1667,7 @@ CRITICAL: the "items" array length MUST equal the number of target words (${word
     temperature: reinforce || avoidEn.length ? 0.95 : 0.9,
     jsonMode: true,
     maxTokens,
+    modelTier: 'mid',
     signal: genOpts?.signal,
   });
 

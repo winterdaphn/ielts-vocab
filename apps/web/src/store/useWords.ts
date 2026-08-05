@@ -70,13 +70,22 @@ export const useWordsStore = create<WordsState>((set, _get) => ({
     await db.words.bulkPut(rows);
   },
   updateWord: async (w) => {
-    const prev = useWordsStore.getState().words.find((x) => x.id === w.id);
+    // Prefer Dexie as source of truth — zustand `words` is only refreshed on pull/replace,
+    // so using it alone often makes prev=undefined and forces a full PUT every time.
+    const fromDb = await db.words.get(w.id);
+    const fromStore = useWordsStore.getState().words.find((x) => x.id === w.id);
+    const prev = (fromDb as Word | undefined) || fromStore || null;
     const word = withUpdatedAt(withCanonicalWordId(w));
     const row: WordRow = {
       ...word,
       userId: useAuth.getState().username,
     };
     await dbPut(row);
+    set((state) => ({
+      words: state.words.some((x) => x.id === word.id)
+        ? state.words.map((x) => (x.id === word.id ? word : x))
+        : state.words,
+    }));
     enqueueWord(word, undefined, prev);
   },
   removeWord: async (id) => {

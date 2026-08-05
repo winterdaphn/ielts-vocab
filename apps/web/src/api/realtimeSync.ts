@@ -1,5 +1,12 @@
 /**
  * Auto incremental sync queue — debounce local Dexie writes to REST.
+ *
+ * 推送尽量走字段级 PATCH，避免整词大包：
+ * - 新建词（无 prev）→ PUT 整词
+ * - 只改复习进度 → PATCH 进度字段
+ * - 改助记 / 例句 / 近义等 → PATCH 仅变更字段（不是整词）
+ *
+ * 1s 内同一词多次变更会合并 fields；content 与 progress 可打在同一次 PATCH。
  */
 import type { Word } from '@/types/word';
 import { useSettings } from '@/store/useSettings';
@@ -17,7 +24,7 @@ import {
   deleteWordRemote,
   fetchPrefs,
   fetchWordsSince,
-  patchWordProgress,
+  patchWordFields,
   putPrefs,
   putWord,
 } from '@/api/wordsApi';
@@ -46,6 +53,10 @@ interface QueueItem {
   kind: SyncKind;
   word?: Word;
   wordId?: string;
+  /** 字段级补丁；与 fullPut 互斥 */
+  fields?: Record<string, unknown>;
+  /** 新建词：必须整词 PUT */
+  fullPut?: boolean;
 }
 
 const PROGRESS_KEYS = new Set([
@@ -75,6 +86,8 @@ const CONTENT_KEYS = new Set([
   'examples',
 ]);
 
+const TRACKED_KEYS = [...CONTENT_KEYS, ...PROGRESS_KEYS];
+
 const queue = new Map<string, QueueItem>();
 let timer: ReturnType<typeof setTimeout> | null = null;
 let flushing = false;
@@ -84,23 +97,39 @@ function settings() {
   return useSettings.getState();
 }
 
+function fieldValue(word: Word, key: string): unknown {
+  return (word as unknown as Record<string, unknown>)[key];
+}
+
+/** 只收集 prev→next 真正变了的字段 */
+export function diffWordFields(
+  prev: Word | null | undefined,
+  next: Word
+): Record<string, unknown> {
+  const fields: Record<string, unknown> = {};
+  if (!prev) return fields;
+  for (const key of TRACKED_KEYS) {
+    const a = fieldValue(prev, key);
+    const b = fieldValue(next, key);
+    if (JSON.stringify(a) !== JSON.stringify(b)) {
+      fields[key] = b;
+    }
+  }
+  return fields;
+}
+
 export function classifyWordChange(prev: Word | null | undefined, next: Word): SyncKind {
-  if (!prev) return 'content';
-  let content = false;
-  let progress = false;
-  for (const k of CONTENT_KEYS) {
-    if (JSON.stringify((prev as never)[k]) !== JSON.stringify((next as never)[k])) {
-      content = true;
-    }
+  // 没有旧快照时：若调用方没强制 kind，按 progress 处理；
+  // 真正新建应走 enqueueWord(..., 'content') → fullPut。
+  if (!prev) return 'progress';
+  const fields = diffWordFields(prev, next);
+  for (const key of Object.keys(fields)) {
+    if (CONTENT_KEYS.has(key)) return 'content';
   }
-  for (const k of PROGRESS_KEYS) {
-    if (JSON.stringify((prev as never)[k]) !== JSON.stringify((next as never)[k])) {
-      progress = true;
-    }
+  for (const key of Object.keys(fields)) {
+    if (PROGRESS_KEYS.has(key)) return 'progress';
   }
-  if (content) return 'content';
-  if (progress) return 'progress';
-  return 'content';
+  return 'progress';
 }
 
 function scheduleFlush() {
@@ -125,14 +154,53 @@ export function enqueueWord(word: Word, kind?: SyncKind, prev?: Word | null) {
   const s = settings();
   if (!s.syncToken || !s.autoSync) return;
 
-  const resolved = kind || classifyWordChange(prev, word);
+  const now = Date.now();
+  const next = { ...word, updatedAt: now } as Word;
   const existing = queue.get(word.id);
   if (existing?.kind === 'delete') return;
-  if (existing?.kind === 'content' || resolved === 'content') {
-    queue.set(word.id, { kind: 'content', word: { ...word, updatedAt: Date.now() } as Word });
-  } else {
-    queue.set(word.id, { kind: 'progress', word: { ...word, updatedAt: Date.now() } as Word });
+
+  // 新建词：强制整词 PUT
+  const isCreate = kind === 'content' && !prev;
+  if (isCreate || existing?.fullPut) {
+    queue.set(word.id, { kind: 'content', word: next, fullPut: true });
+    scheduleFlush();
+    return;
   }
+
+  const resolved = kind || classifyWordChange(prev, next);
+  const delta = prev ? diffWordFields(prev, next) : {};
+  if (!prev) {
+    // 无快照的更新：只推进度小包，缺行时由 patch 404 fallback PUT
+    const progressOnly: Record<string, unknown> = {
+      ease: next.ease,
+      interval: next.interval,
+      streak: next.streak,
+      nextReview: next.nextReview,
+      totalReviews: next.totalReviews,
+      correctReviews: next.correctReviews,
+      crossedOut: next.crossedOut,
+      starred: !!next.starred,
+      updatedAt: now,
+    };
+    queue.set(word.id, {
+      kind: 'progress',
+      word: next,
+      fields: { ...(existing?.fields || {}), ...progressOnly },
+    });
+    scheduleFlush();
+    return;
+  }
+
+  if (Object.keys(delta).length === 0) return;
+
+  const mergedFields = { ...(existing?.fields || {}), ...delta, updatedAt: now };
+  const nextKind =
+    existing?.kind === 'content' || resolved === 'content' ? 'content' : 'progress';
+  queue.set(word.id, {
+    kind: nextKind,
+    word: next,
+    fields: mergedFields,
+  });
   scheduleFlush();
 }
 
@@ -157,9 +225,12 @@ export async function flushSyncQueue(): Promise<void> {
     for (const item of items) {
       if (item.kind === 'delete' && item.wordId) {
         await deleteWordRemote(s, item.wordId);
-      } else if (item.kind === 'progress' && item.word) {
-        await patchWordProgress(s, item.word);
+      } else if (item.fullPut && item.word) {
+        await putWord(s, item.word);
+      } else if (item.fields && item.word) {
+        await patchWordFields(s, item.word.id, item.fields, item.word);
       } else if (item.word) {
+        // 兜底：不应常见
         await putWord(s, item.word);
       }
     }

@@ -125,6 +125,36 @@ export function readSavedPracticeSession(): SavedPracticeSession | null {
   }
 }
 
+/** Prefer forward progress for the same round; otherwise prefer the newer round. */
+export function choosePracticeSession(
+  local: SavedPracticeSession | null,
+  remote: SavedPracticeSession | null
+): SavedPracticeSession | null {
+  const active = (saved: SavedPracticeSession | null) =>
+    !!saved && saved.idx < saved.wordIds.length;
+  if (!active(local)) return active(remote) ? remote : null;
+  if (!active(remote)) return local;
+  if (!local || !remote) return local || remote;
+
+  const sameRound =
+    parsePracticeMode(local.mode) === parsePracticeMode(remote.mode) &&
+    parseStudyScope(local.scope) === parseStudyScope(remote.scope) &&
+    parseSentenceDifficulty(local.difficulty) ===
+      parseSentenceDifficulty(remote.difficulty) &&
+    local.wordIds.length === remote.wordIds.length &&
+    local.wordIds.every((id, i) => id === remote.wordIds[i]);
+
+  if (sameRound) {
+    if (local.idx !== remote.idx) return local.idx > remote.idx ? local : remote;
+    const localAnswered = local.stats?.total || 0;
+    const remoteAnswered = remote.stats?.total || 0;
+    if (localAnswered !== remoteAnswered) {
+      return localAnswered > remoteAnswered ? local : remote;
+    }
+  }
+  return (local.savedAt || 0) >= (remote.savedAt || 0) ? local : remote;
+}
+
 export function getSavedPracticeSummary(): PracticeSummary | null {
   const saved = readSavedPracticeSession();
   if (!saved) return null;

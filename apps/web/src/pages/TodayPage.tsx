@@ -15,6 +15,7 @@ import {
 import {
   getSavedPracticeSummary,
   readSavedPracticeSession,
+  choosePracticeSession,
   modeLabel,
   scopeLabel,
   difficultyLabel,
@@ -84,6 +85,11 @@ export default function TodayPage() {
         return;
       }
       const snap = cloudSessionFromSaved(remote);
+      const preferred = choosePracticeSession(readSavedPracticeSession(), snap);
+      if (preferred !== snap) {
+        setRemoteSummary(null);
+        return;
+      }
       const total = snap.wordIds.length;
       const idx = Math.min(snap.idx, total);
       const mode = parsePracticeMode(snap.mode);

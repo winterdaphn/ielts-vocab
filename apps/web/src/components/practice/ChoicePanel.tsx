@@ -22,6 +22,7 @@ interface Props {
   structureTip: SentenceStructureAnalysis | null;
   structureLoading: boolean;
   structureAvailable?: boolean;
+  disabled?: boolean;
   onPick: (letter: string) => void;
   onHint: () => void;
   onRequestStructure: () => void;
@@ -39,6 +40,7 @@ export default function ChoicePanel({
   structureTip,
   structureLoading,
   structureAvailable = true,
+  disabled = false,
   onPick,
   onHint,
   onRequestStructure,
@@ -70,7 +72,13 @@ export default function ChoicePanel({
         </div>
       )}
       {!showAnswer && !hintShown && (
-        <Button block size="large" onClick={onHint} style={{ marginBottom: 12 }}>
+        <Button
+          block
+          size="large"
+          onClick={onHint}
+          disabled={disabled}
+          style={{ marginBottom: 12 }}
+        >
           提示
         </Button>
       )}
@@ -86,7 +94,13 @@ export default function ChoicePanel({
           else if (showAnswer && isPicked && !isCorrect)
             style = { background: 'var(--error-light)', borderColor: 'var(--error)' };
           return (
-            <Button key={letter} block onClick={() => onPick(letter)} style={style}>
+            <Button
+              key={letter}
+              block
+              onClick={() => onPick(letter)}
+              disabled={disabled}
+              style={style}
+            >
               {letter}. {opt}
             </Button>
           );

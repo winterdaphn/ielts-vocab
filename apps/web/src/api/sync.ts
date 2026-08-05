@@ -157,7 +157,16 @@ export async function applySyncPayload(
     // 勿用 CloudBase 里旧的 syncToken 覆盖当前 JWT，否则导入后推送到新服务器会失败，
     // 本机看起来有进度，换设备拉取却是空的。
     if (typeof decrypted.apiBase === 'string' && decrypted.apiBase) patch.apiBase = decrypted.apiBase;
-    if (typeof decrypted.model === 'string' && decrypted.model) patch.model = decrypted.model;
+    if (typeof decrypted.model === 'string' && decrypted.model) {
+      patch.model = decrypted.model;
+      if (!decrypted.modelMid) patch.modelMid = decrypted.model;
+    }
+    if (typeof decrypted.modelLow === 'string' && decrypted.modelLow) patch.modelLow = decrypted.modelLow;
+    if (typeof decrypted.modelMid === 'string' && decrypted.modelMid) {
+      patch.modelMid = decrypted.modelMid;
+      patch.model = decrypted.modelMid;
+    }
+    if (typeof decrypted.modelHigh === 'string' && decrypted.modelHigh) patch.modelHigh = decrypted.modelHigh;
     if (
       decrypted.provider === 'openai' ||
       decrypted.provider === 'deepseek' ||
@@ -229,7 +238,10 @@ export async function buildSyncPayload(
     syncToken: settings.syncToken || '',
     provider: settings.provider || 'openai',
     apiBase: settings.apiBase || '',
-    model: settings.model || '',
+    model: settings.modelMid || settings.model || '',
+    modelLow: settings.modelLow || '',
+    modelMid: settings.modelMid || settings.model || '',
+    modelHigh: settings.modelHigh || '',
     session: practice,
   };
 

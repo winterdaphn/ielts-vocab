@@ -23,6 +23,7 @@ import {
 import {
   cloudSessionFromSaved,
   loadActiveCloudPractice,
+  flushCloudSessionPatch,
   scheduleCloudSessionPatch,
   startCloudPracticeSession,
   syncCloudItemAttempt,
@@ -36,6 +37,7 @@ import {
   hydratePracticeSession,
   readSavedPracticeSession,
   savePracticeSession,
+  choosePracticeSession,
   parsePracticeMode,
   parseStudyScope,
   parseSentenceDifficulty,
@@ -108,6 +110,7 @@ export function usePracticeSession() {
   const [translateHintLevel, setTranslateHintLevel] = useState(0);
   const [translateHints, setTranslateHints] = useState<TranslateHints | null>(null);
   const [translateHintLoading, setTranslateHintLoading] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
   const [mnemonicTip, setMnemonicTip] = useState('');
   const [mnemonicLoading, setMnemonicLoading] = useState(false);
   const [synonymsTip, setSynonymsTip] = useState<RelatedWord[]>([]);
@@ -156,6 +159,17 @@ export function usePracticeSession() {
       queueRef.current = next;
       return next;
     });
+  }
+
+  function latestWordSnapshot(word: Word): Word {
+    const candidates = [
+      word,
+      words.find((item) => item.id === word.id),
+      useWordsStore.getState().words.find((item) => item.id === word.id),
+    ].filter((item): item is Word => !!item);
+    return candidates.reduce((best, item) =>
+      (item.updatedAt || 0) > (best.updatedAt || 0) ? item : best
+    );
   }
 
   function isAbortError(e: unknown): boolean {
@@ -215,9 +229,9 @@ export function usePracticeSession() {
     translateHintLevel: number;
     translateHints: TranslateHints | null;
     picked: string | null;
-    userText: string;
     judgeResult: JudgeResult;
   }> = {}) {
+    // Draft answers stay in the input only — no local/cloud persistence.
     savePracticeSession({
       mode: overrides.mode ?? mode,
       scope: overrides.scope ?? scope,
@@ -234,7 +248,7 @@ export function usePracticeSession() {
           ? overrides.translateHints
           : translateHints,
       picked: overrides.picked !== undefined ? overrides.picked : picked,
-      userText: overrides.userText ?? userText,
+      userText: '',
       judgeResult: overrides.judgeResult !== undefined ? overrides.judgeResult : judgeResult,
       phase: overrides.phase ?? phase,
     });
@@ -253,7 +267,6 @@ export function usePracticeSession() {
               ? overrides.translateHints
               : translateHints,
           picked: overrides.picked !== undefined ? overrides.picked : picked,
-          userText: overrides.userText ?? userText,
           judgeResult:
             overrides.judgeResult !== undefined ? overrides.judgeResult : judgeResult,
         },
@@ -271,7 +284,11 @@ export function usePracticeSession() {
     }
     if (hasModeParam) {
       startedRef.current = true;
-      startPractice(initialMode);
+      if (readSavedPracticeSession()) {
+        resumePractice();
+      } else {
+        startPractice(initialMode);
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasModeParam, wantResume, words.length > 0]);
@@ -284,7 +301,7 @@ export function usePracticeSession() {
       clearPracticeProgress({ completed: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase, idx, queue, showAnswer, hintShown, translateHintLevel, translateHints, picked, userText, judgeResult, stats]);
+  }, [phase, idx, queue, showAnswer, hintShown, translateHintLevel, translateHints, picked, judgeResult, stats]);
 
   // 输入填空：提交后加载 / 生成助记提示（同 example.html）
   useEffect(() => {
@@ -367,8 +384,10 @@ export function usePracticeSession() {
             /* keep bank */
           }
         }
+        const baseSynonyms = mergeSynonymSources([youdaoSyn], 10);
         let aiSyn: RelatedWord[] = [];
-        if (settings.apiKey) {
+        // Dictionary results are enough for practice; only ask the LLM to fill gaps.
+        if (settings.apiKey && baseSynonyms.length < 3) {
           try {
             const fromAi = await generateRelatedWords(
               word.word,
@@ -380,7 +399,7 @@ export function usePracticeSession() {
             /* keep youdao/bank */
           }
         }
-        const synonyms = mergeSynonymSources([youdaoSyn, aiSyn], 10);
+        const synonyms = mergeSynonymSources([baseSynonyms, aiSyn], 10);
         if (cancelled) return;
         setSynonymsTip(synonyms);
         setSimilarsTip(similars);
@@ -406,18 +425,29 @@ export function usePracticeSession() {
 
   // 句型分析改为按需加载（见 requestStructureTip）
 
-  // Save when leaving the page
+  // Save when leaving the page / hiding the tab
   useEffect(() => {
-    const onHide = () => {
-      if (phase === 'asking' || phase === 'waiting' || phase === 'judging') persist();
+    const saveNow = (keepalive = false) => {
+      if (phase === 'asking' || phase === 'waiting' || phase === 'judging') {
+        persist();
+        void flushCloudSessionPatch(keepalive ? { keepalive: true } : undefined);
+      }
     };
-    window.addEventListener('beforeunload', onHide);
+    const onUnload = () => saveNow(true);
+    const onVis = () => {
+      if (document.visibilityState === 'hidden') saveNow(true);
+    };
+    window.addEventListener('pagehide', onUnload);
+    window.addEventListener('beforeunload', onUnload);
+    document.addEventListener('visibilitychange', onVis);
     return () => {
-      window.removeEventListener('beforeunload', onHide);
-      onHide();
+      window.removeEventListener('pagehide', onUnload);
+      window.removeEventListener('beforeunload', onUnload);
+      document.removeEventListener('visibilitychange', onVis);
+      saveNow(false);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase, idx, queue, showAnswer, hintShown, translateHintLevel, translateHints, picked, userText, judgeResult, stats, mode, sessionWords]);
+  }, [phase, idx, queue, showAnswer, hintShown, translateHintLevel, translateHints, picked, judgeResult, stats, mode, sessionWords]);
 
   function toQuestion(
     word: Word,
@@ -432,14 +462,61 @@ export function usePracticeSession() {
     }
     return {
       word,
-      example: exampleFromCache(word, sentence, m, distractors),
+      example: {
+        ...exampleFromCache(word, sentence, m, distractors),
+        difficulty: difficultyRef.current,
+      },
       source,
       wasNew: wasNewRef.current.get(word.id) ?? isNew(word),
     };
   }
 
+  function questionFromStoredCache(word: Word, m: Mode, pool: Word[]): Question | null {
+    const difficulty = difficultyRef.current;
+    const cached = word.examples?.find((example) => {
+      if (!example?.en || !example?.zh) return false;
+      if (isLazyMetaSentence(example.en, word.word)) return false;
+      return example.difficulty
+        ? example.difficulty === difficulty
+        : difficulty === 'medium';
+    });
+    if (!cached) return null;
+    return toQuestion(
+      word,
+      { en: cached.en, zh: cached.zh, source: 'cache' },
+      m,
+      pool
+    );
+  }
+
   /** Returns error message if generation failed hard (API / parse). */
   async function fillBatch(sid: number, list: Word[], m: Mode, pool: Word[]): Promise<string> {
+    const cachedNext = [...queueRef.current];
+    let cacheHit = false;
+    for (const word of list) {
+      const i = pool.findIndex((item) => item.id === word.id);
+      if (i < 0 || cachedNext[i]) continue;
+      const cached = questionFromStoredCache(word, m, pool);
+      if (cached) {
+        cachedNext[i] = cached;
+        cacheHit = true;
+      }
+    }
+    if (cacheHit) {
+      queueRef.current = cachedNext;
+      setQueue(cachedNext);
+      const cloudId = cloudPracticeSessionIdRef.current;
+      if (cloudId) {
+        for (const word of list) {
+          const i = pool.findIndex((item) => item.id === word.id);
+          const question = cachedNext[i];
+          if (i >= 0 && question?.source === 'cache') {
+            syncCloudItemExample(cloudId, i, question.example, !!question.wasNew);
+          }
+        }
+      }
+    }
+
     const todo = list.filter(
       (w) =>
         !inflightRef.current.has(w.id) &&
@@ -504,10 +581,14 @@ export function usePracticeSession() {
   }
 
   async function resumePractice() {
-    let saved = readSavedPracticeSession();
+    const local = readSavedPracticeSession();
     const remote = await loadActiveCloudPractice();
-    if (remote && remote.idx < remote.items.length) {
-      saved = cloudSessionFromSaved(remote);
+    const remoteSaved =
+      remote && remote.idx < remote.items.length
+        ? cloudSessionFromSaved(remote)
+        : null;
+    const saved = choosePracticeSession(local, remoteSaved);
+    if (saved && remoteSaved && saved === remoteSaved && remote) {
       cloudPracticeSessionIdRef.current = remote.sessionId;
     }
     if (!saved) {
@@ -532,6 +613,32 @@ export function usePracticeSession() {
     wasNewRef.current = new Map(
       hydrated.sessionWords.map((w) => [w.id, isNew(w)])
     );
+
+    const sameRemoteRound =
+      !!remoteSaved &&
+      saved.mode === remoteSaved.mode &&
+      parseStudyScope(saved.scope) === parseStudyScope(remoteSaved.scope) &&
+      parseSentenceDifficulty(saved.difficulty) ===
+        parseSentenceDifficulty(remoteSaved.difficulty) &&
+      saved.wordIds.length === remoteSaved.wordIds.length &&
+      saved.wordIds.every((id, i) => id === remoteSaved.wordIds[i]);
+    if (saved === local && (!remote || !sameRemoteRound)) {
+      const wasNewByWordId: Record<string, boolean> = {};
+      for (const word of hydrated.sessionWords) {
+        wasNewByWordId[word.id] = wasNewRef.current.get(word.id) ?? isNew(word);
+      }
+      const cloud = await startCloudPracticeSession({
+        mode: hydrated.mode,
+        scope: hydrated.scope,
+        difficulty: hydrated.difficulty,
+        wordIds: hydrated.sessionWords.map((word) => word.id),
+        wasNewByWordId,
+      });
+      cloudPracticeSessionIdRef.current = cloud?.sessionId || null;
+    } else if (remote) {
+      cloudPracticeSessionIdRef.current = remote.sessionId;
+    }
+
     setSessionWords(hydrated.sessionWords);
     queueRef.current = hydrated.queue;
     setQueue(hydrated.queue);
@@ -547,8 +654,22 @@ export function usePracticeSession() {
     setStructureTip(null);
     setStructureLoading(false);
     setPicked(hydrated.picked);
-    setUserText(hydrated.userText);
+    setUserText('');
     setJudgeResult(hydrated.judgeResult);
+
+    const cloudId = cloudPracticeSessionIdRef.current;
+    if (cloudId) {
+      hydrated.queue.forEach((question, ordinal) => {
+        if (question) {
+          syncCloudItemExample(
+            cloudId,
+            ordinal,
+            question.example,
+            !!question.wasNew
+          );
+        }
+      });
+    }
 
     if (!hydrated.queue[hydrated.idx]) {
       setPhase('loading');
@@ -698,43 +819,11 @@ export function usePracticeSession() {
     const needLlm: Word[] = [];
     const prefilled = pool.map(() => null as Question | null);
 
-    // easy/hard: skip cached sentences so length/complexity matches difficulty
-    const allowCache = d === 'medium';
-
     for (const w of initial) {
       const i = pool.findIndex((x) => x.id === w.id);
-      const cached =
-        allowCache &&
-        w.examples?.find((ex) => {
-          if (!ex?.en || !ex?.zh) return false;
-          if (isLazyMetaSentence(ex.en, w.word)) return false;
-          if (m === 'choice') return !!(ex.choiceA && ex.answer);
-          return true;
-        });
-      if (cached && m === 'choice' && cached.choiceA) {
-        prefilled[i] = {
-          word: w,
-          example: cached,
-          source: 'cache',
-          wasNew: wasNewRef.current.get(w.id),
-        };
-        console.info(`[practice] ${w.word} ← cache`);
-      } else if (cached && m !== 'choice' && cached.en && cached.zh) {
-        // For type-in cloze, drop stale MCQ fields if present
-        prefilled[i] = {
-          word: w,
-          example:
-            m === 'cloze'
-              ? {
-                  en: cached.en,
-                  zh: cached.zh,
-                  blank: getClozeExpectedForm(w.word, cached.en) || w.word,
-                }
-              : cached,
-          source: 'cache',
-          wasNew: wasNewRef.current.get(w.id),
-        };
-        console.info(`[practice] ${w.word} ← cache`);
+      const cached = questionFromStoredCache(w, m, pool);
+      if (cached) {
+        prefilled[i] = cached;
       } else {
         needLlm.push(w);
       }
@@ -742,6 +831,15 @@ export function usePracticeSession() {
 
     queueRef.current = prefilled;
     setQueue(prefilled);
+    const cloudId = cloudPracticeSessionIdRef.current;
+    if (cloudId) {
+      for (let i = 0; i < prefilled.length; i += 1) {
+        const question = prefilled[i];
+        if (question) {
+          syncCloudItemExample(cloudId, i, question.example, !!question.wasNew);
+        }
+      }
+    }
 
     let batchErr = '';
     if (needLlm.length) {
@@ -766,9 +864,10 @@ export function usePracticeSession() {
     }, 300);
   }
 
-  function exitPractice() {
+  async function exitPractice() {
     if (phase === 'asking' || phase === 'waiting' || phase === 'judging') {
       persist();
+      await flushCloudSessionPatch();
       message.info('进度已保存，可随时继续');
     }
     cancelSessionWork();
@@ -900,12 +999,9 @@ export function usePracticeSession() {
           ? picked === current.example.answer
           : judgeResult?.correct;
       const quality = wasCorrect ? 5 : 1;
-      const updated = applyReview(current.word, quality as 1 | 5);
-      const examples =
-        current.word.examples?.length > 0
-          ? current.word.examples
-          : [current.example];
-      await updateWord({ ...updated, examples });
+      const latest = latestWordSnapshot(current.word);
+      const updated = applyReview(latest, quality as 1 | 5);
+      await updateWord(updated);
       recordLearningEvent({
         wasNew: !!current.wasNew,
         correct: !!wasCorrect,
@@ -1032,7 +1128,7 @@ export function usePracticeSession() {
 
   async function regenerateCurrent() {
     if (!sessionWords.length) return;
-    if (phase === 'judging') return;
+    if (phase === 'judging' || regenerating) return;
     if (!settings.apiKey) {
       message.warning('请先在设置里填 API Key');
       return;
@@ -1044,44 +1140,9 @@ export function usePracticeSession() {
     const pool = sessionWords;
     const i = idx;
     const sid = sessionIdRef.current;
-    const prevQuestion = current;
     const prevEn = current?.example.en || '';
-
-    // Undo score if this card was already judged
-    if (current && (showAnswer || judgeResult)) {
-      const wasCorrect =
-        m === 'choice' ? picked === current.example.answer : !!judgeResult?.correct;
-      setStats((s) => ({
-        correct: Math.max(0, s.correct - (wasCorrect ? 1 : 0)),
-        total: Math.max(0, s.total - 1),
-      }));
-    }
-
-    setPicked(null);
-    setShowAnswer(false);
-    setHintShown(false);
-    setTranslateHintLevel(0);
-    setTranslateHints(null);
-    setTranslateHintLoading(false);
-    setMnemonicTip('');
-    setMnemonicLoading(false);
-    setSynonymsTip([]);
-    setSimilarsTip([]);
-    setRelatedLoading(false);
-    setStructureTip(null);
-    setStructureLoading(false);
-    setUserText('');
-    setJudgeResult(null);
-    setGenError('');
-    setPhase('loading');
-
-    // Clear slot so generate can overwrite
-    setQueueBoth((prev) => {
-      const next = [...prev];
-      next[i] = null;
-      return next;
-    });
-    inflightRef.current.delete(w.id);
+    setRegenerating(true);
+    inflightRef.current.add(w.id);
     prefetchFailedRef.current.delete(w.id);
 
     try {
@@ -1093,40 +1154,54 @@ export function usePracticeSession() {
       });
       if (sessionIdRef.current !== sid) return;
       if (!map[w.id]) {
-        if (prevQuestion) {
-          setQueueBoth((prev) => {
-            const next = [...prev];
-            next[i] = prevQuestion;
-            return next;
-          });
-          setPhase('asking');
-        } else {
-          setGenError('出题失败，请重试');
-        }
         message.error('出题失败，请重试');
         return;
       }
+      const generated = toQuestion(w, map[w.id], m, pool);
+
+      // Only reset the answered card after the replacement is safely ready.
+      if (current && (showAnswer || judgeResult)) {
+        const wasCorrect =
+          m === 'choice' ? picked === current.example.answer : !!judgeResult?.correct;
+        setStats((s) => ({
+          correct: Math.max(0, s.correct - (wasCorrect ? 1 : 0)),
+          total: Math.max(0, s.total - 1),
+        }));
+      }
+      setPicked(null);
+      setShowAnswer(false);
+      setHintShown(false);
+      setTranslateHintLevel(0);
+      setTranslateHints(null);
+      setTranslateHintLoading(false);
+      setMnemonicTip('');
+      setMnemonicLoading(false);
+      setSynonymsTip([]);
+      setSimilarsTip([]);
+      setRelatedLoading(false);
+      setStructureTip(null);
+      setStructureLoading(false);
+      setUserText('');
+      setJudgeResult(null);
+      setGenError('');
+
       setQueueBoth((prev) => {
         const next = [...prev];
-        next[i] = toQuestion(w, map[w.id], m, pool);
+        next[i] = generated;
         return next;
       });
+      const cloudId = cloudPracticeSessionIdRef.current;
+      if (cloudId) {
+        syncCloudItemExample(cloudId, i, generated.example, !!generated.wasNew);
+      }
       setGenError('');
-      setPhase('asking');
       message.success('已换一句');
     } catch (e) {
       if (isAbortError(e) || sessionIdRef.current !== sid) return;
-      if (prevQuestion) {
-        setQueueBoth((prev) => {
-          const next = [...prev];
-          next[i] = prevQuestion;
-          return next;
-        });
-        setPhase('asking');
-      } else {
-        setGenError('出题失败，请重试');
-      }
       message.error('出题失败：' + (e instanceof Error ? e.message : '未知错误'));
+    } finally {
+      inflightRef.current.delete(w.id);
+      setRegenerating(false);
     }
   }
 
@@ -1166,6 +1241,43 @@ export function usePracticeSession() {
     message.success(nextStarred ? '已加星标' : '已取消星标');
   }
 
+  async function toggleExampleFavorite() {
+    if (!current) return;
+    const latest = latestWordSnapshot(current.word);
+    const isSame = (example: Word['examples'][number]) =>
+      example.en === current.example.en && example.zh === current.example.zh;
+    const alreadySaved = (latest.examples || []).some(isSame);
+    const savedExample = {
+      en: current.example.en,
+      zh: current.example.zh,
+      blank: current.example.blank,
+      difficulty: current.example.difficulty,
+    };
+    const examples = alreadySaved
+      ? (latest.examples || []).filter((example) => !isSame(example))
+      : [savedExample, ...(latest.examples || [])];
+    const updated = { ...latest, examples };
+    await updateWord(updated);
+    setSessionWords((prev) =>
+      prev.map((word) => (word.id === updated.id ? updated : word))
+    );
+    setQueueBoth((prev) =>
+      prev.map((question) =>
+        question?.word.id === updated.id
+          ? { ...question, word: updated }
+          : question
+      )
+    );
+    message.success(alreadySaved ? '已取消收藏例句' : '例句已收藏到词库');
+  }
+
+  const exampleFavorited =
+    !!current &&
+    (current.word.examples || []).some(
+      (example) =>
+        example.en === current.example.en && example.zh === current.example.zh
+    );
+
   return {
     phase,
     mode,
@@ -1183,6 +1295,8 @@ export function usePracticeSession() {
     translateHintLevel,
     translateHints,
     translateHintLoading,
+    regenerating,
+    exampleFavorited,
     userText,
     judgeResult,
     mnemonicTip,
@@ -1211,6 +1325,7 @@ export function usePracticeSession() {
     regenerateCurrent,
     retryGenerate,
     toggleStarred,
+    toggleExampleFavorite,
     navigate,
   };
 }

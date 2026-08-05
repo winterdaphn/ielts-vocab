@@ -1,5 +1,12 @@
 ﻿import { Button } from 'antd';
-import { RightOutlined, ReloadOutlined, StarOutlined, StarFilled } from '@ant-design/icons';
+import {
+  HeartFilled,
+  HeartOutlined,
+  RightOutlined,
+  ReloadOutlined,
+  StarOutlined,
+  StarFilled,
+} from '@ant-design/icons';
 import { usePracticeSession } from '@/hooks/usePracticeSession';
 import { isClozeFamily } from '@/utils/practiceSelect';
 import { modeLabel, scopeLabel, difficultyLabel } from '@/utils/practiceSession';
@@ -68,6 +75,7 @@ export default function PracticePage() {
 
   const current = s.current;
   const judging = s.phase === 'judging';
+  const busy = judging || s.regenerating;
   const answerWord =
     s.judgeResult?.expected || current.example.blank || current.word.word;
   const isNewCard = !!current.wasNew;
@@ -187,7 +195,7 @@ export default function PracticePage() {
             structureTip={s.structureTip}
             structureLoading={s.structureLoading}
             structureAvailable={s.structureAvailable}
-            judging={judging}
+            judging={busy}
             onUserTextChange={s.setUserText}
             onHint={() => s.setHintShown(true)}
             onSubmit={s.submitClozeInput}
@@ -206,6 +214,7 @@ export default function PracticePage() {
             structureTip={s.structureTip}
             structureLoading={s.structureLoading}
             structureAvailable={s.structureAvailable}
+            disabled={busy}
             onPick={s.pickAnswer}
             onHint={() => s.setHintShown(true)}
             onRequestStructure={s.requestStructureTip}
@@ -215,7 +224,7 @@ export default function PracticePage() {
             current={current}
             userText={s.userText}
             judgeResult={s.judgeResult}
-            judging={judging}
+            judging={busy}
             hintLevel={s.translateHintLevel}
             hints={s.translateHints}
             hintLoading={s.translateHintLoading}
@@ -231,6 +240,7 @@ export default function PracticePage() {
             block
             size="large"
             onClick={s.next}
+            disabled={s.regenerating}
             style={{ marginTop: 16 }}
             icon={<RightOutlined />}
           >
@@ -249,7 +259,7 @@ export default function PracticePage() {
           className={current.word.starred ? 'practice-star-action active' : 'practice-star-action'}
           icon={current.word.starred ? <StarFilled /> : <StarOutlined />}
           onClick={s.toggleStarred}
-          disabled={judging}
+          disabled={busy}
           title={current.word.starred ? '取消星标' : '加星标，方便单独复习'}
         >
           {current.word.starred ? '已星标' : '星标'}
@@ -257,9 +267,21 @@ export default function PracticePage() {
         <Button
           type="text"
           size="small"
+          className={s.exampleFavorited ? 'practice-star-action active' : 'practice-star-action'}
+          icon={s.exampleFavorited ? <HeartFilled /> : <HeartOutlined />}
+          onClick={s.toggleExampleFavorite}
+          disabled={busy}
+          title={s.exampleFavorited ? '取消收藏这条例句' : '把这条例句收藏到词库'}
+        >
+          {s.exampleFavorited ? '已收藏例句' : '收藏例句'}
+        </Button>
+        <Button
+          type="text"
+          size="small"
           icon={<ReloadOutlined />}
           onClick={s.regenerateCurrent}
           disabled={judging}
+          loading={s.regenerating}
           title="换一道题"
         >
           换一句

@@ -464,7 +464,89 @@ export async function buildApp(pool, { logger = false } = {}) {
     return { ok: true, word: saved };
   });
 
+  /** Field-level patch: only update keys present in the body (saves bandwidth). */
+  app.patch('/api/words/:wordId', { preHandler: requireAuth }, async (req, reply) => {
+    const wordId = String(req.params.wordId || '').trim();
+    if (!wordId) return reply.code(400).send({ error: 'invalid_wordId' });
+    const body = req.body || {};
+    const sets = [];
+    const vals = [];
+    let i = 1;
+
+    function add(col, val) {
+      sets.push(`${col} = $${i++}`);
+      vals.push(val);
+    }
+
+    if (body.word !== undefined) add('word', String(body.word));
+    if (body.translation !== undefined) add('translation', String(body.translation || ''));
+    if (body.phoneticUs !== undefined || body.phonetic_us !== undefined) {
+      add('phonetic_us', String(body.phoneticUs ?? body.phonetic_us ?? ''));
+    }
+    if (body.phoneticUk !== undefined || body.phonetic_uk !== undefined) {
+      add('phonetic_uk', String(body.phoneticUk ?? body.phonetic_uk ?? ''));
+    }
+    if (body.partOfSpeech !== undefined || body.pos !== undefined) {
+      add('pos', String(body.partOfSpeech ?? body.pos ?? ''));
+    }
+    if (body.mnemonic !== undefined) add('mnemonic', String(body.mnemonic || ''));
+    if (body.category !== undefined || body.categories !== undefined) {
+      add('categories', JSON.stringify(body.category ?? body.categories ?? []));
+    }
+    if (body.synonyms !== undefined) add('synonyms', JSON.stringify(body.synonyms || []));
+    if (body.similars !== undefined) add('similars', JSON.stringify(body.similars || []));
+    if (body.derivatives !== undefined) {
+      add('derivatives', JSON.stringify(body.derivatives || []));
+    }
+    if (body.collocations !== undefined) {
+      add('collocations', JSON.stringify(body.collocations || []));
+    }
+    if (body.dictCollocations !== undefined || body.dict_collocations !== undefined) {
+      add(
+        'dict_collocations',
+        JSON.stringify(body.dictCollocations ?? body.dict_collocations ?? [])
+      );
+    }
+    if (body.examples !== undefined) add('examples', JSON.stringify(body.examples || []));
+    if (body.ease !== undefined) add('ease', Number(body.ease));
+    if (body.interval !== undefined || body.interval_days !== undefined) {
+      add('interval_days', Number(body.interval ?? body.interval_days));
+    }
+    if (body.streak !== undefined) add('streak', Number(body.streak));
+    if (body.nextReview !== undefined || body.next_review !== undefined) {
+      const nr = body.nextReview ?? body.next_review;
+      add('next_review', new Date(nr));
+    }
+    if (body.totalReviews !== undefined || body.total_reviews !== undefined) {
+      add('total_reviews', Number(body.totalReviews ?? body.total_reviews));
+    }
+    if (body.correctReviews !== undefined || body.correct_reviews !== undefined) {
+      add('correct_reviews', Number(body.correctReviews ?? body.correct_reviews));
+    }
+    if (body.crossedOut !== undefined || body.crossed_out !== undefined) {
+      add('crossed_out', !!(body.crossedOut ?? body.crossed_out));
+    }
+    if (body.starred !== undefined) add('starred', !!body.starred);
+
+    if (sets.length === 0) return reply.code(400).send({ error: 'empty_patch' });
+
+    add('updated_at', new Date());
+    vals.push(req.user.id, wordId);
+
+    const result = await pool.query(
+      `UPDATE words SET ${sets.join(', ')}
+       WHERE user_id = $${i++} AND word_id = $${i}
+       RETURNING *`,
+      vals
+    );
+    if (result.rowCount === 0) {
+      return reply.code(404).send({ error: 'word_not_found' });
+    }
+    return { ok: true, word: rowToWord(result.rows[0]) };
+  });
+
   app.patch('/api/words/:wordId/progress', { preHandler: requireAuth }, async (req, reply) => {
+    // Backward-compatible alias — same field patch, progress fields only from client.
     const wordId = String(req.params.wordId || '').trim();
     if (!wordId) return reply.code(400).send({ error: 'invalid_wordId' });
     const body = req.body || {};
