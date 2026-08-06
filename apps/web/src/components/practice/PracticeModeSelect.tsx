@@ -22,11 +22,11 @@ export default function PracticeModeSelect({
       </div>
       <div className="app-card">
         <Space direction="vertical" style={{ width: '100%' }} size="middle">
-          <Button type="primary" size="large" block onClick={() => onStart('cloze')}>
-            输入填空
-          </Button>
-          <Button size="large" block onClick={() => onStart('choice')}>
+          <Button type="primary" size="large" block onClick={() => onStart('choice')}>
             选词填空
+          </Button>
+          <Button size="large" block onClick={() => onStart('cloze')}>
+            输入填空
           </Button>
           {onStartClozeBatch ? (
             <Button size="large" block onClick={onStartClozeBatch}>

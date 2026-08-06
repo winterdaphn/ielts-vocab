@@ -286,21 +286,22 @@ export default function TodayPage() {
 
         <div className="today-actions">
           <Button
-            size="large"
-            block
-            disabled={!hasTasks}
-            onClick={() => startMode('cloze')}
-          >
-            输入填空 · {todayDone ? '再练' : '开始'} ({sessionCount}
-            {taskCount > 50 ? `/${taskCount}` : ''})
-          </Button>
-          <Button
+            type="primary"
             size="large"
             block
             disabled={!hasTasks}
             onClick={() => startMode('choice')}
           >
             选词填空 · {todayDone ? '再练' : '开始'} ({sessionCount}
+            {taskCount > 50 ? `/${taskCount}` : ''})
+          </Button>
+          <Button
+            size="large"
+            block
+            disabled={!hasTasks}
+            onClick={() => startMode('cloze')}
+          >
+            输入填空 · {todayDone ? '再练' : '开始'} ({sessionCount}
             {taskCount > 50 ? `/${taskCount}` : ''})
           </Button>
           <Button
