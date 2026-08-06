@@ -828,23 +828,30 @@ export async function buildApp(pool, { logger = false } = {}) {
     const clientUpdatedAt = Number(body.clientUpdatedAt) || Date.now();
 
     const cur = await pool.query(
-      `SELECT * FROM practice_sessions
+      `SELECT session_id, idx, stats, ui_state, revision, client_updated_at, updated_at
+       FROM practice_sessions
        WHERE session_id = $1 AND user_id = $2 AND status = 'active'`,
       [sessionId, req.user.id]
     );
     if (cur.rowCount === 0) return reply.code(404).send({ error: 'session_not_found' });
 
     const row = cur.rows[0];
+    // 冲突时也不回整包 items，客户端只需要 revision 做元数据
     if (clientUpdatedAt < Number(row.client_updated_at || 0)) {
-      const full = await loadPracticeSession(pool, req.user.id, sessionId);
-      return { ok: true, applied: false, session: full };
+      return {
+        ok: true,
+        applied: false,
+        sessionId,
+        revision: Number(row.revision) || 0,
+        updatedAt: new Date(row.updated_at).getTime(),
+      };
     }
 
     const idx = body.idx !== undefined ? Number(body.idx) : row.idx;
     const stats = body.stats !== undefined ? body.stats : row.stats;
     const uiState = body.uiState !== undefined ? body.uiState : row.ui_state;
 
-    await pool.query(
+    const updated = await pool.query(
       `UPDATE practice_sessions SET
          idx = $1,
          stats = $2::jsonb,
@@ -852,12 +859,19 @@ export async function buildApp(pool, { logger = false } = {}) {
          revision = revision + 1,
          client_updated_at = $4,
          updated_at = NOW()
-       WHERE session_id = $5 AND user_id = $6`,
+       WHERE session_id = $5 AND user_id = $6
+       RETURNING session_id, revision, updated_at`,
       [idx, JSON.stringify(stats), JSON.stringify(uiState), clientUpdatedAt, sessionId, req.user.id]
     );
 
-    const full = await loadPracticeSession(pool, req.user.id, sessionId);
-    return { ok: true, applied: true, session: full };
+    const out = updated.rows[0];
+    return {
+      ok: true,
+      applied: true,
+      sessionId: out.session_id,
+      revision: Number(out.revision) || 0,
+      updatedAt: new Date(out.updated_at).getTime(),
+    };
   });
 
   app.put('/api/practice/sessions/:sessionId/items/:ordinal', { preHandler: requireAuth }, async (req, reply) => {

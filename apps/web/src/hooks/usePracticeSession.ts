@@ -141,6 +141,37 @@ export function usePracticeSession() {
   /** Sync copy for fillBatch / prefetch (avoids stale state after setDifficulty) */
   const difficultyRef = useRef<SentenceDifficulty>(initialDifficulty);
   difficultyRef.current = difficulty;
+  /** 关页保存用：始终指向最新练习状态，避免 effect 依赖 queue 导致预取时狂刷云端 */
+  const leaveSnapshotRef = useRef({
+    phase,
+    idx,
+    mode,
+    scope,
+    difficulty,
+    sessionWords,
+    stats,
+    showAnswer,
+    hintShown,
+    translateHintLevel,
+    translateHints,
+    picked,
+    judgeResult,
+  });
+  leaveSnapshotRef.current = {
+    phase,
+    idx,
+    mode,
+    scope,
+    difficulty,
+    sessionWords,
+    stats,
+    showAnswer,
+    hintShown,
+    translateHintLevel,
+    translateHints,
+    picked,
+    judgeResult,
+  };
 
   const current = queue[idx] || null;
   const total = sessionWords.length;
@@ -438,19 +469,50 @@ export function usePracticeSession() {
 
   // 句型分析改为按需加载（见 requestStructureTip）
 
-  // Save when leaving the page / hiding the tab
+  // 关页 / 切后台推云端。只挂载一次，避免依赖 queue 导致预取时反复 cleanup
   useEffect(() => {
-    const saveNow = (keepalive = false) => {
-      if (phase === 'asking' || phase === 'waiting' || phase === 'judging') {
-        persist();
-        const cloudId = cloudPracticeSessionIdRef.current;
-        void flushCloudSessionPatch(keepalive ? { keepalive: true } : undefined);
-        if (cloudId) void flushCloudItemPatches(cloudId);
+    const saveOnLeave = (keepalive = false) => {
+      const s = leaveSnapshotRef.current;
+      if (s.phase !== 'asking' && s.phase !== 'waiting' && s.phase !== 'judging') return;
+      savePracticeSession({
+        mode: s.mode,
+        scope: s.scope,
+        difficulty: s.difficulty,
+        sessionWords: s.sessionWords,
+        idx: s.idx,
+        queue: queueRef.current,
+        stats: s.stats,
+        showAnswer: s.showAnswer,
+        hintShown: s.hintShown,
+        translateHintLevel: s.translateHintLevel,
+        translateHints: s.translateHints,
+        picked: s.picked,
+        userText: '',
+        judgeResult: s.judgeResult,
+        phase: s.phase,
+      });
+      const cloudId = cloudPracticeSessionIdRef.current;
+      if (cloudId) {
+        scheduleCloudSessionPatch({
+          sessionId: cloudId,
+          idx: s.idx,
+          stats: s.stats,
+          uiState: {
+            showAnswer: s.showAnswer,
+            hintShown: s.hintShown,
+            translateHintLevel: s.translateHintLevel,
+            translateHints: s.translateHints,
+            picked: s.picked,
+            judgeResult: s.judgeResult,
+          },
+        });
       }
+      void flushCloudSessionPatch(keepalive ? { keepalive: true } : undefined);
+      if (cloudId) void flushCloudItemPatches(cloudId);
     };
-    const onUnload = () => saveNow(true);
+    const onUnload = () => saveOnLeave(true);
     const onVis = () => {
-      if (document.visibilityState === 'hidden') saveNow(true);
+      if (document.visibilityState === 'hidden') saveOnLeave(true);
     };
     window.addEventListener('pagehide', onUnload);
     window.addEventListener('beforeunload', onUnload);
@@ -459,10 +521,10 @@ export function usePracticeSession() {
       window.removeEventListener('pagehide', onUnload);
       window.removeEventListener('beforeunload', onUnload);
       document.removeEventListener('visibilitychange', onVis);
-      if (!exitingRef.current) saveNow(false);
+      if (!exitingRef.current) saveOnLeave(false);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase, idx, queue, showAnswer, hintShown, translateHintLevel, translateHints, picked, judgeResult, stats, mode, sessionWords]);
+  }, []);
 
   function toQuestion(
     word: Word,
@@ -517,6 +579,7 @@ export function usePracticeSession() {
       queueRef.current = next;
       setQueue(next);
 
+      // LLM 新生成的例句 → 同步到云端会话；已从后台/本机恢复的不在这里
       const cloudId = cloudPracticeSessionIdRef.current;
       if (cloudId) {
         for (const w of todo) {
@@ -631,12 +694,12 @@ export function usePracticeSession() {
     setUserText('');
     setJudgeResult(hydrated.judgeResult);
 
-    // 只有「本机进度 → 新建云端会话」才需要把已有例句推上去；
-    // 续做用的本来就是云端 items，再 PUT 一遍纯浪费。
+    // 本机进度挂到「新建」的空云端会话：需要把本轮已有句种子推上去一次。
+    // 若续做用的就是云端 active，例句已在库里，不要再 PUT。
     const cloudId = cloudPracticeSessionIdRef.current;
     if (createdFreshCloud && cloudId) {
       hydrated.queue.forEach((question, ordinal) => {
-        if (question) {
+        if (question?.example) {
           syncCloudItemExample(
             cloudId,
             ordinal,

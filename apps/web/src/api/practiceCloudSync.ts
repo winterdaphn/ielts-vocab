@@ -4,11 +4,12 @@
  * 分两层：
  * 1) 会话头 session：第几题 idx、对错统计 stats、当前题 UI（是否揭晓等）
  *    → scheduleCloudSessionPatch / flushCloudSessionPatch
- * 2) 题目行 item：这一题的例句 example、作答记录 attempt
+ * 2) 题目行 item：
+ *    - example：仅 LLM 新生成的句子要上传；续做时已从云端拉回的不要再 PUT
+ *    - attempt：点下一题后的作答记录
  *    → syncCloudItemExample / syncCloudItemAttempt
  *
- * 注意：例句进「词库 words.examples」是另一条路（做题页点「收藏例句」），
- * 这里只写练习会话表 practice_sessions / practice_session_items，方便跨设备续做。
+ * 词库收藏例句（words.examples）是另一条路，做题页「收藏例句」才写入。
  */
 import { useSettings } from '@/store/useSettings';
 import type { WordExample } from '@/types/word';
@@ -100,10 +101,22 @@ export function cloudSessionFromSaved(
 let pendingPatch: SessionPatch | null = null;
 /** 正在飞的 flush Promise；有值表示已有请求在路上 */
 let flushPromise: Promise<void> | null = null;
+/** 上一份已排队/发出的会话头指纹，内容不变就别再 PATCH */
+let lastSessionPatchKey: string | null = null;
+
+function sessionPatchKey(p: SessionPatch): string {
+  return JSON.stringify({
+    sessionId: p.sessionId,
+    idx: p.idx,
+    stats: p.stats,
+    uiState: p.uiState,
+  });
+}
 
 /** 开练/拉到云端会话后，把 sessionId 记到本机 */
 export function bindCloudSession(session: CloudPracticeSession) {
   writeCloudMeta({ sessionId: session.sessionId, revision: session.revision });
+  lastSessionPatchKey = null;
 }
 
 /** 创建云端练习会话；失败时返回 null，本机仍可离线做题 */
@@ -159,6 +172,10 @@ async function drainCloudSessionPatch(opts?: { keepalive?: boolean }): Promise<v
       }
     } catch (e) {
       console.warn('[practice-cloud] patch failed', e);
+      // 失败时允许同内容重试
+      if (lastSessionPatchKey === sessionPatchKey(patch)) {
+        lastSessionPatchKey = null;
+      }
     }
   }
 }
@@ -188,6 +205,9 @@ function ensureCloudSessionFlush(opts?: { keepalive?: boolean }): Promise<void> 
  * 调用方不用 await；退出时请再调 flushCloudSessionPatch 等它飞完。
  */
 export function scheduleCloudSessionPatch(payload: SessionPatch) {
+  const key = sessionPatchKey(payload);
+  if (key === lastSessionPatchKey) return;
+  lastSessionPatchKey = key;
   pendingPatch = payload;
   void ensureCloudSessionFlush();
 }
@@ -291,7 +311,8 @@ function ensureCloudItemsFlush(sessionId: string): Promise<void> {
 }
 
 /**
- * 题目行：例句写入合并队列（~120ms 内多题合成 1 次批量请求）。
+ * 题目行：LLM 新造的例句写入合并队列（~120ms 合成 1 次批量 PUT）。
+ * 已从云端 active 拉回来的句子不要调这个。
  */
 export function syncCloudItemExample(
   sessionId: string,

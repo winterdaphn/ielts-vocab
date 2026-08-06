@@ -187,7 +187,7 @@ export async function patchPracticeSession(
     uiState?: Record<string, unknown>;
   },
   opts?: { keepalive?: boolean }
-): Promise<CloudPracticeSession | null> {
+): Promise<{ sessionId: string; revision: number } | null> {
   const resp = await fetch(
     getBase(settings) + '/api/practice/sessions/' + encodeURIComponent(sessionId),
     {
@@ -199,7 +199,12 @@ export async function patchPracticeSession(
   );
   const data = await readJson(resp);
   if (!resp.ok) return null;
-  return parseSession(data.session);
+  // 新：轻量 { sessionId, revision }；旧：整包 session（兼容过渡）
+  const legacy = data.session as { sessionId?: string; revision?: number } | undefined;
+  const sid = String(data.sessionId || legacy?.sessionId || sessionId);
+  const revision = Number(data.revision ?? legacy?.revision);
+  if (!Number.isFinite(revision)) return null;
+  return { sessionId: sid, revision };
 }
 
 export async function putPracticeItem(
