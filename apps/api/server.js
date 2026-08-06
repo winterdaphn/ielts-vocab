@@ -75,8 +75,37 @@ function sanitizeSynonymDiff(raw) {
   return { key, summary, items, contrasts: [] };
 }
 
+const SRS_TARGET_TYPES = new Set(['word', 'chunk', 'frame']);
+
+/** Prefer joined srs_* columns when present; fall back to legacy words.* SRS columns. */
 function rowToWord(row) {
   const synonymDiff = sanitizeSynonymDiff(row.synonym_diff);
+  const hasSrs = row.s_ease != null || row.s_next_review != null || row.s_updated_at != null;
+  const crossedOut = hasSrs ? !!row.s_crossed_out : !!row.crossed_out;
+  const starred = hasSrs ? !!row.s_starred : !!row.starred;
+  const ease = hasSrs ? Number(row.s_ease) || 2.5 : Number(row.ease) || 2.5;
+  const interval = hasSrs
+    ? Number(row.s_interval_days) || 0
+    : Number(row.interval_days) || 0;
+  const streak = hasSrs ? Number(row.s_streak) || 0 : Number(row.streak) || 0;
+  const nextReview = hasSrs
+    ? row.s_next_review
+      ? new Date(row.s_next_review).getTime()
+      : Date.now()
+    : row.next_review
+      ? new Date(row.next_review).getTime()
+      : Date.now();
+  const totalReviews = hasSrs
+    ? Number(row.s_total_reviews) || 0
+    : Number(row.total_reviews) || 0;
+  const correctReviews = hasSrs
+    ? Number(row.s_correct_reviews) || 0
+    : Number(row.correct_reviews) || 0;
+  const progressUpdatedAt = row.s_updated_at
+    ? new Date(row.s_updated_at).getTime()
+    : row.updated_at
+      ? new Date(row.updated_at).getTime()
+      : Date.now();
   return {
     id: row.word_id,
     word: row.word,
@@ -93,17 +122,180 @@ function rowToWord(row) {
     dictCollocations: row.dict_collocations || [],
     examples: row.examples || [],
     ...(synonymDiff ? { synonymDiff } : {}),
-    crossedOut: !!row.crossed_out,
-    starred: !!row.starred,
+    crossedOut,
+    starred,
+    ease,
+    interval,
+    streak,
+    nextReview,
+    totalReviews,
+    correctReviews,
+    createdAt: row.created_at ? new Date(row.created_at).getTime() : Date.now(),
+    /** Content row mtime — progress changes do not bump this */
+    updatedAt: row.updated_at ? new Date(row.updated_at).getTime() : Date.now(),
+    progressUpdatedAt,
+  };
+}
+
+function rowToSrs(row) {
+  return {
+    targetType: row.target_type,
+    targetId: row.target_id,
     ease: Number(row.ease) || 2.5,
     interval: Number(row.interval_days) || 0,
     streak: Number(row.streak) || 0,
     nextReview: row.next_review ? new Date(row.next_review).getTime() : Date.now(),
     totalReviews: Number(row.total_reviews) || 0,
     correctReviews: Number(row.correct_reviews) || 0,
-    createdAt: row.created_at ? new Date(row.created_at).getTime() : Date.now(),
+    starred: !!row.starred,
+    crossedOut: !!row.crossed_out,
     updatedAt: row.updated_at ? new Date(row.updated_at).getTime() : Date.now(),
   };
+}
+
+function normalizeSrsBody(body, targetType, targetId) {
+  if (!body || typeof body !== 'object') return null;
+  const type = String(targetType || body.targetType || body.target_type || '').trim();
+  const id = String(targetId || body.targetId || body.target_id || '').trim();
+  if (!SRS_TARGET_TYPES.has(type) || !id || id.length > 128) return null;
+  return {
+    targetType: type,
+    targetId: id,
+    ease: Number(body.ease ?? 2.5),
+    intervalDays: Number(body.interval ?? body.interval_days ?? 0),
+    streak: Number(body.streak ?? 0),
+    nextReview: body.nextReview ?? body.next_review ?? Date.now(),
+    totalReviews: Number(body.totalReviews ?? body.total_reviews ?? 0),
+    correctReviews: Number(body.correctReviews ?? body.correct_reviews ?? 0),
+    starred: !!(body.starred),
+    crossedOut: !!(body.crossedOut ?? body.crossed_out),
+    updatedAt: body.updatedAt ?? body.updated_at ?? Date.now(),
+  };
+}
+
+async function upsertSrsProgress(pool, userId, p) {
+  const nextReview =
+    typeof p.nextReview === 'number' ? new Date(p.nextReview) : new Date(p.nextReview);
+  const updatedAt =
+    typeof p.updatedAt === 'number' ? new Date(p.updatedAt) : new Date(p.updatedAt);
+  const result = await pool.query(
+    `INSERT INTO srs_progress (
+      user_id, target_type, target_id,
+      ease, interval_days, streak, next_review,
+      total_reviews, correct_reviews, starred, crossed_out, updated_at
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+    ON CONFLICT (user_id, target_type, target_id) DO UPDATE SET
+      ease = EXCLUDED.ease,
+      interval_days = EXCLUDED.interval_days,
+      streak = EXCLUDED.streak,
+      next_review = EXCLUDED.next_review,
+      total_reviews = EXCLUDED.total_reviews,
+      correct_reviews = EXCLUDED.correct_reviews,
+      starred = EXCLUDED.starred,
+      crossed_out = EXCLUDED.crossed_out,
+      updated_at = EXCLUDED.updated_at
+    RETURNING *`,
+    [
+      userId,
+      p.targetType,
+      p.targetId,
+      p.ease,
+      p.intervalDays,
+      p.streak,
+      nextReview,
+      p.totalReviews,
+      p.correctReviews,
+      p.starred,
+      p.crossedOut,
+      updatedAt,
+    ]
+  );
+  return rowToSrs(result.rows[0]);
+}
+
+/** Partial update of srs_progress; only keys present in `fields`. */
+async function patchSrsProgress(pool, userId, targetType, targetId, fields) {
+  const sets = [];
+  const vals = [];
+  let i = 1;
+  function add(col, val) {
+    sets.push(`${col} = $${i++}`);
+    vals.push(val);
+  }
+  if (fields.ease !== undefined) add('ease', Number(fields.ease));
+  if (fields.interval !== undefined || fields.interval_days !== undefined) {
+    add('interval_days', Number(fields.interval ?? fields.interval_days));
+  }
+  if (fields.streak !== undefined) add('streak', Number(fields.streak));
+  if (fields.nextReview !== undefined || fields.next_review !== undefined) {
+    add('next_review', new Date(fields.nextReview ?? fields.next_review));
+  }
+  if (fields.totalReviews !== undefined || fields.total_reviews !== undefined) {
+    add('total_reviews', Number(fields.totalReviews ?? fields.total_reviews));
+  }
+  if (fields.correctReviews !== undefined || fields.correct_reviews !== undefined) {
+    add('correct_reviews', Number(fields.correctReviews ?? fields.correct_reviews));
+  }
+  if (fields.crossedOut !== undefined || fields.crossed_out !== undefined) {
+    add('crossed_out', !!(fields.crossedOut ?? fields.crossed_out));
+  }
+  if (fields.starred !== undefined) add('starred', !!fields.starred);
+
+  if (sets.length === 0) return null;
+
+  add('updated_at', new Date(fields.updatedAt ?? fields.updated_at ?? Date.now()));
+  vals.push(userId, targetType, targetId);
+
+  const result = await pool.query(
+    `UPDATE srs_progress SET ${sets.join(', ')}
+     WHERE user_id = $${i++} AND target_type = $${i++} AND target_id = $${i}
+     RETURNING *`,
+    vals
+  );
+  if (result.rowCount > 0) return rowToSrs(result.rows[0]);
+
+  // Missing row: upsert from patch fields + defaults
+  return upsertSrsProgress(pool, userId, {
+    targetType,
+    targetId,
+    ease: Number(fields.ease ?? 2.5),
+    intervalDays: Number(fields.interval ?? fields.interval_days ?? 0),
+    streak: Number(fields.streak ?? 0),
+    nextReview: fields.nextReview ?? fields.next_review ?? Date.now(),
+    totalReviews: Number(fields.totalReviews ?? fields.total_reviews ?? 0),
+    correctReviews: Number(fields.correctReviews ?? fields.correct_reviews ?? 0),
+    starred: !!(fields.starred),
+    crossedOut: !!(fields.crossedOut ?? fields.crossed_out),
+    updatedAt: fields.updatedAt ?? fields.updated_at ?? Date.now(),
+  });
+}
+
+const WORDS_WITH_SRS_SELECT = `
+  SELECT w.*,
+    s.ease AS s_ease,
+    s.interval_days AS s_interval_days,
+    s.streak AS s_streak,
+    s.next_review AS s_next_review,
+    s.total_reviews AS s_total_reviews,
+    s.correct_reviews AS s_correct_reviews,
+    s.starred AS s_starred,
+    s.crossed_out AS s_crossed_out,
+    s.updated_at AS s_updated_at
+  FROM words w
+  LEFT JOIN srs_progress s
+    ON s.user_id = w.user_id
+   AND s.target_type = 'word'
+   AND s.target_id = w.word_id
+`;
+
+async function fetchWordMerged(pool, userId, wordId) {
+  const result = await pool.query(
+    `${WORDS_WITH_SRS_SELECT}
+     WHERE w.user_id = $1 AND w.word_id = $2`,
+    [userId, wordId]
+  );
+  if (!result.rowCount) return null;
+  return rowToWord(result.rows[0]);
 }
 
 function normalizeWordBody(body, wordIdParam) {
@@ -218,7 +410,21 @@ async function upsertWord(pool, userId, w) {
       updatedAt,
     ]
   );
-  return rowToWord(result.rows[0]);
+  // Canonical progress lives in srs_progress (words.* SRS columns kept dual-write for rollback)
+  await upsertSrsProgress(pool, userId, {
+    targetType: 'word',
+    targetId: w.wordId,
+    ease: w.ease,
+    intervalDays: w.intervalDays,
+    streak: w.streak,
+    nextReview: w.nextReview,
+    totalReviews: w.totalReviews,
+    correctReviews: w.correctReviews,
+    starred: w.starred,
+    crossedOut: w.crossedOut,
+    updatedAt: w.updatedAt,
+  });
+  return (await fetchWordMerged(pool, userId, w.wordId)) || rowToWord(result.rows[0]);
 }
 
 export async function ensureTables(pool) {
@@ -276,6 +482,46 @@ export async function ensureTables(pool) {
     ADD COLUMN IF NOT EXISTS synonym_diff JSONB;
   `);
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS srs_progress (
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      target_type TEXT NOT NULL
+        CHECK (target_type IN ('word', 'chunk', 'frame')),
+      target_id TEXT NOT NULL,
+      ease DOUBLE PRECISION NOT NULL DEFAULT 2.5,
+      interval_days DOUBLE PRECISION NOT NULL DEFAULT 0,
+      streak INTEGER NOT NULL DEFAULT 0,
+      next_review TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      total_reviews INTEGER NOT NULL DEFAULT 0,
+      correct_reviews INTEGER NOT NULL DEFAULT 0,
+      starred BOOLEAN NOT NULL DEFAULT FALSE,
+      crossed_out BOOLEAN NOT NULL DEFAULT FALSE,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (user_id, target_type, target_id)
+    );
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS srs_progress_user_updated_idx
+    ON srs_progress (user_id, updated_at);
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS srs_progress_user_type_next_review_idx
+    ON srs_progress (user_id, target_type, next_review);
+  `);
+  // One-time backfill from legacy words SRS columns (idempotent)
+  await pool.query(`
+    INSERT INTO srs_progress (
+      user_id, target_type, target_id,
+      ease, interval_days, streak, next_review,
+      total_reviews, correct_reviews, starred, crossed_out, updated_at
+    )
+    SELECT
+      user_id, 'word', word_id,
+      ease, interval_days, streak, next_review,
+      total_reviews, correct_reviews, starred, crossed_out, updated_at
+    FROM words
+    ON CONFLICT (user_id, target_type, target_id) DO NOTHING
+  `);
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS user_prefs (
       user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
       custom_categories JSONB NOT NULL DEFAULT '[]'::jsonb,
@@ -318,6 +564,317 @@ export async function ensureTables(pool) {
       PRIMARY KEY (session_id, ordinal)
     );
   `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS chunks (
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      chunk_id TEXT NOT NULL,
+      phrase TEXT NOT NULL,
+      phrase_key TEXT NOT NULL,
+      gloss TEXT NOT NULL DEFAULT '',
+      kind TEXT NOT NULL DEFAULT 'collocation',
+      tags JSONB NOT NULL DEFAULT '[]'::jsonb,
+      anchor_word_id TEXT,
+      source TEXT NOT NULL DEFAULT 'manual',
+      example_en TEXT NOT NULL DEFAULT '',
+      example_zh TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (user_id, chunk_id)
+    );
+  `);
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS chunks_user_phrase_key_idx
+      ON chunks (user_id, phrase_key);
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS chunks_user_updated_idx
+      ON chunks (user_id, updated_at);
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS frames (
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      frame_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      frame_key TEXT NOT NULL,
+      skeleton TEXT NOT NULL DEFAULT '',
+      slots JSONB NOT NULL DEFAULT '[]'::jsonb,
+      gloss_zh TEXT NOT NULL DEFAULT '',
+      anchor_word_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+      example_filled TEXT NOT NULL DEFAULT '',
+      pack_id TEXT NOT NULL DEFAULT '',
+      source TEXT NOT NULL DEFAULT 'manual',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (user_id, frame_id)
+    );
+  `);
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS frames_user_frame_key_idx
+      ON frames (user_id, frame_key);
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS frames_user_updated_idx
+      ON frames (user_id, updated_at);
+  `);
+}
+
+function normalizePhraseKey(phrase) {
+  return String(phrase || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+}
+
+function rowToChunk(row) {
+  return {
+    id: row.chunk_id,
+    phrase: row.phrase || '',
+    phraseKey: row.phrase_key || '',
+    gloss: row.gloss || '',
+    kind: row.kind || 'collocation',
+    tags: row.tags || [],
+    anchorWordId: row.anchor_word_id || undefined,
+    source: row.source || 'manual',
+    exampleEn: row.example_en || '',
+    exampleZh: row.example_zh || '',
+    createdAt: row.created_at ? new Date(row.created_at).getTime() : Date.now(),
+    updatedAt: row.updated_at ? new Date(row.updated_at).getTime() : Date.now(),
+  };
+}
+
+function normalizeChunkBody(body, chunkIdParam) {
+  if (!body || typeof body !== 'object') return null;
+  const phrase = String(body.phrase || '').trim();
+  const chunkId = String(body.id || chunkIdParam || '').trim();
+  if (!chunkId || chunkId.length > 128 || !phrase) return null;
+  const phraseKey = normalizePhraseKey(body.phraseKey || body.phrase_key || phrase);
+  return {
+    chunkId,
+    phrase,
+    phraseKey,
+    gloss: String(body.gloss || ''),
+    kind: String(body.kind || 'collocation'),
+    tags: asJson(body.tags, []),
+    anchorWordId: body.anchorWordId || body.anchor_word_id || null,
+    source: String(body.source || 'manual'),
+    exampleEn: String(body.exampleEn || body.example_en || ''),
+    exampleZh: String(body.exampleZh || body.example_zh || ''),
+    createdAt: body.createdAt ?? body.created_at ?? Date.now(),
+    updatedAt: body.updatedAt ?? body.updated_at ?? Date.now(),
+  };
+}
+
+async function upsertChunk(pool, userId, c) {
+  const createdAt =
+    typeof c.createdAt === 'number' ? new Date(c.createdAt) : new Date(c.createdAt);
+  const updatedAt =
+    typeof c.updatedAt === 'number' ? new Date(c.updatedAt) : new Date(c.updatedAt);
+  const result = await pool.query(
+    `INSERT INTO chunks (
+      user_id, chunk_id, phrase, phrase_key, gloss, kind, tags,
+      anchor_word_id, source, example_en, example_zh, created_at, updated_at
+    ) VALUES (
+      $1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11,$12,$13
+    )
+    ON CONFLICT (user_id, chunk_id) DO UPDATE SET
+      phrase = EXCLUDED.phrase,
+      phrase_key = EXCLUDED.phrase_key,
+      gloss = EXCLUDED.gloss,
+      kind = EXCLUDED.kind,
+      tags = EXCLUDED.tags,
+      anchor_word_id = EXCLUDED.anchor_word_id,
+      source = EXCLUDED.source,
+      example_en = EXCLUDED.example_en,
+      example_zh = EXCLUDED.example_zh,
+      updated_at = EXCLUDED.updated_at
+    RETURNING *`,
+    [
+      userId,
+      c.chunkId,
+      c.phrase,
+      c.phraseKey,
+      c.gloss,
+      c.kind,
+      JSON.stringify(c.tags || []),
+      c.anchorWordId,
+      c.source,
+      c.exampleEn,
+      c.exampleZh,
+      createdAt,
+      updatedAt,
+    ]
+  );
+  // Ensure SRS row exists (do not reset progress on content upsert)
+  await pool.query(
+    `INSERT INTO srs_progress (
+      user_id, target_type, target_id, ease, interval_days, streak, next_review,
+      total_reviews, correct_reviews, starred, crossed_out, updated_at
+    ) VALUES ($1,'chunk',$2,2.5,0,0,NOW(),0,0,FALSE,FALSE,NOW())
+    ON CONFLICT (user_id, target_type, target_id) DO NOTHING`,
+    [userId, c.chunkId]
+  );
+  return rowToChunk(result.rows[0]);
+}
+
+function rowToFrame(row) {
+  return {
+    id: row.frame_id,
+    title: row.title || '',
+    frameKey: row.frame_key || '',
+    skeleton: row.skeleton || '',
+    slots: row.slots || [],
+    glossZh: row.gloss_zh || '',
+    anchorWordIds: row.anchor_word_ids || [],
+    exampleFilled: row.example_filled || '',
+    packId: row.pack_id || '',
+    source: row.source || 'manual',
+    createdAt: row.created_at ? new Date(row.created_at).getTime() : Date.now(),
+    updatedAt: row.updated_at ? new Date(row.updated_at).getTime() : Date.now(),
+  };
+}
+
+function normalizeFrameBody(body, frameIdParam) {
+  if (!body || typeof body !== 'object') return null;
+  const title = String(body.title || '').trim();
+  const skeleton = String(body.skeleton || '').trim();
+  const frameId = String(body.id || frameIdParam || '').trim();
+  if (!frameId || frameId.length > 128 || !title) return null;
+  const frameKey = normalizePhraseKey(
+    body.frameKey || body.frame_key || skeleton || title
+  );
+  return {
+    frameId,
+    title,
+    frameKey,
+    skeleton,
+    slots: asJson(body.slots, []),
+    glossZh: String(body.glossZh || body.gloss_zh || ''),
+    anchorWordIds: asJson(body.anchorWordIds ?? body.anchor_word_ids, []),
+    exampleFilled: String(body.exampleFilled || body.example_filled || ''),
+    packId: String(body.packId || body.pack_id || ''),
+    source: String(body.source || 'manual'),
+    createdAt: body.createdAt ?? body.created_at ?? Date.now(),
+    updatedAt: body.updatedAt ?? body.updated_at ?? Date.now(),
+  };
+}
+
+async function upsertFrame(pool, userId, f) {
+  const createdAt =
+    typeof f.createdAt === 'number' ? new Date(f.createdAt) : new Date(f.createdAt);
+  const updatedAt =
+    typeof f.updatedAt === 'number' ? new Date(f.updatedAt) : new Date(f.updatedAt);
+  const result = await pool.query(
+    `INSERT INTO frames (
+      user_id, frame_id, title, frame_key, skeleton, slots, gloss_zh,
+      anchor_word_ids, example_filled, pack_id, source, created_at, updated_at
+    ) VALUES (
+      $1,$2,$3,$4,$5,$6::jsonb,$7,$8::jsonb,$9,$10,$11,$12,$13
+    )
+    ON CONFLICT (user_id, frame_id) DO UPDATE SET
+      title = EXCLUDED.title,
+      frame_key = EXCLUDED.frame_key,
+      skeleton = EXCLUDED.skeleton,
+      slots = EXCLUDED.slots,
+      gloss_zh = EXCLUDED.gloss_zh,
+      anchor_word_ids = EXCLUDED.anchor_word_ids,
+      example_filled = EXCLUDED.example_filled,
+      pack_id = EXCLUDED.pack_id,
+      source = EXCLUDED.source,
+      updated_at = EXCLUDED.updated_at
+    RETURNING *`,
+    [
+      userId,
+      f.frameId,
+      f.title,
+      f.frameKey,
+      f.skeleton,
+      JSON.stringify(f.slots || []),
+      f.glossZh,
+      JSON.stringify(f.anchorWordIds || []),
+      f.exampleFilled,
+      f.packId,
+      f.source,
+      createdAt,
+      updatedAt,
+    ]
+  );
+  await pool.query(
+    `INSERT INTO srs_progress (
+      user_id, target_type, target_id, ease, interval_days, streak, next_review,
+      total_reviews, correct_reviews, starred, crossed_out, updated_at
+    ) VALUES ($1,'frame',$2,2.5,0,0,NOW(),0,0,FALSE,FALSE,NOW())
+    ON CONFLICT (user_id, target_type, target_id) DO NOTHING`,
+    [userId, f.frameId]
+  );
+  return rowToFrame(result.rows[0]);
+}
+
+/** Generic incremental list helper for content tables with updated_at + id. */
+async function listContentRows(pool, {
+  userId,
+  table,
+  idCol,
+  since,
+  limit,
+  cursor,
+}) {
+  let result;
+  if (since) {
+    let cursorAt = null;
+    let cursorId = '';
+    if (cursor.includes(':')) {
+      const idx = cursor.indexOf(':');
+      const ms = Number(cursor.slice(0, idx));
+      cursorId = cursor.slice(idx + 1);
+      if (Number.isFinite(ms) && ms > 0) cursorAt = new Date(ms);
+    }
+    if (limit && cursorAt && cursorId) {
+      result = await pool.query(
+        `SELECT * FROM ${table}
+         WHERE user_id = $1
+           AND (updated_at > $2 OR (updated_at = $2 AND ${idCol} > $3))
+         ORDER BY updated_at ASC, ${idCol} ASC
+         LIMIT $4`,
+        [userId, cursorAt, cursorId, limit]
+      );
+    } else if (limit) {
+      result = await pool.query(
+        `SELECT * FROM ${table}
+         WHERE user_id = $1 AND updated_at > $2
+         ORDER BY updated_at ASC, ${idCol} ASC
+         LIMIT $3`,
+        [userId, since, limit]
+      );
+    } else {
+      result = await pool.query(
+        `SELECT * FROM ${table}
+         WHERE user_id = $1 AND updated_at > $2
+         ORDER BY updated_at ASC, ${idCol} ASC`,
+        [userId, since]
+      );
+    }
+  } else if (limit) {
+    if (cursor) {
+      result = await pool.query(
+        `SELECT * FROM ${table}
+         WHERE user_id = $1 AND ${idCol} > $2
+         ORDER BY ${idCol} ASC LIMIT $3`,
+        [userId, cursor, limit]
+      );
+    } else {
+      result = await pool.query(
+        `SELECT * FROM ${table}
+         WHERE user_id = $1 ORDER BY ${idCol} ASC LIMIT $2`,
+        [userId, limit]
+      );
+    }
+  } else {
+    result = await pool.query(
+      `SELECT * FROM ${table} WHERE user_id = $1 ORDER BY ${idCol} ASC`,
+      [userId]
+    );
+  }
+  return result.rows;
 }
 
 export async function buildApp(pool, { logger = false } = {}) {
@@ -416,6 +973,7 @@ export async function buildApp(pool, { logger = false } = {}) {
     let result;
     if (since) {
       // cursor format for incremental: `${updatedAtMs}:${wordId}`
+      // since tracks content mtime only — progress-only edits use GET /api/srs
       let cursorAt = null;
       let cursorId = '';
       if (cursor.includes(':')) {
@@ -426,45 +984,53 @@ export async function buildApp(pool, { logger = false } = {}) {
       }
       if (limit && cursorAt && cursorId) {
         result = await pool.query(
-          `SELECT * FROM words
-           WHERE user_id = $1
+          `${WORDS_WITH_SRS_SELECT}
+           WHERE w.user_id = $1
              AND (
-               updated_at > $2
-               OR (updated_at = $2 AND word_id > $3)
+               w.updated_at > $2
+               OR (w.updated_at = $2 AND w.word_id > $3)
              )
-           ORDER BY updated_at ASC, word_id ASC
+           ORDER BY w.updated_at ASC, w.word_id ASC
            LIMIT $4`,
           [req.user.id, cursorAt, cursorId, limit]
         );
       } else if (limit) {
         result = await pool.query(
-          `SELECT * FROM words
-           WHERE user_id = $1 AND updated_at > $2
-           ORDER BY updated_at ASC, word_id ASC
+          `${WORDS_WITH_SRS_SELECT}
+           WHERE w.user_id = $1 AND w.updated_at > $2
+           ORDER BY w.updated_at ASC, w.word_id ASC
            LIMIT $3`,
           [req.user.id, since, limit]
         );
       } else {
         result = await pool.query(
-          `SELECT * FROM words WHERE user_id = $1 AND updated_at > $2 ORDER BY updated_at ASC, word_id ASC`,
+          `${WORDS_WITH_SRS_SELECT}
+           WHERE w.user_id = $1 AND w.updated_at > $2
+           ORDER BY w.updated_at ASC, w.word_id ASC`,
           [req.user.id, since]
         );
       }
     } else if (limit) {
       if (cursor) {
         result = await pool.query(
-          `SELECT * FROM words WHERE user_id = $1 AND word_id > $2 ORDER BY word_id ASC LIMIT $3`,
+          `${WORDS_WITH_SRS_SELECT}
+           WHERE w.user_id = $1 AND w.word_id > $2
+           ORDER BY w.word_id ASC LIMIT $3`,
           [req.user.id, cursor, limit]
         );
       } else {
         result = await pool.query(
-          `SELECT * FROM words WHERE user_id = $1 ORDER BY word_id ASC LIMIT $2`,
+          `${WORDS_WITH_SRS_SELECT}
+           WHERE w.user_id = $1
+           ORDER BY w.word_id ASC LIMIT $2`,
           [req.user.id, limit]
         );
       }
     } else {
       result = await pool.query(
-        `SELECT * FROM words WHERE user_id = $1 ORDER BY word_id ASC`,
+        `${WORDS_WITH_SRS_SELECT}
+         WHERE w.user_id = $1
+         ORDER BY w.word_id ASC`,
         [req.user.id]
       );
     }
@@ -496,7 +1062,7 @@ export async function buildApp(pool, { logger = false } = {}) {
     return { ok: true, word: saved };
   });
 
-  /** Field-level patch: only update keys present in the body (saves bandwidth). */
+  /** Field-level patch: content → words; progress → srs_progress (no words.updated_at bump). */
   app.patch('/api/words/:wordId', { preHandler: requireAuth }, async (req, reply) => {
     const wordId = String(req.params.wordId || '').trim();
     if (!wordId) return reply.code(400).send({ error: 'invalid_wordId' });
@@ -504,10 +1070,13 @@ export async function buildApp(pool, { logger = false } = {}) {
     const sets = [];
     const vals = [];
     let i = 1;
+    let contentTouched = false;
+    const progressFields = {};
 
     function add(col, val) {
       sets.push(`${col} = $${i++}`);
       vals.push(val);
+      contentTouched = true;
     }
 
     if (body.word !== undefined) add('word', String(body.word));
@@ -548,92 +1117,107 @@ export async function buildApp(pool, { logger = false } = {}) {
         )
       );
     }
-    if (body.ease !== undefined) add('ease', Number(body.ease));
+
+    if (body.ease !== undefined) progressFields.ease = body.ease;
     if (body.interval !== undefined || body.interval_days !== undefined) {
-      add('interval_days', Number(body.interval ?? body.interval_days));
+      progressFields.interval = body.interval ?? body.interval_days;
     }
-    if (body.streak !== undefined) add('streak', Number(body.streak));
+    if (body.streak !== undefined) progressFields.streak = body.streak;
     if (body.nextReview !== undefined || body.next_review !== undefined) {
-      const nr = body.nextReview ?? body.next_review;
-      add('next_review', new Date(nr));
+      progressFields.nextReview = body.nextReview ?? body.next_review;
     }
     if (body.totalReviews !== undefined || body.total_reviews !== undefined) {
-      add('total_reviews', Number(body.totalReviews ?? body.total_reviews));
+      progressFields.totalReviews = body.totalReviews ?? body.total_reviews;
     }
     if (body.correctReviews !== undefined || body.correct_reviews !== undefined) {
-      add('correct_reviews', Number(body.correctReviews ?? body.correct_reviews));
+      progressFields.correctReviews = body.correctReviews ?? body.correct_reviews;
     }
     if (body.crossedOut !== undefined || body.crossed_out !== undefined) {
-      add('crossed_out', !!(body.crossedOut ?? body.crossed_out));
+      progressFields.crossedOut = body.crossedOut ?? body.crossed_out;
     }
-    if (body.starred !== undefined) add('starred', !!body.starred);
+    if (body.starred !== undefined) progressFields.starred = body.starred;
+    if (body.updatedAt !== undefined || body.updated_at !== undefined) {
+      progressFields.updatedAt = body.updatedAt ?? body.updated_at;
+    }
 
-    if (sets.length === 0) return reply.code(400).send({ error: 'empty_patch' });
-
-    add('updated_at', new Date());
-    vals.push(req.user.id, wordId);
-
-    const result = await pool.query(
-      `UPDATE words SET ${sets.join(', ')}
-       WHERE user_id = $${i++} AND word_id = $${i}
-       RETURNING *`,
-      vals
+    const progressTouched = Object.keys(progressFields).some(
+      (k) => k !== 'updatedAt'
     );
-    if (result.rowCount === 0) {
-      return reply.code(404).send({ error: 'word_not_found' });
+
+    if (!contentTouched && !progressTouched) {
+      return reply.code(400).send({ error: 'empty_patch' });
     }
-    return { ok: true, word: rowToWord(result.rows[0]) };
+
+    if (contentTouched) {
+      add('updated_at', new Date());
+      vals.push(req.user.id, wordId);
+      const result = await pool.query(
+        `UPDATE words SET ${sets.join(', ')}
+         WHERE user_id = $${i++} AND word_id = $${i}
+         RETURNING word_id`,
+        vals
+      );
+      if (result.rowCount === 0) {
+        return reply.code(404).send({ error: 'word_not_found' });
+      }
+    } else {
+      const exists = await pool.query(
+        `SELECT 1 FROM words WHERE user_id = $1 AND word_id = $2`,
+        [req.user.id, wordId]
+      );
+      if (exists.rowCount === 0) {
+        return reply.code(404).send({ error: 'word_not_found' });
+      }
+    }
+
+    if (progressTouched) {
+      await patchSrsProgress(pool, req.user.id, 'word', wordId, progressFields);
+    }
+
+    const merged = await fetchWordMerged(pool, req.user.id, wordId);
+    return { ok: true, word: merged };
   });
 
   app.patch('/api/words/:wordId/progress', { preHandler: requireAuth }, async (req, reply) => {
-    // Backward-compatible alias — same field patch, progress fields only from client.
+    // Backward-compatible — writes srs_progress only (does not bump words.updated_at).
     const wordId = String(req.params.wordId || '').trim();
     if (!wordId) return reply.code(400).send({ error: 'invalid_wordId' });
     const body = req.body || {};
-    const sets = [];
-    const vals = [];
-    let i = 1;
-
-    function add(col, val) {
-      sets.push(`${col} = $${i++}`);
-      vals.push(val);
-    }
-
-    if (body.ease !== undefined) add('ease', Number(body.ease));
-    if (body.interval !== undefined || body.interval_days !== undefined) {
-      add('interval_days', Number(body.interval ?? body.interval_days));
-    }
-    if (body.streak !== undefined) add('streak', Number(body.streak));
-    if (body.nextReview !== undefined || body.next_review !== undefined) {
-      const nr = body.nextReview ?? body.next_review;
-      add('next_review', new Date(nr));
-    }
-    if (body.totalReviews !== undefined || body.total_reviews !== undefined) {
-      add('total_reviews', Number(body.totalReviews ?? body.total_reviews));
-    }
-    if (body.correctReviews !== undefined || body.correct_reviews !== undefined) {
-      add('correct_reviews', Number(body.correctReviews ?? body.correct_reviews));
-    }
-    if (body.crossedOut !== undefined || body.crossed_out !== undefined) {
-      add('crossed_out', !!(body.crossedOut ?? body.crossed_out));
-    }
-    if (body.starred !== undefined) add('starred', !!body.starred);
-
-    if (sets.length === 0) return reply.code(400).send({ error: 'empty_patch' });
-
-    add('updated_at', new Date());
-    vals.push(req.user.id, wordId);
-
-    const result = await pool.query(
-      `UPDATE words SET ${sets.join(', ')}
-       WHERE user_id = $${i++} AND word_id = $${i}
-       RETURNING *`,
-      vals
+    const exists = await pool.query(
+      `SELECT 1 FROM words WHERE user_id = $1 AND word_id = $2`,
+      [req.user.id, wordId]
     );
-    if (result.rowCount === 0) {
+    if (exists.rowCount === 0) {
       return reply.code(404).send({ error: 'word_not_found' });
     }
-    return { ok: true, word: rowToWord(result.rows[0]) };
+    const progressFields = {};
+    if (body.ease !== undefined) progressFields.ease = body.ease;
+    if (body.interval !== undefined || body.interval_days !== undefined) {
+      progressFields.interval = body.interval ?? body.interval_days;
+    }
+    if (body.streak !== undefined) progressFields.streak = body.streak;
+    if (body.nextReview !== undefined || body.next_review !== undefined) {
+      progressFields.nextReview = body.nextReview ?? body.next_review;
+    }
+    if (body.totalReviews !== undefined || body.total_reviews !== undefined) {
+      progressFields.totalReviews = body.totalReviews ?? body.total_reviews;
+    }
+    if (body.correctReviews !== undefined || body.correct_reviews !== undefined) {
+      progressFields.correctReviews = body.correctReviews ?? body.correct_reviews;
+    }
+    if (body.crossedOut !== undefined || body.crossed_out !== undefined) {
+      progressFields.crossedOut = body.crossedOut ?? body.crossed_out;
+    }
+    if (body.starred !== undefined) progressFields.starred = body.starred;
+    if (body.updatedAt !== undefined || body.updated_at !== undefined) {
+      progressFields.updatedAt = body.updatedAt ?? body.updated_at;
+    }
+    if (Object.keys(progressFields).filter((k) => k !== 'updatedAt').length === 0) {
+      return reply.code(400).send({ error: 'empty_patch' });
+    }
+    await patchSrsProgress(pool, req.user.id, 'word', wordId, progressFields);
+    const merged = await fetchWordMerged(pool, req.user.id, wordId);
+    return { ok: true, word: merged };
   });
 
   app.delete('/api/words/:wordId', { preHandler: requireAuth }, async (req, reply) => {
@@ -643,6 +1227,11 @@ export async function buildApp(pool, { logger = false } = {}) {
       [req.user.id, wordId]
     );
     if (result.rowCount === 0) return reply.code(404).send({ error: 'word_not_found' });
+    await pool.query(
+      `DELETE FROM srs_progress
+       WHERE user_id = $1 AND target_type = 'word' AND target_id = $2`,
+      [req.user.id, wordId]
+    );
     return { ok: true };
   });
 
@@ -660,6 +1249,427 @@ export async function buildApp(pool, { logger = false } = {}) {
       saved.push(await upsertWord(pool, req.user.id, w));
     }
     return { ok: true, count: saved.length, words: saved };
+  });
+
+  // --- Unified SRS progress (word / chunk / frame) ---
+
+  app.get('/api/srs', { preHandler: requireAuth }, async (req) => {
+    const since = parseSince(req.query?.since);
+    const limitRaw = Number(req.query?.limit);
+    const limit =
+      Number.isFinite(limitRaw) && limitRaw > 0
+        ? Math.min(Math.floor(limitRaw), 2000)
+        : null;
+    const cursor = String(req.query?.cursor || '').trim();
+    const targetType = String(req.query?.targetType || req.query?.target_type || '').trim();
+    const typeFilter = SRS_TARGET_TYPES.has(targetType) ? targetType : null;
+
+    let result;
+    if (since) {
+      let cursorAt = null;
+      let cursorType = '';
+      let cursorId = '';
+      // cursor: `${updatedAtMs}:${targetType}:${targetId}`
+      const parts = cursor.split(':');
+      if (parts.length >= 3) {
+        const ms = Number(parts[0]);
+        cursorType = parts[1];
+        cursorId = parts.slice(2).join(':');
+        if (Number.isFinite(ms) && ms > 0) cursorAt = new Date(ms);
+      }
+      if (limit && cursorAt && cursorType && cursorId) {
+        result = await pool.query(
+          `SELECT * FROM srs_progress
+           WHERE user_id = $1
+             AND ($2::text IS NULL OR target_type = $2)
+             AND (
+               updated_at > $3
+               OR (updated_at = $3 AND (target_type > $4 OR (target_type = $4 AND target_id > $5)))
+             )
+           ORDER BY updated_at ASC, target_type ASC, target_id ASC
+           LIMIT $6`,
+          [req.user.id, typeFilter, cursorAt, cursorType, cursorId, limit]
+        );
+      } else if (limit) {
+        result = await pool.query(
+          `SELECT * FROM srs_progress
+           WHERE user_id = $1
+             AND ($2::text IS NULL OR target_type = $2)
+             AND updated_at > $3
+           ORDER BY updated_at ASC, target_type ASC, target_id ASC
+           LIMIT $4`,
+          [req.user.id, typeFilter, since, limit]
+        );
+      } else {
+        result = await pool.query(
+          `SELECT * FROM srs_progress
+           WHERE user_id = $1
+             AND ($2::text IS NULL OR target_type = $2)
+             AND updated_at > $3
+           ORDER BY updated_at ASC, target_type ASC, target_id ASC`,
+          [req.user.id, typeFilter, since]
+        );
+      }
+    } else if (limit) {
+      if (cursor.includes(':')) {
+        const idx = cursor.indexOf(':');
+        const cType = cursor.slice(0, idx);
+        const cId = cursor.slice(idx + 1);
+        result = await pool.query(
+          `SELECT * FROM srs_progress
+           WHERE user_id = $1
+             AND ($2::text IS NULL OR target_type = $2)
+             AND (target_type > $3 OR (target_type = $3 AND target_id > $4))
+           ORDER BY target_type ASC, target_id ASC
+           LIMIT $5`,
+          [req.user.id, typeFilter, cType, cId, limit]
+        );
+      } else {
+        result = await pool.query(
+          `SELECT * FROM srs_progress
+           WHERE user_id = $1
+             AND ($2::text IS NULL OR target_type = $2)
+           ORDER BY target_type ASC, target_id ASC
+           LIMIT $3`,
+          [req.user.id, typeFilter, limit]
+        );
+      }
+    } else {
+      result = await pool.query(
+        `SELECT * FROM srs_progress
+         WHERE user_id = $1
+           AND ($2::text IS NULL OR target_type = $2)
+         ORDER BY target_type ASC, target_id ASC`,
+        [req.user.id, typeFilter]
+      );
+    }
+
+    const items = result.rows.map(rowToSrs);
+    const maxUpdated = items.reduce((m, x) => Math.max(m, x.updatedAt || 0), 0);
+    let nextCursor = null;
+    if (limit && items.length === limit) {
+      const last = items[items.length - 1];
+      nextCursor = since
+        ? `${last.updatedAt || 0}:${last.targetType}:${last.targetId}`
+        : `${last.targetType}:${last.targetId}`;
+    }
+    return {
+      ok: true,
+      items,
+      nextCursor,
+      serverTime: Date.now(),
+      since: since ? since.getTime() : null,
+      maxUpdatedAt: maxUpdated || Date.now(),
+    };
+  });
+
+  app.put('/api/srs/:targetType/:targetId', { preHandler: requireAuth }, async (req, reply) => {
+    const targetType = String(req.params.targetType || '').trim();
+    const targetId = String(req.params.targetId || '').trim();
+    const p = normalizeSrsBody(req.body, targetType, targetId);
+    if (!p) return reply.code(400).send({ error: 'invalid_srs' });
+    p.updatedAt = Date.now();
+    const saved = await upsertSrsProgress(pool, req.user.id, p);
+    return { ok: true, item: saved };
+  });
+
+  app.patch('/api/srs/:targetType/:targetId', { preHandler: requireAuth }, async (req, reply) => {
+    const targetType = String(req.params.targetType || '').trim();
+    const targetId = String(req.params.targetId || '').trim();
+    if (!SRS_TARGET_TYPES.has(targetType) || !targetId) {
+      return reply.code(400).send({ error: 'invalid_srs' });
+    }
+    const body = req.body || {};
+    const saved = await patchSrsProgress(pool, req.user.id, targetType, targetId, body);
+    if (!saved) return reply.code(400).send({ error: 'empty_patch' });
+    return { ok: true, item: saved };
+  });
+
+  app.delete('/api/srs/:targetType/:targetId', { preHandler: requireAuth }, async (req, reply) => {
+    const targetType = String(req.params.targetType || '').trim();
+    const targetId = String(req.params.targetId || '').trim();
+    if (!SRS_TARGET_TYPES.has(targetType) || !targetId) {
+      return reply.code(400).send({ error: 'invalid_srs' });
+    }
+    const result = await pool.query(
+      `DELETE FROM srs_progress
+       WHERE user_id = $1 AND target_type = $2 AND target_id = $3`,
+      [req.user.id, targetType, targetId]
+    );
+    if (result.rowCount === 0) return reply.code(404).send({ error: 'srs_not_found' });
+    return { ok: true };
+  });
+
+  // --- Chunks (content) ---
+
+  app.get('/api/chunks', { preHandler: requireAuth }, async (req) => {
+    const since = parseSince(req.query?.since);
+    const limitRaw = Number(req.query?.limit);
+    const limit =
+      Number.isFinite(limitRaw) && limitRaw > 0
+        ? Math.min(Math.floor(limitRaw), 2000)
+        : null;
+    const cursor = String(req.query?.cursor || '').trim();
+    const rows = await listContentRows(pool, {
+      userId: req.user.id,
+      table: 'chunks',
+      idCol: 'chunk_id',
+      since,
+      limit,
+      cursor,
+    });
+    const chunks = rows.map(rowToChunk);
+    const maxUpdated = chunks.reduce((m, c) => Math.max(m, c.updatedAt || 0), 0);
+    let nextCursor = null;
+    if (limit && chunks.length === limit) {
+      const last = chunks[chunks.length - 1];
+      nextCursor = since ? `${last.updatedAt || 0}:${last.id}` : last.id;
+    }
+    return {
+      ok: true,
+      chunks,
+      nextCursor,
+      serverTime: Date.now(),
+      since: since ? since.getTime() : null,
+      maxUpdatedAt: maxUpdated || Date.now(),
+    };
+  });
+
+  app.put('/api/chunks/:chunkId', { preHandler: requireAuth }, async (req, reply) => {
+    const chunkId = String(req.params.chunkId || '').trim();
+    const c = normalizeChunkBody(req.body, chunkId);
+    if (!c) return reply.code(400).send({ error: 'invalid_chunk' });
+    c.updatedAt = Date.now();
+    try {
+      const saved = await upsertChunk(pool, req.user.id, c);
+      return { ok: true, chunk: saved };
+    } catch (e) {
+      if (String(e?.code) === '23505') {
+        return reply.code(409).send({ error: 'phrase_key_taken' });
+      }
+      throw e;
+    }
+  });
+
+  app.patch('/api/chunks/:chunkId', { preHandler: requireAuth }, async (req, reply) => {
+    const chunkId = String(req.params.chunkId || '').trim();
+    if (!chunkId) return reply.code(400).send({ error: 'invalid_chunkId' });
+    const body = req.body || {};
+    const sets = [];
+    const vals = [];
+    let i = 1;
+    function add(col, val) {
+      sets.push(`${col} = $${i++}`);
+      vals.push(val);
+    }
+    if (body.phrase !== undefined) {
+      add('phrase', String(body.phrase));
+      add('phrase_key', normalizePhraseKey(body.phraseKey || body.phrase_key || body.phrase));
+    } else if (body.phraseKey !== undefined || body.phrase_key !== undefined) {
+      add('phrase_key', normalizePhraseKey(body.phraseKey ?? body.phrase_key));
+    }
+    if (body.gloss !== undefined) add('gloss', String(body.gloss || ''));
+    if (body.kind !== undefined) add('kind', String(body.kind || 'collocation'));
+    if (body.tags !== undefined) add('tags', JSON.stringify(body.tags || []));
+    if (body.anchorWordId !== undefined || body.anchor_word_id !== undefined) {
+      add('anchor_word_id', (body.anchorWordId ?? body.anchor_word_id) || null);
+    }
+    if (body.source !== undefined) add('source', String(body.source || 'manual'));
+    if (body.exampleEn !== undefined || body.example_en !== undefined) {
+      add('example_en', String(body.exampleEn ?? body.example_en ?? ''));
+    }
+    if (body.exampleZh !== undefined || body.example_zh !== undefined) {
+      add('example_zh', String(body.exampleZh ?? body.example_zh ?? ''));
+    }
+    if (sets.length === 0) return reply.code(400).send({ error: 'empty_patch' });
+    add('updated_at', new Date());
+    vals.push(req.user.id, chunkId);
+    try {
+      const result = await pool.query(
+        `UPDATE chunks SET ${sets.join(', ')}
+         WHERE user_id = $${i++} AND chunk_id = $${i}
+         RETURNING *`,
+        vals
+      );
+      if (result.rowCount === 0) return reply.code(404).send({ error: 'chunk_not_found' });
+      return { ok: true, chunk: rowToChunk(result.rows[0]) };
+    } catch (e) {
+      if (String(e?.code) === '23505') {
+        return reply.code(409).send({ error: 'phrase_key_taken' });
+      }
+      throw e;
+    }
+  });
+
+  app.delete('/api/chunks/:chunkId', { preHandler: requireAuth }, async (req, reply) => {
+    const chunkId = String(req.params.chunkId || '').trim();
+    const result = await pool.query(
+      `DELETE FROM chunks WHERE user_id = $1 AND chunk_id = $2`,
+      [req.user.id, chunkId]
+    );
+    if (result.rowCount === 0) return reply.code(404).send({ error: 'chunk_not_found' });
+    await pool.query(
+      `DELETE FROM srs_progress
+       WHERE user_id = $1 AND target_type = 'chunk' AND target_id = $2`,
+      [req.user.id, chunkId]
+    );
+    return { ok: true };
+  });
+
+  app.post('/api/chunks/batch', { preHandler: requireAuth }, async (req, reply) => {
+    const list = Array.isArray(req.body?.chunks) ? req.body.chunks : null;
+    if (!list) return reply.code(400).send({ error: 'missing_chunks' });
+    if (list.length > BATCH_MAX) {
+      return reply.code(413).send({ error: 'batch_too_large', max: BATCH_MAX });
+    }
+    const saved = [];
+    for (const item of list) {
+      const c = normalizeChunkBody(item, item?.id);
+      if (!c) continue;
+      if (!c.updatedAt) c.updatedAt = Date.now();
+      saved.push(await upsertChunk(pool, req.user.id, c));
+    }
+    return { ok: true, count: saved.length, chunks: saved };
+  });
+
+  // --- Frames (content, Phase 2) ---
+
+  app.get('/api/frames', { preHandler: requireAuth }, async (req) => {
+    const since = parseSince(req.query?.since);
+    const limitRaw = Number(req.query?.limit);
+    const limit =
+      Number.isFinite(limitRaw) && limitRaw > 0
+        ? Math.min(Math.floor(limitRaw), 2000)
+        : null;
+    const cursor = String(req.query?.cursor || '').trim();
+    const rows = await listContentRows(pool, {
+      userId: req.user.id,
+      table: 'frames',
+      idCol: 'frame_id',
+      since,
+      limit,
+      cursor,
+    });
+    const frames = rows.map(rowToFrame);
+    const maxUpdated = frames.reduce((m, f) => Math.max(m, f.updatedAt || 0), 0);
+    let nextCursor = null;
+    if (limit && frames.length === limit) {
+      const last = frames[frames.length - 1];
+      nextCursor = since ? `${last.updatedAt || 0}:${last.id}` : last.id;
+    }
+    return {
+      ok: true,
+      frames,
+      nextCursor,
+      serverTime: Date.now(),
+      since: since ? since.getTime() : null,
+      maxUpdatedAt: maxUpdated || Date.now(),
+    };
+  });
+
+  app.put('/api/frames/:frameId', { preHandler: requireAuth }, async (req, reply) => {
+    const frameId = String(req.params.frameId || '').trim();
+    const f = normalizeFrameBody(req.body, frameId);
+    if (!f) return reply.code(400).send({ error: 'invalid_frame' });
+    f.updatedAt = Date.now();
+    try {
+      const saved = await upsertFrame(pool, req.user.id, f);
+      return { ok: true, frame: saved };
+    } catch (e) {
+      if (String(e?.code) === '23505') {
+        return reply.code(409).send({ error: 'frame_key_taken' });
+      }
+      throw e;
+    }
+  });
+
+  app.patch('/api/frames/:frameId', { preHandler: requireAuth }, async (req, reply) => {
+    const frameId = String(req.params.frameId || '').trim();
+    if (!frameId) return reply.code(400).send({ error: 'invalid_frameId' });
+    const body = req.body || {};
+    const sets = [];
+    const vals = [];
+    let i = 1;
+    function add(col, val) {
+      sets.push(`${col} = $${i++}`);
+      vals.push(val);
+    }
+    if (body.title !== undefined) add('title', String(body.title));
+    if (body.skeleton !== undefined) {
+      add('skeleton', String(body.skeleton || ''));
+      if (body.frameKey === undefined && body.frame_key === undefined) {
+        add('frame_key', normalizePhraseKey(body.skeleton || body.title || ''));
+      }
+    }
+    if (body.frameKey !== undefined || body.frame_key !== undefined) {
+      add('frame_key', normalizePhraseKey(body.frameKey ?? body.frame_key));
+    }
+    if (body.slots !== undefined) add('slots', JSON.stringify(body.slots || []));
+    if (body.glossZh !== undefined || body.gloss_zh !== undefined) {
+      add('gloss_zh', String(body.glossZh ?? body.gloss_zh ?? ''));
+    }
+    if (body.anchorWordIds !== undefined || body.anchor_word_ids !== undefined) {
+      add(
+        'anchor_word_ids',
+        JSON.stringify(body.anchorWordIds ?? body.anchor_word_ids ?? [])
+      );
+    }
+    if (body.exampleFilled !== undefined || body.example_filled !== undefined) {
+      add('example_filled', String(body.exampleFilled ?? body.example_filled ?? ''));
+    }
+    if (body.packId !== undefined || body.pack_id !== undefined) {
+      add('pack_id', String(body.packId ?? body.pack_id ?? ''));
+    }
+    if (body.source !== undefined) add('source', String(body.source || 'manual'));
+    if (sets.length === 0) return reply.code(400).send({ error: 'empty_patch' });
+    add('updated_at', new Date());
+    vals.push(req.user.id, frameId);
+    try {
+      const result = await pool.query(
+        `UPDATE frames SET ${sets.join(', ')}
+         WHERE user_id = $${i++} AND frame_id = $${i}
+         RETURNING *`,
+        vals
+      );
+      if (result.rowCount === 0) return reply.code(404).send({ error: 'frame_not_found' });
+      return { ok: true, frame: rowToFrame(result.rows[0]) };
+    } catch (e) {
+      if (String(e?.code) === '23505') {
+        return reply.code(409).send({ error: 'frame_key_taken' });
+      }
+      throw e;
+    }
+  });
+
+  app.delete('/api/frames/:frameId', { preHandler: requireAuth }, async (req, reply) => {
+    const frameId = String(req.params.frameId || '').trim();
+    const result = await pool.query(
+      `DELETE FROM frames WHERE user_id = $1 AND frame_id = $2`,
+      [req.user.id, frameId]
+    );
+    if (result.rowCount === 0) return reply.code(404).send({ error: 'frame_not_found' });
+    await pool.query(
+      `DELETE FROM srs_progress
+       WHERE user_id = $1 AND target_type = 'frame' AND target_id = $2`,
+      [req.user.id, frameId]
+    );
+    return { ok: true };
+  });
+
+  app.post('/api/frames/batch', { preHandler: requireAuth }, async (req, reply) => {
+    const list = Array.isArray(req.body?.frames) ? req.body.frames : null;
+    if (!list) return reply.code(400).send({ error: 'missing_frames' });
+    if (list.length > BATCH_MAX) {
+      return reply.code(413).send({ error: 'batch_too_large', max: BATCH_MAX });
+    }
+    const saved = [];
+    for (const item of list) {
+      const f = normalizeFrameBody(item, item?.id);
+      if (!f) continue;
+      if (!f.updatedAt) f.updatedAt = Date.now();
+      saved.push(await upsertFrame(pool, req.user.id, f));
+    }
+    return { ok: true, count: saved.length, frames: saved };
   });
 
   app.get('/api/me/prefs', { preHandler: requireAuth }, async (req) => {

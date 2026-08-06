@@ -13,7 +13,14 @@ export interface Settings {
   workerUrl: string;
   syncToken: string;
   autoSync: boolean;
+  /** Content words incremental cursor (words.updated_at) */
   lastSyncAt: number;
+  /** SRS progress incremental cursor (srs_progress.updated_at) */
+  lastSrsSyncAt: number;
+  /** Chunks content cursor */
+  lastChunkSyncAt: number;
+  /** Frames content cursor */
+  lastFrameSyncAt: number;
   welcomeSeen: boolean;
 }
 

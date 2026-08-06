@@ -21,6 +21,9 @@ const initial: Settings = {
   syncToken: '',
   autoSync: true,
   lastSyncAt: 0,
+  lastSrsSyncAt: 0,
+  lastChunkSyncAt: 0,
+  lastFrameSyncAt: 0,
   welcomeSeen: false,
 };
 

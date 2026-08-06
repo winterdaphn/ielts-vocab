@@ -94,8 +94,10 @@ export interface Word {
   totalReviews: number;
   correctReviews: number;
   createdAt: number;
-  /** Last local/remote mutation time (ms); used for LWW sync */
+  /** Content mtime (ms); progress-only edits should not bump this after srs split */
   updatedAt?: number;
+  /** SRS / starred / crossedOut mtime from srs_progress */
+  progressUpdatedAt?: number;
 }
 
 export interface WordExample {

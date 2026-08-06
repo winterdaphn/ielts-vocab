@@ -10,7 +10,7 @@ import { useAuth } from './useAuth';
 import { normalizeCategories } from '@/config/categories';
 import { migratePhoneticFields } from '@/utils/phonetic';
 import { migrateUserWordIdsIfNeeded } from '@/utils/migrateWordIds';
-import { enqueueDelete, enqueueWord } from '@/api/realtimeSync';
+import { classifyWordChange, enqueueDelete, enqueueWord } from '@/api/realtimeSync';
 import { wordToId, withCanonicalWordId } from '@/utils/wordId';
 
 interface WordsState {
@@ -32,8 +32,17 @@ interface WordsState {
   setLoaded: (v: boolean) => void;
 }
 
-function withUpdatedAt(w: Word): Word {
-  return { ...w, updatedAt: Date.now() };
+function withUpdatedAt(w: Word, prev?: Word | null): Word {
+  const now = Date.now();
+  const kind = classifyWordChange(prev, w);
+  if (kind === 'progress' && prev) {
+    return {
+      ...w,
+      updatedAt: prev.updatedAt ?? now,
+      progressUpdatedAt: now,
+    };
+  }
+  return { ...w, updatedAt: now, progressUpdatedAt: w.progressUpdatedAt ?? now };
 }
 
 export const useWordsStore = create<WordsState>((set, _get) => ({
@@ -41,7 +50,7 @@ export const useWordsStore = create<WordsState>((set, _get) => ({
   loaded: false,
   setWords: (words) => set({ words, loaded: true }),
   addWord: async (w) => {
-    const word = withUpdatedAt(withCanonicalWordId(w));
+    const word = withUpdatedAt(withCanonicalWordId(w), null);
     const row: WordRow = {
       ...word,
       userId: useAuth.getState().username,
@@ -53,7 +62,7 @@ export const useWordsStore = create<WordsState>((set, _get) => ({
     const userId = useAuth.getState().username;
     if (!userId || words.length === 0) return;
     const rows: WordRow[] = words.map((w) => ({
-      ...withUpdatedAt(withCanonicalWordId(w)),
+      ...withUpdatedAt(withCanonicalWordId(w), null),
       userId,
     }));
     await db.words.bulkPut(rows);
@@ -64,7 +73,7 @@ export const useWordsStore = create<WordsState>((set, _get) => ({
     const userId = useAuth.getState().username;
     if (!userId || words.length === 0) return;
     const rows: WordRow[] = words.map((w) => ({
-      ...withUpdatedAt(withCanonicalWordId(w)),
+      ...withUpdatedAt(withCanonicalWordId(w), null),
       userId,
     }));
     await db.words.bulkPut(rows);
@@ -75,7 +84,7 @@ export const useWordsStore = create<WordsState>((set, _get) => ({
     const fromDb = await db.words.get(w.id);
     const fromStore = useWordsStore.getState().words.find((x) => x.id === w.id);
     const prev = (fromDb as Word | undefined) || fromStore || null;
-    const word = withUpdatedAt(withCanonicalWordId(w));
+    const word = withUpdatedAt(withCanonicalWordId(w), prev);
     const row: WordRow = {
       ...word,
       userId: useAuth.getState().username,
@@ -184,5 +193,6 @@ export function makeNewWord(input: Partial<Word> & { word: string; translation?:
     correctReviews: input.correctReviews ?? 0,
     createdAt: input.createdAt ?? Date.now(),
     updatedAt: input.updatedAt ?? Date.now(),
+    progressUpdatedAt: input.progressUpdatedAt ?? input.updatedAt ?? Date.now(),
   };
 }

@@ -2203,3 +2203,67 @@ mark.highlight {
   margin-bottom: 12px;
   opacity: 0.5;
 }
+
+/* Deck (chunks / frames) */
+.page-pad {
+  padding: 12px 14px 88px;
+}
+.filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.filter-chips .chip {
+  border: 1px solid var(--border, #ddd);
+  background: transparent;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--text-light);
+  cursor: pointer;
+}
+.filter-chips .chip.active {
+  border-color: var(--accent);
+  color: var(--accent-dark, var(--accent));
+  background: var(--accent-light, rgba(0, 0, 0, 0.04));
+}
+.deck-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.deck-list-item {
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: var(--card-bg, #fff);
+  border-bottom: 1px solid var(--border, #eee);
+  padding: 12px 4px;
+  cursor: pointer;
+}
+.deck-pack-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border, #eee);
+}
+.deck-anchor-link {
+  color: var(--accent);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.collocation-actions {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  flex-shrink: 0;
+}
+button.linkish {
+  border: none;
+  background: none;
+  color: var(--accent);
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+}

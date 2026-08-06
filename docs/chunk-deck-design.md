@@ -394,17 +394,14 @@ MVP 主题型一种（推荐例句挖空整段 phrase）。结束只 `applyRevie
 
 ## 7. MVP 实施顺序
 
-1. **`srs_progress` 类型 + Dexie 表 + `useSrsProgress`**；`scheduler` 改为吃进度  
-2. **后端 `srs_progress` + `/api/srs`**；从 `words` 迁出 SRS；words 增量不再因练题刷屏  
-3. 前端 words sync 分轨：内容 vs 进度（旧 `/progress` 兼容转发）  
-4. Chunk 类型 + Dexie `chunks` + `useChunks` + phraseKey 去重；加入时写进度行  
-5. **底栏 Tab「搭配」** + `/chunks`、`/chunks/:id`  
-6. 词详情「加入搭配本」+ 列表/详情 UI  
-7. 今日语块卡片 + 到期统计  
-8. 语块练习 + 只同步 srs  
-9. PostgreSQL `chunks` + `/api/chunks` 内容 sync  
-10. Phase 2：`frames` 内容表 + UI；进度复用 `/api/srs/frame/:id`  
-11. 语块练习云端续做（可选）
+1. ~~后端 `srs_progress` + `/api/srs` + words 迁移~~  
+2. ~~前端 words sync 分轨~~  
+3. ~~Chunk / Frame 内容表 + Dexie + store + sync~~  
+4. ~~底栏 Tab「搭配」+ `/chunks` + Segmented 语块|模板~~  
+5. ~~词详情「加入搭配本」+ 今日卡片 + 轻量练习（`/practice?deck=`）~~  
+6. ~~Phase 2：预制模板包 + `/frames/:id` + `/api/frames`~~  
+7. （可选）语块练习云端续做；Word 本地也拆到 Dexie `srsProgress`  
+8. （可选）DROP `words` 上遗留 SRS 列
 
 **风险点**：Word UI 大量读 `w.nextReview` —— 需一层 `getWordProgress(w)` 或 merge 视图，避免漏改；迁移要可回滚（先双写再删列）。
 

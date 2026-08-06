@@ -28,6 +28,8 @@ import {
   type PracticeSummary,
 } from '@/utils/practiceSession';
 import { countByScope } from '@/utils/practiceSelect';
+import { useChunkDueStats } from '@/store/useChunks';
+import { useFrameDueStats } from '@/store/useFrames';
 
 const SCOPES: { key: StudyScope; label: string; hint: string }[] = [
   { key: 'new', label: '学新词', hint: '只练从未复习过的词' },
@@ -60,6 +62,8 @@ export default function TodayPage() {
   const localSaved = useMemo(() => getSavedPracticeSummary(), [savedTick, words.length]);
   const saved = remoteSummary ?? localSaved;
   const scopeCounts = useMemo(() => countByScope(words), [words]);
+  const chunkStats = useChunkDueStats();
+  const frameStats = useFrameDueStats();
 
   // 回到今日：刷新本机续做摘要（不触发云端）
   useEffect(() => {
@@ -334,6 +338,32 @@ export default function TodayPage() {
           </p>
         </div>
       )}
+
+      <div className="app-card" style={{ marginTop: 12 }}>
+        <h3 style={{ fontSize: 15, marginBottom: 6 }}>语块 / 模板复习</h3>
+        <p className="text-light" style={{ fontSize: 13, marginBottom: 12 }}>
+          语块到期 {chunkStats.due} · 本库 {chunkStats.total}
+          {' · '}模板到期 {frameStats.due} · 本库 {frameStats.total}
+        </p>
+        <div className="flex-row" style={{ gap: 8, flexWrap: 'wrap' }}>
+          <Button
+            type="primary"
+            disabled={chunkStats.total === 0}
+            onClick={() => navigate('/practice?deck=chunk&scope=mixed')}
+          >
+            练语块
+          </Button>
+          <Button
+            disabled={frameStats.total === 0}
+            onClick={() => navigate('/practice?deck=frame&scope=mixed')}
+          >
+            练模板
+          </Button>
+          <Button type="link" onClick={() => navigate('/chunks')}>
+            打开搭配本
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }

@@ -7,6 +7,7 @@ import {
   StarOutlined,
   StarFilled,
 } from '@ant-design/icons';
+import { useSearchParams } from 'react-router-dom';
 import { usePracticeSession } from '@/hooks/usePracticeSession';
 import { isClozeFamily } from '@/utils/practiceSelect';
 import { modeLabel, scopeLabel, difficultyLabel } from '@/utils/practiceSession';
@@ -20,8 +21,18 @@ import ChoicePanel from '@/components/practice/ChoicePanel';
 import TranslatePanel from '@/components/practice/TranslatePanel';
 import SpeakButton from '@/components/SpeakButton';
 import PhoneticDisplay from '@/components/PhoneticDisplay';
+import DeckPracticePage from '@/pages/DeckPracticePage';
 
 export default function PracticePage() {
+  const [params] = useSearchParams();
+  const deck = params.get('deck');
+  if (deck === 'chunk' || deck === 'frame') {
+    return <DeckPracticePage />;
+  }
+  return <WordPracticePage />;
+}
+
+function WordPracticePage() {
   const s = usePracticeSession();
 
   if (s.phase === 'selecting' && !s.hasModeParam) {

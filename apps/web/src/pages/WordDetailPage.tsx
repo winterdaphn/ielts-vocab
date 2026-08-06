@@ -51,6 +51,7 @@ import type { Collocation, RelatedWord } from '@/types/word';
 import WordCategoryEditor from '@/components/WordCategoryEditor';
 import { normalizeCategories } from '@/config/categories';
 import { findWordIndex, wordDetailPath, decodeWordRouteId } from '@/utils/wordId';
+import { useChunksStore, useUserChunks } from '@/store/useChunks';
 
 type TipTab = 'mnemonic' | 'synonyms' | 'similars' | 'derivatives';
 type ColoTab = 'dict' | 'mine';
@@ -63,6 +64,16 @@ export default function WordDetailPage() {
   const updateWord = useWordsStore((s) => s.updateWord);
   const removeWord = useWordsStore((s) => s.removeWord);
   const settings = useSettings();
+  const userChunks = useUserChunks();
+  const addFromCollocation = useChunksStore((s) => s.addFromCollocation);
+  const deckPhraseKeys = useMemo(
+    () => new Set(userChunks.map((c) => c.phraseKey)),
+    [userChunks]
+  );
+  const chunkIdByKey = useMemo(
+    () => new Map(userChunks.map((c) => [c.phraseKey, c.id])),
+    [userChunks]
+  );
 
   const routeId = id ?? '';
   const idx = useMemo(
@@ -890,6 +901,21 @@ export default function WordDetailPage() {
               <CollocationsList
                 items={dictCollocations}
                 emptyText="词库暂无该词的词典搭配"
+                deckPhraseKeys={deckPhraseKeys}
+                onAddToDeck={async (item) => {
+                  const { existed, chunk } = await addFromCollocation({
+                    phrase: item.phrase,
+                    gloss: item.gloss,
+                    anchorWordId: word?.id,
+                    source: 'dict',
+                  });
+                  message.success(existed ? '已在搭配本' : '已加入搭配本');
+                  if (existed) navigate(`/chunks/${chunk.id}`);
+                }}
+                onOpenInDeck={(phraseKey) => {
+                  const cid = chunkIdByKey.get(phraseKey);
+                  if (cid) navigate(`/chunks/${cid}`);
+                }}
               />
             </>
           )}
@@ -918,6 +944,21 @@ export default function WordDetailPage() {
                 emptyText="暂无搭配，可手记或点「AI 抓取」"
                 onRemove={removeCollocation}
                 removeTitle="删除这条搭配"
+                deckPhraseKeys={deckPhraseKeys}
+                onAddToDeck={async (item) => {
+                  const { existed, chunk } = await addFromCollocation({
+                    phrase: item.phrase,
+                    gloss: item.gloss,
+                    anchorWordId: word?.id,
+                    source: 'manual',
+                  });
+                  message.success(existed ? '已在搭配本' : '已加入搭配本');
+                  if (existed) navigate(`/chunks/${chunk.id}`);
+                }}
+                onOpenInDeck={(phraseKey) => {
+                  const cid = chunkIdByKey.get(phraseKey);
+                  if (cid) navigate(`/chunks/${cid}`);
+                }}
               />
               {showColoAdd && (
                 <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>

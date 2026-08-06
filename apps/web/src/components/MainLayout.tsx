@@ -3,13 +3,10 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useEffect } from 'react';
 
 import {
-
   HomeOutlined,
-
   BookOutlined,
-
   SettingOutlined,
-
+  BlockOutlined,
 } from '@ant-design/icons';
 
 import { useAuth } from '@/store/useAuth';
@@ -31,13 +28,10 @@ import { ensureVocabBankRelated } from '@/utils/vocabBankRelated';
 
 
 const NAV_ITEMS = [
-
   { path: '/today', label: '今日', icon: <HomeOutlined /> },
-
   { path: '/words', label: '词表', icon: <BookOutlined /> },
-
+  { path: '/chunks', label: '搭配', icon: <BlockOutlined /> },
   { path: '/settings', label: '设置', icon: <SettingOutlined /> },
-
 ];
 
 
@@ -60,9 +54,13 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
 
   const isWordDetail = /^\/words\/[^/]+$/.test(location.pathname);
 
+  const isChunkDetail = /^\/chunks\/[^/]+$/.test(location.pathname);
+
+  const isFrameDetail = /^\/frames\/[^/]+$/.test(location.pathname);
+
   const isWordsList = location.pathname === '/words';
 
-  const hideMainNav = isPractice || isWordDetail;
+  const hideMainNav = isPractice || isWordDetail || isChunkDetail || isFrameDetail;
 
 
 
@@ -209,7 +207,10 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
 
               className={`bottom-nav-item ${
                 location.pathname === it.path ||
-                (it.path === '/settings' && location.pathname.startsWith('/settings'))
+                (it.path === '/settings' && location.pathname.startsWith('/settings')) ||
+                (it.path === '/chunks' &&
+                  (location.pathname.startsWith('/chunks') ||
+                    location.pathname.startsWith('/frames')))
                   ? 'active'
                   : ''
               }`}

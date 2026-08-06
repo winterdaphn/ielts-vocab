@@ -7,6 +7,9 @@ import WordDetailPage from '@/pages/WordDetailPage';
 import AddPage from '@/pages/AddPage';
 import SettingsPage from '@/pages/SettingsPage';
 import PracticePage from '@/pages/PracticePage';
+import ChunksPage from '@/pages/ChunksPage';
+import ChunkDetailPage from '@/pages/ChunkDetailPage';
+import FrameDetailPage from '@/pages/FrameDetailPage';
 import MainLayout from '@/components/MainLayout';
 
 export default function App() {
@@ -28,6 +31,9 @@ export default function App() {
         <Route path="/today" element={<TodayPage />} />
         <Route path="/words" element={<WordsPage />} />
         <Route path="/words/:id" element={<WordDetailPage />} />
+        <Route path="/chunks" element={<ChunksPage />} />
+        <Route path="/chunks/:id" element={<ChunkDetailPage />} />
+        <Route path="/frames/:id" element={<FrameDetailPage />} />
         <Route path="/add" element={<AddPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/practice" element={<PracticePage />} />

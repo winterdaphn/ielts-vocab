@@ -19,6 +19,13 @@ async function main() {
     implementation: () => new Date(),
     impure: true,
   });
+  db.public.registerFunction({
+    name: 'gen_random_uuid',
+    returns: 'uuid',
+    implementation: () =>
+      '00000000-0000-4000-8000-' + String(Date.now()).padStart(12, '0').slice(-12),
+    impure: true,
+  });
 
   const { Pool } = db.adapters.createPg();
   const pool = new Pool();
@@ -67,6 +74,8 @@ async function main() {
   assert(put.json().word.mnemonic === 'note1', 'mnemonic');
   assert(put.json().word.synonyms?.[0]?.word === 'joyful', 'synonym');
 
+  const contentAtBefore = put.json().word.updatedAt;
+
   const patch = await app.inject({
     method: 'PATCH',
     url: '/api/words/elated/progress',
@@ -76,6 +85,20 @@ async function main() {
   assert(patch.statusCode === 200, 'patch ' + patch.body);
   assert(patch.json().word.streak === 2, 'streak');
   assert(patch.json().word.starred === true, 'starred');
+  // Progress must not bump words content mtime
+  assert(
+    patch.json().word.updatedAt === contentAtBefore,
+    'progress must not bump words.updated_at'
+  );
+
+  const srsPatch = await app.inject({
+    method: 'PATCH',
+    url: '/api/srs/word/elated',
+    headers: auth,
+    payload: { streak: 3 },
+  });
+  assert(srsPatch.statusCode === 200, 'srs patch ' + srsPatch.body);
+  assert(srsPatch.json().item.streak === 3, 'srs streak');
 
   const list = await app.inject({
     method: 'GET',
@@ -84,6 +107,7 @@ async function main() {
   });
   assert(list.statusCode === 200, 'list');
   assert(list.json().words.length === 1, 'list count');
+  assert(list.json().words[0].streak === 3, 'list joins srs');
 
   const since = Date.now() + 10_000;
   const incr = await app.inject({
@@ -93,6 +117,15 @@ async function main() {
   });
   assert(incr.statusCode === 200, 'since');
   assert(incr.json().words.length === 0, 'since empty');
+
+  const srsList = await app.inject({
+    method: 'GET',
+    url: '/api/srs?targetType=word',
+    headers: auth,
+  });
+  assert(srsList.statusCode === 200, 'srs list');
+  assert(srsList.json().items.length >= 1, 'srs items');
+  assert(srsList.json().items.some((x) => x.targetId === 'elated'), 'srs has elated');
 
   const batch = await app.inject({
     method: 'POST',
@@ -134,12 +167,46 @@ async function main() {
   });
   assert(del.statusCode === 200, 'delete');
 
+  const chunkPut = await app.inject({
+    method: 'PUT',
+    url: '/api/chunks/c1',
+    headers: auth,
+    payload: {
+      id: 'c1',
+      phrase: 'take into account',
+      gloss: '考虑到',
+      source: 'manual',
+    },
+  });
+  assert(chunkPut.statusCode === 200, 'chunk put ' + chunkPut.body);
+
+  const chunkList = await app.inject({
+    method: 'GET',
+    url: '/api/chunks',
+    headers: auth,
+  });
+  assert(chunkList.json().chunks.length === 1, 'chunk list');
+
+  const framePut = await app.inject({
+    method: 'PUT',
+    url: '/api/frames/f1',
+    headers: auth,
+    payload: {
+      id: 'f1',
+      title: 'Growing concern',
+      skeleton: 'There is growing concern that [clause].',
+      glossZh: '引出担忧',
+      source: 'bank',
+    },
+  });
+  assert(framePut.statusCode === 200, 'frame put ' + framePut.body);
+
   const noAuth = await app.inject({ method: 'GET', url: '/api/words' });
   assert(noAuth.statusCode === 401, 'auth guard');
 
   await app.close();
   await pool.end();
-  console.log('SMOKE OK: relational words / progress / batch / prefs');
+  console.log('SMOKE OK: words / srs / chunks / frames / prefs');
 }
 
 main().catch((e) => {

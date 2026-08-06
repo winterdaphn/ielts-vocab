@@ -30,7 +30,10 @@ import {
   putPrefs,
   putWord,
 } from '@/api/wordsApi';
+import { applySrsToWord, fetchSrsSince } from '@/api/srsApi';
+import { flushDeckSyncQueue, pullDeckContentIncremental } from '@/api/deckSync';
 import { useSyncStatus } from '@/store/useSyncStatus';
+import { upsertLocalSrs } from '@/db/ieltsDb';
 
 export type SyncKind = 'content' | 'progress' | 'delete';
 
@@ -162,20 +165,33 @@ export function enqueueWord(word: Word, kind?: SyncKind, prev?: Word | null) {
   if (!s.syncToken || !s.autoSync) return;
 
   const now = Date.now();
-  const next = { ...word, updatedAt: now } as Word;
   const existing = queue.get(word.id);
   if (existing?.kind === 'delete') return;
 
   // 新建词：强制整词 PUT
   const isCreate = kind === 'content' && !prev;
   if (isCreate || existing?.fullPut) {
+    const next = { ...word, updatedAt: now, progressUpdatedAt: now } as Word;
     queue.set(word.id, { kind: 'content', word: next, fullPut: true });
     scheduleFlush();
     return;
   }
 
-  const resolved = kind || classifyWordChange(prev, next);
-  const delta = prev ? diffWordFields(prev, next) : {};
+  const resolved = kind || classifyWordChange(prev, word);
+  const delta = prev ? diffWordFields(prev, word) : {};
+  const progressOnlyChange =
+    resolved === 'progress' &&
+    (!prev || !Object.keys(delta).some((k) => CONTENT_KEYS.has(k)));
+
+  // Progress-only: keep content updatedAt; bump progressUpdatedAt
+  const next = {
+    ...word,
+    updatedAt: progressOnlyChange
+      ? (prev?.updatedAt ?? word.updatedAt ?? now)
+      : now,
+    progressUpdatedAt: now,
+  } as Word;
+
   if (!prev) {
     // 无快照的更新：只推进度小包，缺行时由 patch 404 fallback PUT
     const progressOnly: Record<string, unknown> = {
@@ -187,7 +203,6 @@ export function enqueueWord(word: Word, kind?: SyncKind, prev?: Word | null) {
       correctReviews: next.correctReviews,
       crossedOut: next.crossedOut,
       starred: !!next.starred,
-      updatedAt: now,
     };
     queue.set(word.id, {
       kind: 'progress',
@@ -200,7 +215,7 @@ export function enqueueWord(word: Word, kind?: SyncKind, prev?: Word | null) {
 
   if (Object.keys(delta).length === 0) return;
 
-  const mergedFields = { ...(existing?.fields || {}), ...delta, updatedAt: now };
+  const mergedFields = { ...(existing?.fields || {}), ...delta };
   const nextKind =
     existing?.kind === 'content' || resolved === 'content' ? 'content' : 'progress';
   queue.set(word.id, {
@@ -223,6 +238,8 @@ export async function flushSyncQueue(): Promise<void> {
   if (flushing) return;
   const s = settings();
   if (!s.syncToken) return;
+  // Always try deck queue even if word queue empty
+  void flushDeckSyncQueue();
   if (queue.size === 0) return;
 
   flushing = true;
@@ -286,9 +303,14 @@ async function pullIncrementalInner(
 
   const sync = useSyncStatus.getState();
   const since = s.lastSyncAt > 0 ? s.lastSyncAt : undefined;
+  const srsSince = s.lastSrsSyncAt > 0 ? s.lastSrsSyncAt : undefined;
   const fullPull = !since;
   sync.setPulling(true);
-  syncLog(`pull start (${reason})`, { fullPull, since: since ?? 0 });
+  syncLog(`pull start (${reason})`, {
+    fullPull,
+    since: since ?? 0,
+    srsSince: srsSince ?? 0,
+  });
 
   try {
     const { db } = await import('@/db/ieltsDb');
@@ -304,12 +326,13 @@ async function pullIncrementalInner(
     const map = new Map(localRows.map((w) => [w.id, w]));
     let merged = 0;
     let maxUpdatedAt = 0;
+    let maxSrsUpdatedAt = 0;
     let clearedForFullPull = false;
 
     const { words: remote, maxUpdatedAt: remoteMax } = await fetchWordsSince(
       s,
       since,
-      async (page, totalSoFar) => {
+      async (page, _totalSoFar) => {
         const accepted: Word[] = [];
         for (const rw of page) {
           const lw = map.get(rw.id);
@@ -318,7 +341,21 @@ async function pullIncrementalInner(
             (lw as (Word & { updatedAt?: number }) | undefined)?.updatedAt || 0
           );
           if (!lw || rUpdated >= lUpdated) {
+            // Content LWW: keep newer local progress if remote content is older on progress
             const next = { ...lw, ...rw, id: rw.id } as Word;
+            const lProg = Number(lw?.progressUpdatedAt || 0);
+            const rProg = Number(rw.progressUpdatedAt || 0);
+            if (lw && lProg > rProg) {
+              next.ease = lw.ease;
+              next.interval = lw.interval;
+              next.streak = lw.streak;
+              next.nextReview = lw.nextReview;
+              next.totalReviews = lw.totalReviews;
+              next.correctReviews = lw.correctReviews;
+              next.crossedOut = lw.crossedOut;
+              next.starred = lw.starred;
+              next.progressUpdatedAt = lw.progressUpdatedAt;
+            }
             map.set(rw.id, next);
             accepted.push(next);
             merged++;
@@ -342,11 +379,46 @@ async function pullIncrementalInner(
     );
     maxUpdatedAt = remoteMax;
 
-    if (remote.length === 0) {
+    // Progress channel — all target types (word embeds in Word; chunk/frame → Dexie srsProgress)
+    const { items: srsItems, maxUpdatedAt: srsMax } = await fetchSrsSince(
+      s,
+      fullPull ? undefined : srsSince
+    );
+    maxSrsUpdatedAt = srsMax;
+    let srsMerged = 0;
+    const srsTouched: Word[] = [];
+    for (const item of srsItems) {
+      if (item.targetType === 'word') {
+        const lw = map.get(item.targetId);
+        if (!lw) continue;
+        const lProg = Number(lw.progressUpdatedAt || 0);
+        if (item.updatedAt >= lProg) {
+          const next = applySrsToWord(lw, item);
+          map.set(item.targetId, next);
+          srsTouched.push(next);
+          srsMerged++;
+          merged++;
+        }
+      } else if (item.targetType === 'chunk' || item.targetType === 'frame') {
+        const { db } = await import('@/db/ieltsDb');
+        const local = await db.srsProgress.get(`${item.targetType}:${item.targetId}`);
+        const lUp = Number(local?.updatedAt || 0);
+        if (!local || item.updatedAt >= lUp) {
+          await upsertLocalSrs(userId, item);
+          srsMerged++;
+          merged++;
+        }
+      }
+    }
+
+    if (remote.length === 0 && srsTouched.length === 0) {
       const prefs = await fetchPrefs(s);
       if (prefs) applyPrefsLocally(prefs, { applyPracticePrefs });
-      if (maxUpdatedAt) useSettings.getState().update({ lastSyncAt: maxUpdatedAt });
-      syncLog(`pull done (${reason})`, { merged: 0 });
+      useSettings.getState().update({
+        ...(maxUpdatedAt ? { lastSyncAt: maxUpdatedAt } : {}),
+        ...(maxSrsUpdatedAt ? { lastSrsSyncAt: maxSrsUpdatedAt } : {}),
+      });
+      syncLog(`pull done (${reason})`, { merged: 0, srsMerged: 0 });
       return { merged: 0 };
     }
 
@@ -358,15 +430,25 @@ async function pullIncrementalInner(
       await withSyncSuspended(() => useWordsStore.getState().replaceAll([...map.values()]));
     } else if (localCount === 0 && map.size > 0) {
       useWordsStore.getState().setWords([...map.values()]);
+    } else if (srsTouched.length && fullPull && clearedForFullPull) {
+      await withSyncSuspended(() =>
+        useWordsStore.getState().bulkMergeWords(srsTouched)
+      );
     }
 
     const prefs = await fetchPrefs(s);
     if (prefs) applyPrefsLocally(prefs, { applyPracticePrefs });
 
     useSettings.getState().update({
-      lastSyncAt: Math.max(maxUpdatedAt, Date.now()),
+      lastSyncAt: Math.max(maxUpdatedAt, s.lastSyncAt, Date.now()),
+      lastSrsSyncAt: Math.max(maxSrsUpdatedAt, s.lastSrsSyncAt, Date.now()),
     });
-    syncLog(`pull done (${reason})`, { merged });
+
+    // Chunks / frames content (SRS already merged above)
+    const deck = await pullDeckContentIncremental();
+    merged += deck.merged;
+
+    syncLog(`pull done (${reason})`, { merged, srsMerged, deck: deck.merged });
     return { merged };
   } finally {
     sync.setPulling(false);
@@ -462,11 +544,24 @@ export async function pullOnLogin(): Promise<{ merged: number }> {
   if (!s.syncToken) return { merged: 0 };
   // Force full pull once by clearing since
   const prev = s.lastSyncAt;
-  useSettings.getState().update({ lastSyncAt: 0 });
+  const prevSrs = s.lastSrsSyncAt;
+  const prevChunk = s.lastChunkSyncAt;
+  const prevFrame = s.lastFrameSyncAt;
+  useSettings.getState().update({
+    lastSyncAt: 0,
+    lastSrsSyncAt: 0,
+    lastChunkSyncAt: 0,
+    lastFrameSyncAt: 0,
+  });
   try {
     return await pullIncremental({ reason: 'login', applyPracticePrefs: true });
   } catch (e) {
-    useSettings.getState().update({ lastSyncAt: prev });
+    useSettings.getState().update({
+      lastSyncAt: prev,
+      lastSrsSyncAt: prevSrs,
+      lastChunkSyncAt: prevChunk,
+      lastFrameSyncAt: prevFrame,
+    });
     throw e;
   }
 }

@@ -11,6 +11,16 @@ export type ReviewQuality = 0 | 1 | 2 | 3 | 4 | 5;
 /** Learning stage for tags / filtering / practice labeling */
 export type WordStage = 'new' | 'learning' | 'due' | 'young' | 'mature' | 'mastered' | 'crossed';
 
+/** Minimal shape for Ebbinghaus scheduling (Word or SrsProgress). */
+export interface Reviewable {
+  ease: number;
+  interval: number;
+  streak: number;
+  nextReview: number;
+  totalReviews: number;
+  correctReviews: number;
+}
+
 const MIN = 60 * 1000;
 const HOUR = 60 * MIN;
 const DAY = 24 * HOUR;
@@ -93,7 +103,7 @@ export function formatNextReview(ts: number, now = Date.now()): string {
 }
 
 /** Ladder progress label, e.g. "第 3/9 步 · 12 小时" */
-export function ladderProgressLabel(w: Word): string {
+export function ladderProgressLabel(w: Reviewable): string {
   const step = clampStep(w.streak);
   if (isNew(w) && step === 0) return `未开始 · 共 ${EBBINGHAUS_STEPS} 步`;
   const displayStep = Math.min(Math.max(step, 1), EBBINGHAUS_STEPS);
@@ -118,7 +128,7 @@ export function estimateRetention(w: Word, now = Date.now()): number | null {
   return Math.max(0, Math.min(1, r));
 }
 
-export function applyReview(w: Word, q: ReviewQuality): Word {
+export function applyReviewToProgress<T extends Reviewable>(w: T, q: ReviewQuality): T {
   let { ease, streak, totalReviews, correctReviews } = w;
   totalReviews += 1;
   if (q >= 3) correctReviews += 1;
@@ -127,7 +137,6 @@ export function applyReview(w: Word, q: ReviewQuality): Word {
   let nextMs: number;
 
   if (q < 3) {
-    // Failed: back to first rung (5 min)
     streak = 0;
     nextMs = EBBINGHAUS_INTERVALS_MS[0];
   } else {
@@ -136,26 +145,32 @@ export function applyReview(w: Word, q: ReviewQuality): Word {
     nextMs = intervalMsForStreak(streak);
   }
 
-  const interval = nextMs / DAY; // days (fractional OK)
+  const interval = nextMs / DAY;
   const nextReview = now + nextMs;
-  // ease kept for sync compat only
   return { ...w, ease, interval, streak, totalReviews, correctReviews, nextReview };
 }
 
-export function isDue(w: Word, now = Date.now()): boolean {
+export function applyReview(w: Word, q: ReviewQuality): Word {
+  return applyReviewToProgress(w, q);
+}
+
+export function isDue(w: Reviewable, now = Date.now()): boolean {
   return w.nextReview <= now;
 }
 
-export function isNew(w: Word): boolean {
+export function isNew(w: Reviewable): boolean {
   return w.totalReviews === 0;
 }
 
-export function isMastered(w: Word): boolean {
+export function isMastered(w: Reviewable): boolean {
   return clampStep(w.streak) >= EBBINGHAUS_STEPS;
 }
 
 /** Young: short interval; mature: longer but not yet mastered */
-export function getWordStage(w: Word, now = Date.now()): WordStage {
+export function getWordStage(
+  w: Reviewable & { crossedOut?: boolean },
+  now = Date.now()
+): WordStage {
   if (w.crossedOut) return 'crossed';
   if (isNew(w)) return 'new';
   if (isDue(w, now)) return 'due';

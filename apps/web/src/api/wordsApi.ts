@@ -5,6 +5,8 @@ import type { Settings } from '@/types/settings';
 import type { Word } from '@/types/word';
 import { toPersistedSynonymDiff } from '@/utils/synonymDiffStorage';
 import type { StoredSynonymDiff } from '@/types/word';
+import { SRS_FIELD_KEYS } from '@/types/srsProgress';
+import { applySrsToWord, patchSrsFields, putSrs, SrsApiError } from '@/api/srsApi';
 
 export class WordsApiError extends Error {
   status: number;
@@ -116,8 +118,26 @@ function parseWord(raw: unknown): Word | null {
     correctReviews: Number(o.correctReviews ?? 0),
     createdAt: Number(o.createdAt ?? Date.now()),
     updatedAt: Number(o.updatedAt ?? Date.now()),
+    progressUpdatedAt: Number(
+      o.progressUpdatedAt ?? o.progress_updated_at ?? o.updatedAt ?? Date.now()
+    ),
     ...(synonymDiff ? { synonymDiff } : {}),
   } as Word & { updatedAt: number };
+}
+
+function splitPatchFields(fields: Record<string, unknown>): {
+  content: Record<string, unknown>;
+  progress: Record<string, unknown>;
+} {
+  const content: Record<string, unknown> = {};
+  const progress: Record<string, unknown> = {};
+  const progressKeys = new Set<string>(SRS_FIELD_KEYS);
+  for (const [k, v] of Object.entries(fields)) {
+    if (k === 'updatedAt') continue;
+    if (progressKeys.has(k)) progress[k] = v;
+    else content[k] = v;
+  }
+  return { content, progress };
 }
 
 const PULL_PAGE_SIZE = 2000;
@@ -212,7 +232,7 @@ export async function putWord(settings: Settings, word: Word): Promise<Word> {
 }
 
 /**
- * 字段级部分更新：body 里有什么就改什么。
+ * 字段级部分更新：内容走 /api/words，进度走 /api/srs/word/:id。
  * 404 时回退整词 PUT（远端还没有这行）。
  */
 export async function patchWordFields(
@@ -221,44 +241,106 @@ export async function patchWordFields(
   fields: Record<string, unknown>,
   fallbackWord?: Word
 ): Promise<Word | null> {
-  const resp = await fetch(
-    getBase(settings) + '/api/words/' + encodeURIComponent(wordId),
-    {
-      method: 'PATCH',
-      headers: authHeaders(settings),
-      body: JSON.stringify({ ...fields, updatedAt: Date.now() }),
+  const { content, progress } = splitPatchFields(fields);
+  const hasContent = Object.keys(content).length > 0;
+  const hasProgress = Object.keys(progress).length > 0;
+
+  let word: Word | null = null;
+
+  if (hasContent) {
+    const resp = await fetch(
+      getBase(settings) + '/api/words/' + encodeURIComponent(wordId),
+      {
+        method: 'PATCH',
+        headers: authHeaders(settings),
+        body: JSON.stringify({ ...content, updatedAt: Date.now() }),
+      }
+    );
+    const data = await readJson(resp);
+    if (!resp.ok) {
+      if (resp.status === 404 && fallbackWord) {
+        return putWord(settings, fallbackWord);
+      }
+      throw new WordsApiError(String(data.error || `部分更新失败 ${resp.status}`), resp.status);
     }
-  );
-  const data = await readJson(resp);
-  if (!resp.ok) {
-    if (resp.status === 404 && fallbackWord) {
-      return putWord(settings, fallbackWord);
-    }
-    throw new WordsApiError(String(data.error || `部分更新失败 ${resp.status}`), resp.status);
+    word = parseWord(data.word);
   }
-  return parseWord(data.word);
+
+  if (hasProgress) {
+    try {
+      const srs = await patchSrsFields(settings, 'word', wordId, progress);
+      if (srs) {
+        const base = word || fallbackWord;
+        if (base) word = applySrsToWord(base, srs);
+      }
+    } catch (e) {
+      if (
+        e instanceof SrsApiError &&
+        e.status === 404 &&
+        fallbackWord &&
+        !hasContent
+      ) {
+        return putWord(settings, fallbackWord);
+      }
+      // Word exists but srs row missing: putSrs then done
+      if (fallbackWord && !hasContent) {
+        const srs = await putSrs(settings, {
+          targetType: 'word',
+          targetId: wordId,
+          ease: Number(progress.ease ?? fallbackWord.ease ?? 2.5),
+          interval: Number(progress.interval ?? fallbackWord.interval ?? 0),
+          streak: Number(progress.streak ?? fallbackWord.streak ?? 0),
+          nextReview: Number(progress.nextReview ?? fallbackWord.nextReview ?? Date.now()),
+          totalReviews: Number(
+            progress.totalReviews ?? fallbackWord.totalReviews ?? 0
+          ),
+          correctReviews: Number(
+            progress.correctReviews ?? fallbackWord.correctReviews ?? 0
+          ),
+          starred: !!(progress.starred ?? fallbackWord.starred),
+          crossedOut: !!(progress.crossedOut ?? fallbackWord.crossedOut),
+          updatedAt: Date.now(),
+        });
+        return applySrsToWord(fallbackWord, srs);
+      }
+      throw e;
+    }
+  }
+
+  return word;
 }
 
 export async function patchWordProgress(
   settings: Settings,
   word: Word
 ): Promise<Word> {
-  const patched = await patchWordFields(
-    settings,
-    word.id,
-    {
+  const srs = await patchSrsFields(settings, 'word', word.id, {
+    ease: word.ease,
+    interval: word.interval,
+    streak: word.streak,
+    nextReview: word.nextReview,
+    totalReviews: word.totalReviews,
+    correctReviews: word.correctReviews,
+    crossedOut: word.crossedOut,
+    starred: !!word.starred,
+  });
+  if (!srs) {
+    const put = await putSrs(settings, {
+      targetType: 'word',
+      targetId: word.id,
       ease: word.ease,
       interval: word.interval,
       streak: word.streak,
       nextReview: word.nextReview,
       totalReviews: word.totalReviews,
       correctReviews: word.correctReviews,
-      crossedOut: word.crossedOut,
       starred: !!word.starred,
-    },
-    word
-  );
-  return (patched || word) as Word;
+      crossedOut: !!word.crossedOut,
+      updatedAt: Date.now(),
+    });
+    return applySrsToWord(word, put);
+  }
+  return applySrsToWord(word, srs);
 }
 
 export async function deleteWordRemote(settings: Settings, wordId: string): Promise<void> {
