@@ -12,7 +12,7 @@ import {
   upsertLocalSrs,
   type FrameRow,
 } from '@/db/ieltsDb';
-import type { Frame, FrameWithProgress } from '@/types/frame';
+import type { Frame, FrameSlot, FrameWithProgress } from '@/types/frame';
 import { normalizeFrameKey } from '@/types/frame';
 import type { SrsProgress } from '@/types/srsProgress';
 import { srsLocalId } from '@/types/srsProgress';
@@ -22,6 +22,13 @@ import { FRAME_PACK, packItemToFrame, type FramePackItem } from '@/data/framePac
 
 interface FramesState {
   addFromPack: (item: FramePackItem) => Promise<{ frame: Frame; existed: boolean }>;
+  addManual: (opts: {
+    title: string;
+    skeleton: string;
+    glossZh: string;
+    exampleFilled?: string;
+    slots?: FrameSlot[];
+  }) => Promise<{ frame: Frame; existed: boolean }>;
   upsertFrame: (frame: Frame) => Promise<void>;
   removeFrame: (id: string) => Promise<void>;
   updateProgress: (progress: SrsProgress) => Promise<void>;
@@ -40,6 +47,35 @@ export const useFramesStore = create<FramesState>(() => ({
     const now = Date.now();
     const frame: Frame = {
       ...packItemToFrame(item, newId()),
+      createdAt: now,
+      updatedAt: now,
+    };
+    await db.frames.put({ ...frame, userId });
+    await upsertLocalSrs(userId, makeDefaultSrs('frame', frame.id, now));
+    enqueueFramePut(frame);
+    enqueueSrsProgress(makeDefaultSrs('frame', frame.id, now));
+    return { frame, existed: false };
+  },
+
+  addManual: async ({ title, skeleton, glossZh, exampleFilled, slots }) => {
+    const userId = useAuth.getState().username;
+    if (!userId) throw new Error('not_logged_in');
+    const sk = skeleton.trim();
+    const frameKey = normalizeFrameKey(sk);
+    const existing = await db.frames.where('[userId+frameKey]').equals([userId, frameKey]).first();
+    if (existing) {
+      return { frame: existing as Frame, existed: true };
+    }
+    const now = Date.now();
+    const frame: Frame = {
+      id: newId(),
+      title: title.trim() || sk.slice(0, 48),
+      frameKey,
+      skeleton: sk,
+      slots: slots || [],
+      glossZh: (glossZh || '').trim(),
+      exampleFilled: (exampleFilled || '').trim(),
+      source: 'manual',
       createdAt: now,
       updatedAt: now,
     };

@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react';
-import { Button, Input, Modal, Segmented, App } from 'antd';
+import { Button, Segmented, App } from 'antd';
 import { PlusOutlined, PlayCircleOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
-import { useChunksStore, useChunksWithProgress, useChunkDueStats } from '@/store/useChunks';
+import { useChunksWithProgress, useChunkDueStats } from '@/store/useChunks';
 import { useFramesStore, useFramesWithProgress, useFrameDueStats, FRAME_PACK } from '@/store/useFrames';
 import { formatNextReview, isDue, isMastered, isNew } from '@/utils/scheduler';
 import { wordDetailPath } from '@/utils/wordId';
@@ -16,15 +16,11 @@ export default function ChunksPage() {
   const navigate = useNavigate();
   const [tab, setTab] = useState<Tab>('chunks');
   const [filter, setFilter] = useState<Filter>('all');
-  const [addOpen, setAddOpen] = useState(false);
-  const [phrase, setPhrase] = useState('');
-  const [gloss, setGloss] = useState('');
 
   const chunks = useChunksWithProgress();
   const frames = useFramesWithProgress();
   const chunkStats = useChunkDueStats();
   const frameStats = useFrameDueStats();
-  const addFromCollocation = useChunksStore((s) => s.addFromCollocation);
   const addFromPack = useFramesStore((s) => s.addFromPack);
 
   const filteredChunks = useMemo(() => {
@@ -57,22 +53,6 @@ export default function ChunksPage() {
 
   const stats = tab === 'chunks' ? chunkStats : frameStats;
 
-  async function handleAddChunk() {
-    if (!phrase.trim()) {
-      message.warning('请填写英文搭配');
-      return;
-    }
-    const { existed } = await addFromCollocation({
-      phrase: phrase.trim(),
-      gloss: gloss.trim(),
-      source: 'manual',
-    });
-    message.success(existed ? '已在搭配本' : '已加入搭配本');
-    setAddOpen(false);
-    setPhrase('');
-    setGloss('');
-  }
-
   async function handleAddPackItem(packTitle: string) {
     const item = FRAME_PACK.find((x) => x.title === packTitle);
     if (!item) return;
@@ -87,10 +67,22 @@ export default function ChunksPage() {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h2 style={{ margin: 0 }}>搭配</h2>
           {tab === 'chunks' ? (
-            <Button size="small" icon={<PlusOutlined />} onClick={() => setAddOpen(true)}>
+            <Button
+              size="small"
+              icon={<PlusOutlined />}
+              onClick={() => navigate('/settings?tab=data&add=chunk')}
+            >
               添加
             </Button>
-          ) : null}
+          ) : (
+            <Button
+              size="small"
+              icon={<PlusOutlined />}
+              onClick={() => navigate('/settings?tab=data&add=frame')}
+            >
+              添加
+            </Button>
+          )}
         </div>
         <p className="text-light" style={{ fontSize: 13, margin: '8px 0 12px' }}>
           到期 {stats.due} · 本库 {stats.total}
@@ -162,7 +154,7 @@ export default function ChunksPage() {
           <div className="app-card empty">
             <p>搭配本还是空的</p>
             <p className="text-light" style={{ fontSize: 13 }}>
-              从词详情点搭配旁的「加入」，或点右上角添加
+              从词详情点搭配旁的「加入」，或到设置 · 数据添加语块
             </p>
           </div>
         ) : (
@@ -269,26 +261,6 @@ export default function ChunksPage() {
           </div>
         </>
       )}
-
-      <Modal
-        title="添加语块"
-        open={addOpen}
-        onOk={() => void handleAddChunk()}
-        onCancel={() => setAddOpen(false)}
-        okText="加入搭配本"
-      >
-        <Input
-          placeholder="英文搭配，如 take into account"
-          value={phrase}
-          onChange={(e) => setPhrase(e.target.value)}
-          style={{ marginBottom: 8 }}
-        />
-        <Input
-          placeholder="中文释义（可选）"
-          value={gloss}
-          onChange={(e) => setGloss(e.target.value)}
-        />
-      </Modal>
     </div>
   );
 }

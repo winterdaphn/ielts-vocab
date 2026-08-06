@@ -68,7 +68,7 @@ export default function AddWordPanel() {
       return;
     }
     if (!canLookup) {
-      message.error('查词需要配置 API Base URL（设置 → AI），或本地开发走代理');
+      message.error('有道查词需要后端代理（登录用的同源 /api，或设置里的同步服务地址）');
       return;
     }
     const typed = word.trim();
@@ -231,7 +231,7 @@ export default function AddWordPanel() {
             loading={generating}
             disabled={!canLookup}
           >
-            {canLookup ? '有道查词' : '先配置 API Base'}
+            {canLookup ? '有道查词' : '无法查词'}
           </Button>
         </div>
       </div>

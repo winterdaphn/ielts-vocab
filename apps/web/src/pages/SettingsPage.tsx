@@ -31,7 +31,7 @@ import {
   patchWordsWithBankLexis,
 } from '@/utils/mergeBankLexis';
 import AccountLearningOverview from '@/components/AccountLearningOverview';
-import AddWordPanel from '@/components/AddWordPanel';
+import AddContentPanel from '@/components/AddContentPanel';
 
 type Tab = 'data' | 'ai' | 'account';
 
@@ -396,7 +396,7 @@ function DataSettings() {
 
   return (
     <>
-      <AddWordPanel />
+      <AddContentPanel />
 
       <Card title="本地数据" style={{ marginBottom: 12 }}>
         <Space wrap>

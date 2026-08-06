@@ -90,26 +90,26 @@ function getBase(url: string): string {
   return url.replace(/\/$/, '');
 }
 
-function isLocalDevHost(): boolean {
-  if (typeof location === 'undefined') return false;
-  return /^(localhost|127\.0\.0\.1)$/i.test(location.hostname);
-}
-
-/** Whether Youdao lookup can run (API proxy or local Vite proxy). */
+/**
+ * Whether Youdao lookup can run.
+ * Needs a server proxy (browser cannot call dict.youdao.com directly).
+ * - settings.workerUrl → absolute API host
+ * - otherwise same-origin `/api/youdao`（与登录空 workerUrl 时走相对路径一致）
+ */
 export function canUseYoudao(settings: Settings): boolean {
-  return !!(settings.workerUrl || isLocalDevHost());
+  // Relative /api works for Vite proxy + same-origin deploy; workerUrl for remote API.
+  // LLM「API Base」是智谱等出题用，与有道查词无关。
+  return typeof location !== 'undefined' || !!settings.workerUrl;
 }
 
-/** Build request URL (self-hosted /api/youdao or Vite youdao proxy). */
+/** Build request URL (worker / same-origin /api/youdao). */
 function buildFetchUrl(word: string, settings: Settings): string {
   const q = encodeURIComponent(word);
   if (settings.workerUrl) {
     return `${getBase(settings.workerUrl)}/api/youdao?q=${q}`;
   }
-  if (isLocalDevHost()) {
-    return `/api/youdao?q=${q}`;
-  }
-  throw new YoudaoError('查词需要配置 API Base URL（有道接口需服务端代理）');
+  // Match authLogin('') — same-origin API or Vite /api proxy
+  return `/api/youdao?q=${q}`;
 }
 
 async function fetchYoudaoJson(
