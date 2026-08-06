@@ -558,6 +558,21 @@ input, textarea, select {
   color: var(--accent) !important;
 }
 
+/* primary 在绿底上会融成一片，强制白底深字 */
+.today-actions .ant-btn-primary,
+.today-actions .ant-btn-variant-solid.ant-btn-color-primary {
+  background: rgba(255, 255, 255, 0.95) !important;
+  border-color: white !important;
+  color: var(--accent) !important;
+}
+
+.today-actions .ant-btn-primary:not(:disabled):hover,
+.today-actions .ant-btn-variant-solid.ant-btn-color-primary:not(:disabled):hover {
+  background: white !important;
+  border-color: white !important;
+  color: var(--accent-hover) !important;
+}
+
 /* Stats grid — when nested in .app-card, use softer nested tiles */
 .stats-grid {
   display: grid;
