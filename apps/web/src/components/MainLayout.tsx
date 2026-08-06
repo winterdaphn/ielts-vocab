@@ -8,8 +8,6 @@ import {
 
   BookOutlined,
 
-  PlusCircleOutlined,
-
   SettingOutlined,
 
 } from '@ant-design/icons';
@@ -37,8 +35,6 @@ const NAV_ITEMS = [
   { path: '/today', label: '今日', icon: <HomeOutlined /> },
 
   { path: '/words', label: '词表', icon: <BookOutlined /> },
-
-  { path: '/add', label: '添加', icon: <PlusCircleOutlined /> },
 
   { path: '/settings', label: '设置', icon: <SettingOutlined /> },
 
@@ -211,7 +207,12 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
 
               key={it.path}
 
-              className={`bottom-nav-item ${location.pathname === it.path ? 'active' : ''}`}
+              className={`bottom-nav-item ${
+                location.pathname === it.path ||
+                (it.path === '/settings' && location.pathname.startsWith('/settings'))
+                  ? 'active'
+                  : ''
+              }`}
 
               onClick={() => navigate(it.path)}
 

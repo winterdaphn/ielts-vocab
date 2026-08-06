@@ -10,6 +10,10 @@ interface Props {
   /** Show remove control (e.g. for editable 形近词) */
   onRemove?: (word: string) => void;
   removeTitle?: string;
+  /** 未在词表：点击英文词加入（与例句划词相同交互） */
+  onAddToBank?: (item: RelatedWord) => void;
+  addingKey?: string | null;
+  justAddedKey?: string | null;
   /** Show 有道 / AI source chips (default: when any item has source) */
   showSource?: boolean;
 }
@@ -37,6 +41,9 @@ export default function RelatedWordsList({
   emptyText = '暂无',
   onRemove,
   removeTitle = '移除',
+  onAddToBank,
+  addingKey = null,
+  justAddedKey = null,
   showSource,
 }: Props) {
   const navigate = useNavigate();
@@ -63,8 +70,13 @@ export default function RelatedWordsList({
   return (
     <ul className="related-words-list">
       {items.map((it) => {
-        const targetId = idByKey.get(lettersKey(it.word));
+        const itemKey = lettersKey(it.word);
+        const targetId = idByKey.get(itemKey);
         const src = showBadge ? relatedSourceLabel(it.source) : null;
+        const isAdding = addingKey === itemKey;
+        const justMarked = justAddedKey === itemKey;
+        const canClickAdd = !targetId && !!onAddToBank;
+
         return (
           <li key={it.word} className={onRemove ? 'related-word-row' : undefined}>
             <span className="related-word-main">
@@ -78,9 +90,19 @@ export default function RelatedWordsList({
               {targetId ? (
                 <button
                   type="button"
-                  className="related-word-en is-link"
+                  className="related-word-en is-link markable-word in-list"
                   title={`查看「${it.word}」详情`}
                   onClick={() => navigate(wordDetailPath(targetId))}
+                >
+                  {it.word}
+                </button>
+              ) : canClickAdd ? (
+                <button
+                  type="button"
+                  className={`related-word-en markable-word${justMarked ? ' just-marked' : ''}`}
+                  title="点击加入词表"
+                  disabled={isAdding}
+                  onClick={() => onAddToBank!(it)}
                 >
                   {it.word}
                 </button>

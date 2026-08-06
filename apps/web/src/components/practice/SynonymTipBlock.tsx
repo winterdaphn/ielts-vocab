@@ -1,6 +1,7 @@
 import CollapsibleTip from '@/components/practice/CollapsibleTip';
 import RelatedWordsList from '@/components/RelatedWordsList';
 import { useSynonymDiffAssist } from '@/components/SynonymDiffAssist';
+import { useQuickAddRelatedWord } from '@/hooks/useQuickAddRelatedWord';
 import { useWordsStore, useUserWords } from '@/store/useWords';
 import type { RelatedWord } from '@/types/word';
 
@@ -31,6 +32,7 @@ export default function SynonymTipBlock({
   const words = useUserWords();
   const updateWord = useWordsStore((s) => s.updateWord);
   const local = words.find((w) => w.id === wordId);
+  const { addRelatedToBank, addingKey, justAddedKey } = useQuickAddRelatedWord();
 
   const { trigger, panel } = useSynonymDiffAssist({
     headword,
@@ -60,7 +62,13 @@ export default function SynonymTipBlock({
           加载中…
         </span>
       ) : (
-        <RelatedWordsList items={synonyms} emptyText="暂无近义词" />
+        <RelatedWordsList
+          items={synonyms}
+          emptyText="暂无近义词"
+          onAddToBank={addRelatedToBank}
+          addingKey={addingKey}
+          justAddedKey={justAddedKey}
+        />
       )}
       {panel}
     </CollapsibleTip>

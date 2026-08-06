@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { App } from 'antd';
 import { useUserWords, useWordsStore, makeNewWord } from '@/store/useWords';
 import { useSettings } from '@/store/useSettings';
@@ -9,6 +10,7 @@ import { lookupYoudaoWord, canUseYoudao } from '@/api/youdao';
 import type { Collocation, Derivative, RelatedWord } from '@/types/word';
 import { useCategories } from '@/store/useCategories';
 import { mergeSynonymSources } from '@/utils/vocabBankRelated';
+import { wordDetailPath, wordToId } from '@/utils/wordId';
 
 interface Props {
   text: string;
@@ -21,6 +23,8 @@ interface Props {
   blankDisabled?: boolean;
   onBlankEnter?: () => void;
   className?: string;
+  /** 已揭晓/判题后：词表内单词点击进详情，不再只 toast */
+  openInListDetail?: boolean;
 }
 
 /**
@@ -36,8 +40,10 @@ export default function MarkableSentence({
   blankDisabled = false,
   onBlankEnter,
   className = 'cloze-sentence',
+  openInListDetail = false,
 }: Props) {
   const { message } = App.useApp();
+  const navigate = useNavigate();
   const words = useUserWords();
   const addWord = useWordsStore((s) => s.addWord);
   const updateWord = useWordsStore((s) => s.updateWord);
@@ -60,6 +66,11 @@ export default function MarkableSentence({
     return inflectionHit;
   }
 
+  function goWordDetail(entry: (typeof words)[0]) {
+    const id = entry.id || wordToId(entry.word);
+    navigate(wordDetailPath(id));
+  }
+
   async function handleClick(raw: string) {
     if (busy) return;
     const clicked = normalizeMarkWord(raw);
@@ -73,6 +84,10 @@ export default function MarkableSentence({
       findRelated(clicked) ||
       (localLemma !== clicked ? findRelated(localLemma) : null);
     if (relatedEarly && !relatedEarly.entry.crossedOut) {
+      if (openInListDetail) {
+        goWordDetail(relatedEarly.entry);
+        return;
+      }
       if (relatedEarly.exact && relatedEarly.entry.word.toLowerCase() === clicked) {
         message.info(`「${clicked}」已在词表`);
       } else {
@@ -159,6 +174,10 @@ export default function MarkableSentence({
         relatedEarly;
 
       if (related?.entry && !related.entry.crossedOut) {
+        if (openInListDetail) {
+          goWordDetail(related.entry);
+          return;
+        }
         message.info(
           `词表已有「${related.entry.word}」，「${clicked}」是词形变化，无需再加`
         );
@@ -269,8 +288,12 @@ export default function MarkableSentence({
           inList && (blankMode === 'revealed' || !blankWord);
         const tip = related
           ? related.exact
-            ? '已在词表'
-            : `已有词形「${related.entry.word}」`
+            ? openInListDetail
+              ? '已在词表 · 点击查看详情'
+              : '已在词表'
+            : openInListDetail
+              ? `词表已有「${related.entry.word}」· 点击查看`
+              : `已有词形「${related.entry.word}」`
           : '点击加入生词（自动还原原形）';
 
         return (

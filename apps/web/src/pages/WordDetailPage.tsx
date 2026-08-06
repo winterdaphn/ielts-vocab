@@ -40,6 +40,7 @@ import {
   ensureVocabBankRelated,
 } from '@/utils/vocabBankRelated';
 import RelatedWordsList from '@/components/RelatedWordsList';
+import { useQuickAddRelatedWord } from '@/hooks/useQuickAddRelatedWord';
 import CollocationsList from '@/components/CollocationsList';
 import DerivativesList from '@/components/DerivativesList';
 import MarkableSentence from '@/components/MarkableSentence';
@@ -104,6 +105,7 @@ export default function WordDetailPage() {
       await updateWord({ ...latest, synonymDiff: diff });
     },
   });
+  const { addRelatedToBank, addingKey, justAddedKey } = useQuickAddRelatedWord();
 
   // 切换词条时退出编辑态
   useEffect(() => {
@@ -738,6 +740,9 @@ export default function WordDetailPage() {
                 emptyText="暂无近义词，可点「补全」或「添加」"
                 onRemove={removeSynonym}
                 removeTitle="移除这个近义词"
+                onAddToBank={addRelatedToBank}
+                addingKey={addingKey}
+                justAddedKey={justAddedKey}
               />
               {synonymDiff.panel}
               {showSynonymAdd && (

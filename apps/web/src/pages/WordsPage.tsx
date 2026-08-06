@@ -451,7 +451,7 @@ export default function WordsPage() {
         <div className="app-card empty">
           <div className="empty-icon">📭</div>
           <h3>这里空空如也</h3>
-          <p>{words.length === 0 ? '去「添加」加几个新词吧' : '切换其他分类看看'}</p>
+          <p>{words.length === 0 ? '去设置 → 数据添加几个新词吧' : '切换其他分类看看'}</p>
         </div>
       ) : (
         <div className="word-list-wrap">

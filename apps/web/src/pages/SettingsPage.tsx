@@ -1,8 +1,6 @@
 import { useState, useRef } from 'react';
-import { Form, Input, Button, Card, App, Popconfirm, Alert, Space, Divider, Tag } from 'antd';
+import { Form, Input, Button, Card, App, Popconfirm, Space, Divider, Tag } from 'antd';
 import {
-  CloudUploadOutlined,
-  CloudDownloadOutlined,
   ExportOutlined,
   ImportOutlined,
   DeleteOutlined,
@@ -20,27 +18,36 @@ import { useAuth } from '@/store/useAuth';
 import { useWordsStore, useUserWords } from '@/store/useWords';
 import { PROVIDERS } from '@/config/providers';
 import { testConnection } from '@/api/llm';
-import { flushSyncQueue, pullIncremental, pushAllWordsNow } from '@/api/realtimeSync';
-import {
-  DEFAULT_CLOUDBASE_URL,
-  importFromCloudBase,
-} from '@/api/migrateCloudBase';
+import { pushAllWordsNow } from '@/api/realtimeSync';
 import { clearCryptoCache } from '@/api/crypto';
 import { dbClearForUser } from '@/db/ieltsDb';
 import { makeNewWord } from '@/store/useWords';
 import type { Word } from '@/types/word';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { loadVocabBySource, type VocabBankSource, type VocabBankEntry } from '@/json/vocab';
 import { normalizeCategories } from '@/config/categories';
 import {
   bankEntryMap,
   patchWordsWithBankLexis,
 } from '@/utils/mergeBankLexis';
+import AccountLearningOverview from '@/components/AccountLearningOverview';
+import AddWordPanel from '@/components/AddWordPanel';
 
-type Tab = 'ai' | 'data' | 'account';
+type Tab = 'data' | 'ai' | 'account';
+
+function parseSettingsTab(raw: string | null): Tab {
+  if (raw === 'ai' || raw === 'account' || raw === 'data') return raw;
+  return 'data';
+}
 
 export default function SettingsPage() {
-  const [tab, setTab] = useState<Tab>('ai');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab = parseSettingsTab(searchParams.get('tab'));
+
+  function setTab(next: Tab) {
+    setSearchParams({ tab: next }, { replace: true });
+  }
+
   return (
     <div>
       <div className="app-header">
@@ -49,19 +56,19 @@ export default function SettingsPage() {
       </div>
 
       <div className="settings-tabs">
-        <button className={`settings-tab ${tab === 'ai' ? 'active' : ''}`} onClick={() => setTab('ai')}>
-          <RobotOutlined /> AI
-        </button>
         <button className={`settings-tab ${tab === 'data' ? 'active' : ''}`} onClick={() => setTab('data')}>
           <DatabaseOutlined /> 数据
+        </button>
+        <button className={`settings-tab ${tab === 'ai' ? 'active' : ''}`} onClick={() => setTab('ai')}>
+          <RobotOutlined /> AI
         </button>
         <button className={`settings-tab ${tab === 'account' ? 'active' : ''}`} onClick={() => setTab('account')}>
           <UserOutlined /> 账户
         </button>
       </div>
 
-      {tab === 'ai' && <AISettings />}
       {tab === 'data' && <DataSettings />}
+      {tab === 'ai' && <AISettings />}
       {tab === 'account' && <AccountSettings />}
     </div>
   );
@@ -183,18 +190,11 @@ function AISettings() {
 function DataSettings() {
   const { message, modal } = App.useApp();
   const settings = useSettings();
-  const update = useSettings((s) => s.update);
   const username = useAuth((s) => s.username);
-  const password = useAuth((s) => s.password);
   const words = useUserWords();
   const setWords = useWordsStore((s) => s.setWords);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [pasteText, setPasteText] = useState('');
-  const [pushing, setPushing] = useState(false);
-  const [pulling, setPulling] = useState(false);
-  const [importingCb, setImportingCb] = useState(false);
-  const [cbUrl, setCbUrl] = useState(DEFAULT_CLOUDBASE_URL);
-  const [cbToken, setCbToken] = useState('');
   const [importingSource, setImportingSource] = useState<'ielts' | 'kaoyan' | null>(null);
   const [syncingCats, setSyncingCats] = useState(false);
   const [syncingLexis, setSyncingLexis] = useState(false);
@@ -383,7 +383,7 @@ function DataSettings() {
           const n = await pushAllWordsNow();
           bits.push(`已同步 ${n}`);
         } catch {
-          bits.push('本地已导入，云端同步失败可点「立即同步」');
+          bits.push('本地已导入，云端同步失败请稍后重试或重新登录');
         }
       }
       message.success(bits.join(' · ') || '完成');
@@ -394,66 +394,10 @@ function DataSettings() {
     }
   }
 
-  async function handlePush() {
-    if (!settings.syncToken) return message.error('请先登录以获取 JWT');
-    setPushing(true);
-    try {
-      await flushSyncQueue();
-      const n = await pushAllWordsNow();
-      message.success(`已立即同步 ${n} 个词到服务器`);
-    } catch (e) {
-      message.error('同步失败：' + (e instanceof Error ? e.message : '未知错误'));
-    } finally {
-      setPushing(false);
-    }
-  }
-
-  async function handlePull() {
-    if (!settings.syncToken) return message.error('请先登录以获取 JWT');
-    setPulling(true);
-    try {
-      // Force full pull
-      update({ lastSyncAt: 0 });
-      const result = await pullIncremental({ reason: 'manual', applyPracticePrefs: true });
-      message.success(
-        result.merged > 0 ? `已拉取并合并 ${result.merged} 个词` : '服务器无更新'
-      );
-    } catch (e) {
-      message.error('拉取失败：' + (e instanceof Error ? e.message : '未知错误'));
-    } finally {
-      setPulling(false);
-    }
-  }
-
-  async function handleCloudBaseImport() {
-    if (!settings.syncToken) return message.error('请先登录新服务器');
-    if (!password || !username) return message.error('请先登录');
-    setImportingCb(true);
-    try {
-      const result = await importFromCloudBase({
-        cloudbaseUrl: cbUrl.trim() || DEFAULT_CLOUDBASE_URL,
-        legacyToken: cbToken.trim() || undefined,
-        password,
-        username,
-      });
-      const bits = [
-        `本机合并 +${result.added}/改${result.patched}`,
-        `已上传 ${result.uploaded} 词`,
-      ];
-      if (result.practiceRestored) bits.push('练习进度');
-      message.success(bits.join(' · '));
-      if (result.needsPassword) {
-        message.warning('词数据已导入，但加密配置解密失败（密码可能不一致）');
-      }
-    } catch (e) {
-      message.error('CloudBase 导入失败：' + (e instanceof Error ? e.message : '未知错误'));
-    } finally {
-      setImportingCb(false);
-    }
-  }
-
   return (
     <>
+      <AddWordPanel />
+
       <Card title="本地数据" style={{ marginBottom: 12 }}>
         <Space wrap>
           <Button icon={<ExportOutlined />} onClick={handleExport}>导出</Button>
@@ -549,81 +493,8 @@ function DataSettings() {
           从粘贴内容导入
         </Button>
         <p style={{ color: 'var(--text-mute)', fontSize: 12, marginTop: 8 }}>
-          数据存储在浏览器 IndexedDB，清缓存会丢失
+          数据存储在浏览器 IndexedDB，清缓存会丢失。登录后词库与练习进度会自动与服务器同步，无需在此配置。
         </p>
-      </Card>
-
-      <Card title="云同步（自动增量）">
-        <Alert
-          type="success"
-          showIcon
-          style={{ marginBottom: 12 }}
-          message="自动同步已开启"
-          description="改笔记、近义词、搭配、复习进度会防抖后自动写入服务器，一般无需手动推送。"
-        />
-        <Form layout="vertical">
-          <Form.Item
-            label="JWT（登录后自动写入）"
-            extra={<span style={{ fontSize: 12, color: 'var(--text-light)' }}>一般无需手改</span>}
-          >
-            <Input.Password
-              value={settings.syncToken}
-              onChange={(e) => update({ syncToken: e.target.value })}
-              placeholder="Bearer token"
-            />
-          </Form.Item>
-          <Form.Item>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-              <input
-                type="checkbox"
-                checked={settings.autoSync}
-                onChange={(e) => update({ autoSync: e.target.checked })}
-              />
-              <span>写库后自动同步到服务器</span>
-            </label>
-          </Form.Item>
-          <Space.Compact block>
-            <Button type="primary" loading={pushing} onClick={handlePush} icon={<CloudUploadOutlined />} style={{ flex: 1 }}>
-              立即同步
-            </Button>
-            <Button loading={pulling} onClick={handlePull} icon={<CloudDownloadOutlined />} style={{ flex: 1 }}>
-              从服务器拉取
-            </Button>
-          </Space.Compact>
-          <p style={{ color: 'var(--text-mute)', fontSize: 12, marginTop: 12 }}>
-            {settings.lastSyncAt
-              ? `上次同步：${new Date(settings.lastSyncAt).toLocaleString('zh-CN')}`
-              : '尚未同步'}
-          </p>
-        </Form>
-      </Card>
-
-      <Card title="从 CloudBase 导入" style={{ marginTop: 12 }}>
-        <p style={{ color: 'var(--text-mute)', fontSize: 13, marginBottom: 12 }}>
-          一次性把旧云函数数据迁到<strong>新服务器</strong>（先写入本机再上传）。
-          成功后其它电脑只需用同一账号登录拉取，不必再导一次 CloudBase。
-          若本机有进度、换设备没有，多半是上次没上传成功——请在本机点「立即同步」。
-        </p>
-        <Form layout="vertical">
-          <Form.Item label="CloudBase Endpoint">
-            <Input value={cbUrl} onChange={(e) => setCbUrl(e.target.value)} />
-          </Form.Item>
-          <Form.Item
-            label="旧同步 Token（可选）"
-            extra={<span style={{ fontSize: 12 }}>若 CloudBase 启用了 AUTH_TOKEN 再填</span>}
-          >
-            <Input.Password value={cbToken} onChange={(e) => setCbToken(e.target.value)} />
-          </Form.Item>
-          <Button
-            type="primary"
-            loading={importingCb}
-            icon={<ImportOutlined />}
-            onClick={handleCloudBaseImport}
-            block
-          >
-            开始导入
-          </Button>
-        </Form>
       </Card>
     </>
   );
@@ -674,10 +545,11 @@ function AccountSettings() {
       </Card>
 
       <Card title="账号信息">
-        <p style={{ color: 'var(--text-light)', fontSize: 13, lineHeight: 1.7 }}>
+        <p style={{ color: 'var(--text-light)', fontSize: 13, lineHeight: 1.7, marginBottom: 0 }}>
           • 同一个用户名 + 密码在不同设备都能解密同一份云端数据<br />
           • 忘了密码？只能重置账号（云端数据会丢失，需要重新创建）
         </p>
+        <AccountLearningOverview />
       </Card>
 
       <Card title="关于" style={{ marginTop: 12 }}>

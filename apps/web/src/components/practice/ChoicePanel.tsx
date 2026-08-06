@@ -57,6 +57,7 @@ export default function ChoicePanel({
         text={current.example.en}
         blankWord={current.example.blank || current.word.word}
         blankMode={showAnswer ? 'revealed' : 'hidden'}
+        openInListDetail={showAnswer}
       />
       <div className="mark-tip">点句子里不认识的词 → 加入生词表</div>
       {showZh && zhText ? (

@@ -97,6 +97,7 @@ export default function ClozePanel({
       onBlankChange={onUserTextChange}
       blankDisabled={showAnswer || judging}
       onBlankEnter={onSubmit}
+      openInListDetail={showAnswer}
       className="practice-sentence"
     />
   );

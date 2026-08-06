@@ -3,7 +3,7 @@ import { Button, App } from 'antd';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useUserWords } from '@/store/useWords';
 import { useSettings } from '@/store/useSettings';
-import { isDue, isNew, isMastered } from '@/utils/scheduler';
+import { isDue, isNew } from '@/utils/scheduler';
 import { useAuth } from '@/store/useAuth';
 import { getLS } from '@/utils/date';
 import { clearPracticeProgress } from '@/api/realtimeSync';
@@ -28,8 +28,6 @@ import {
   type PracticeSummary,
 } from '@/utils/practiceSession';
 import { countByScope } from '@/utils/practiceSelect';
-import { getLearningCurve } from '@/utils/learningLog';
-import LearningCurve from '@/components/LearningCurve';
 
 const SCOPES: { key: StudyScope; label: string; hint: string }[] = [
   { key: 'new', label: '学新词', hint: '只练从未复习过的词' },
@@ -39,7 +37,6 @@ const SCOPES: { key: StudyScope; label: string; hint: string }[] = [
     hint: '按艾宾浩斯到期复习：5分钟 → 30分钟 → 12小时 → 1/2/4/7/15/30天',
   },
   { key: 'mixed', label: '混合', hint: '新词优先，再穿插到期复习' },
-  { key: 'starred', label: '星标', hint: '只练你标过星的词，不受到期时间限制' },
 ];
 
 const DIFFICULTIES: { key: SentenceDifficulty; label: string; hint: string }[] = [
@@ -62,7 +59,6 @@ export default function TodayPage() {
 
   const localSaved = useMemo(() => getSavedPracticeSummary(), [savedTick, words.length]);
   const saved = remoteSummary ?? localSaved;
-  const curve = useMemo(() => getLearningCurve(14), [savedTick, words.length]);
   const scopeCounts = useMemo(() => countByScope(words), [words]);
 
   // 回到今日：刷新本机续做摘要（不触发云端）
@@ -135,25 +131,7 @@ export default function TodayPage() {
     [words]
   );
 
-  const learningCount = useMemo(
-    () => words.filter((w) => !w.crossedOut && !isMastered(w)).length,
-    [words]
-  );
-  const masteredCount = useMemo(
-    () => words.filter(isMastered).length,
-    [words]
-  );
-  const crossedCount = useMemo(
-    () => words.filter((w) => w.crossedOut).length,
-    [words]
-  );
-  const starredCount = useMemo(
-    () => words.filter((w) => !w.crossedOut && !!w.starred).length,
-    [words]
-  );
-
   const newCount = scopeCounts.newCount;
-  const total = words.length;
   const taskCount =
     scope === 'new'
       ? scopeCounts.newCount
@@ -166,7 +144,7 @@ export default function TodayPage() {
   const sessionCount = Math.min(50, taskCount);
   const streak = parseInt(getLS('streak') || '0', 10);
   const todayDone = getLS('done-' + new Date().toDateString()) === '1';
-  const activeScope = SCOPES.find((s) => s.key === scope)!;
+  const activeScope = SCOPES.find((s) => s.key === scope) ?? SCOPES[2];
   const activeDifficulty = DIFFICULTIES.find((d) => d.key === difficulty)!;
 
   function startMode(mode: 'cloze' | 'choice' | 'translate') {
@@ -279,9 +257,7 @@ export default function TodayPage() {
                   ? scopeCounts.newCount
                   : s.key === 'review'
                     ? scopeCounts.reviewCount
-                    : s.key === 'starred'
-                      ? scopeCounts.starredCount
-                      : scopeCounts.mixedCount}
+                    : scopeCounts.mixedCount}
               </span>
             </button>
           ))}
@@ -335,36 +311,6 @@ export default function TodayPage() {
         </div>
       </div>
 
-      <div className="app-card">
-        <LearningCurve data={curve} />
-      </div>
-
-      <div className="app-card">
-        <h3>快速统计</h3>
-        <div className="stats-grid">
-          <div className="stat-card">
-            <div className="num">{learningCount}</div>
-            <div className="label">学习中</div>
-          </div>
-          <div className="stat-card">
-            <div className="num">{masteredCount}</div>
-            <div className="label">已掌握</div>
-          </div>
-          <div className="stat-card">
-            <div className="num">{starredCount}</div>
-            <div className="label">星标</div>
-          </div>
-          <div className="stat-card">
-            <div className="num">{crossedCount}</div>
-            <div className="label">已划掉</div>
-          </div>
-          <div className="stat-card">
-            <div className="num">{total}</div>
-            <div className="label">总词数</div>
-          </div>
-        </div>
-      </div>
-
       {!hasTasks && (
         <div className="app-card empty">
           <div className="empty-icon">🎉</div>
@@ -379,12 +325,12 @@ export default function TodayPage() {
           </h3>
           <p>
             {scope === 'new'
-              ? '去「添加」加几个新词，或切换到「复习」'
+              ? '去「设置 → 数据」加几个新词，或切换到「复习」'
               : scope === 'review'
                 ? '没有到期词，可以去学新词'
                 : scope === 'starred'
                   ? '在词表或详情页点 ★ 标出重点词后再来练'
-                  : '所有词都掌握了，去「添加」加几个新词吧'}
+                  : '所有词都掌握了，去设置里添加几个新词吧'}
           </p>
         </div>
       )}

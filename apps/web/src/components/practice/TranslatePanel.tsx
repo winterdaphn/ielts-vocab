@@ -78,7 +78,11 @@ export default function TranslatePanel({
           {hintLevel >= 3 && (
             <div className="translate-hint-block answer">
               <div className="translate-hint-label">③ 参考译文</div>
-              <MarkableSentence text={current.example.en} className="practice-ref-sentence" />
+              <MarkableSentence
+                text={current.example.en}
+                className="practice-ref-sentence"
+                openInListDetail
+              />
               <div className="mark-tip" style={{ marginBottom: 0 }}>
                 点句子里不认识的词 → 加入生词表
               </div>
@@ -144,7 +148,11 @@ export default function TranslatePanel({
           )}
           <div style={{ marginTop: 10, padding: 12, background: 'var(--bg)', borderRadius: 8 }}>
             <div style={{ fontSize: 12, color: 'var(--text-light)', marginBottom: 4 }}>参考译文</div>
-            <MarkableSentence text={current.example.en} className="practice-ref-sentence" />
+            <MarkableSentence
+              text={current.example.en}
+              className="practice-ref-sentence"
+              openInListDetail
+            />
             <div className="mark-tip" style={{ marginBottom: 0 }}>
               点句子里不认识的词 → 加入生词表
             </div>
