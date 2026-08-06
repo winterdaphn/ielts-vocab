@@ -10,11 +10,13 @@ import { clearPracticeProgress } from '@/api/realtimeSync';
 import {
   cloudSessionFromSaved,
   loadActiveCloudPractice,
+  completeStaleCloudPractice,
 } from '@/api/practiceCloudSync';
 import {
   getSavedPracticeSummary,
   readSavedPracticeSession,
   choosePracticeSession,
+  isPracticeSessionFinished,
   modeLabel,
   scopeLabel,
   difficultyLabel,
@@ -81,11 +83,16 @@ export default function TodayPage() {
       // 直接拉 active 即可，不必先 check revision（多一次请求）
       const remote = await loadActiveCloudPractice();
       if (cancelled) return;
-      if (!remote || remote.idx >= remote.items.length) {
+      if (!remote) {
         setRemoteSummary(null);
         return;
       }
       const snap = cloudSessionFromSaved(remote);
+      if (isPracticeSessionFinished(snap)) {
+        setRemoteSummary(null);
+        void completeStaleCloudPractice(remote.sessionId);
+        return;
+      }
       const preferred = choosePracticeSession(readSavedPracticeSession(), snap);
       if (preferred !== snap) {
         setRemoteSummary(null);

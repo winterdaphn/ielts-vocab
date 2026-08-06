@@ -155,12 +155,23 @@ export function choosePracticeSession(
   return (local.savedAt || 0) >= (remote.savedAt || 0) ? local : remote;
 }
 
+/** 题已全部作答或 idx 已越界 → 不应再展示「继续练习」 */
+export function isPracticeSessionFinished(
+  snap: Pick<SavedPracticeSession, 'wordIds' | 'idx' | 'stats'>
+): boolean {
+  const total = snap.wordIds.length;
+  if (!total) return true;
+  if ((snap.idx ?? 0) >= total) return true;
+  if ((snap.stats?.total ?? 0) >= total) return true;
+  return false;
+}
+
 export function getSavedPracticeSummary(): PracticeSummary | null {
   const saved = readSavedPracticeSession();
   if (!saved) return null;
+  if (isPracticeSessionFinished(saved)) return null;
   const total = saved.wordIds.length;
   const idx = Math.min(saved.idx || 0, total);
-  if (idx >= total) return null;
   const scope = parseStudyScope(saved.scope);
   const difficulty = parseSentenceDifficulty(saved.difficulty);
   return {
@@ -195,6 +206,7 @@ export function getPracticeSyncSnapshot(): PracticeSyncSnapshot | null {
   const total = saved.wordIds.length;
   const idx = Math.min(saved.idx || 0, total);
   if (idx >= total) return null;
+  if (isPracticeSessionFinished(saved)) return null;
   return {
     version: 1,
     savedAt: saved.savedAt || Date.now(),

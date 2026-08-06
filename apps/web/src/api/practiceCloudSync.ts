@@ -25,6 +25,7 @@ import {
   type CloudPracticeSession,
 } from '@/api/practiceCloud';
 import type { PracticeMode, SentenceDifficulty, StudyScope } from '@/utils/practiceSession';
+import { isPracticeSessionFinished } from '@/utils/practiceSession';
 import { getLS, setLS, delLS } from '@/utils/date';
 
 /** localStorage 键：记住当前云端会话 id + revision，用来做续做/冲突检测 */
@@ -384,14 +385,32 @@ export async function abandonCloudPracticeSession(): Promise<void> {
   }
 }
 
+/** 首页发现「题已做完但云端仍是 active」时收尾，避免继续卡片误显示 */
+export async function completeStaleCloudPractice(sessionId: string): Promise<void> {
+  const s = settings();
+  if (!s.syncToken || !sessionId) return;
+  const meta = readCloudMeta();
+  if (meta?.sessionId === sessionId) writeCloudMeta(null);
+  try {
+    await completePracticeSession(s, sessionId);
+    console.info('[practice-cloud] stale session completed', sessionId);
+  } catch (e) {
+    console.warn('[practice-cloud] stale complete failed', e);
+  }
+}
+
 /** 拉取当前用户未完成的云端练习（没有则 null） */
 export async function loadActiveCloudPractice(): Promise<CloudPracticeSession | null> {
   const s = settings();
   if (!s.syncToken) return null;
   const remote = await fetchActivePracticeSession(s);
-  if (remote) {
-    bindCloudSession(remote);
+  if (!remote) return null;
+  const snap = cloudSessionFromSaved(remote);
+  if (isPracticeSessionFinished(snap)) {
+    void completeStaleCloudPractice(remote.sessionId);
+    return null;
   }
+  bindCloudSession(remote);
   return remote;
 }
 

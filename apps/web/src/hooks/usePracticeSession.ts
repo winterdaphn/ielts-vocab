@@ -294,14 +294,9 @@ export function usePracticeSession() {
         sessionId: cloudId,
         idx: overrides.idx ?? idx,
         stats: overrides.stats ?? stats,
+        // 提示阶梯只存本机；云端续做不依赖 hint 状态
         uiState: {
           showAnswer: overrides.showAnswer ?? showAnswer,
-          hintShown: overrides.hintShown ?? hintShown,
-          translateHintLevel: overrides.translateHintLevel ?? translateHintLevel,
-          translateHints:
-            overrides.translateHints !== undefined
-              ? overrides.translateHints
-              : translateHints,
           picked: overrides.picked !== undefined ? overrides.picked : picked,
           judgeResult:
             overrides.judgeResult !== undefined ? overrides.judgeResult : judgeResult,
@@ -339,13 +334,13 @@ export function usePracticeSession() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase, idx, queue, showAnswer, hintShown, translateHintLevel, translateHints, picked, judgeResult, stats]);
 
-  // 云端会话头：只跟「人在哪一题 / 揭晓状态」走，不跟预取 queue 刷屏
+  // 云端会话头： mainly 换题 idx；提示/判题中间态不 PATCH（提交时在 handler 里 persist 一次）
   useEffect(() => {
     if (phase === 'asking' || phase === 'waiting' || phase === 'judging') {
       persist({ syncCloud: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase, idx, showAnswer, hintShown, translateHintLevel, translateHints, picked, judgeResult, stats]);
+  }, [idx]);
 
   // 输入填空：提交后加载 / 生成助记提示（同 example.html）
   useEffect(() => {
@@ -499,9 +494,6 @@ export function usePracticeSession() {
           stats: s.stats,
           uiState: {
             showAnswer: s.showAnswer,
-            hintShown: s.hintShown,
-            translateHintLevel: s.translateHintLevel,
-            translateHints: s.translateHints,
             picked: s.picked,
             judgeResult: s.judgeResult,
           },
@@ -932,13 +924,20 @@ export function usePracticeSession() {
 
   function pickAnswer(letter: string) {
     if (showAnswer || !current || mode !== 'choice') return;
+    const correct = letter === current.example.answer;
+    const nextStats = {
+      correct: stats.correct + (correct ? 1 : 0),
+      total: stats.total + 1,
+    };
     setPicked(letter);
     setShowAnswer(true);
-    const correct = letter === current.example.answer;
-    setStats((s) => ({
-      correct: s.correct + (correct ? 1 : 0),
-      total: s.total + 1,
-    }));
+    setStats(nextStats);
+    persist({
+      syncCloud: true,
+      picked: letter,
+      showAnswer: true,
+      stats: nextStats,
+    });
   }
 
   async function submitClozeInput() {
@@ -952,15 +951,24 @@ export function usePracticeSession() {
     // 没填答案 → 直接揭晓 + 助记（不再拦截）
     if (!userText.trim()) {
       setUserText(expected);
-      setJudgeResult({
+      const emptyJudge = {
         correct: false,
         expected,
         feedback: '已显示答案',
         revealed: true,
-      });
+      } as const;
+      const nextStats = { correct: stats.correct, total: stats.total + 1 };
+      setJudgeResult(emptyJudge);
       setShowAnswer(true);
       setHintShown(true);
-      setStats((s) => ({ correct: s.correct, total: s.total + 1 }));
+      setStats(nextStats);
+      persist({
+        syncCloud: true,
+        judgeResult: emptyJudge,
+        showAnswer: true,
+        hintShown: true,
+        stats: nextStats,
+      });
       return;
     }
 
@@ -972,12 +980,19 @@ export function usePracticeSession() {
         current.example.en,
         settings
       );
+      const nextStats = {
+        correct: stats.correct + (result.correct ? 1 : 0),
+        total: stats.total + 1,
+      };
       setJudgeResult(result);
       setShowAnswer(true);
-      setStats((s) => ({
-        correct: s.correct + (result.correct ? 1 : 0),
-        total: s.total + 1,
-      }));
+      setStats(nextStats);
+      persist({
+        syncCloud: true,
+        judgeResult: result,
+        showAnswer: true,
+        stats: nextStats,
+      });
     } catch (e) {
       message.error('评判失败：' + (e instanceof Error ? e.message : '未知错误'));
     } finally {
@@ -1004,11 +1019,17 @@ export function usePracticeSession() {
         userText,
         settings
       );
+      const nextStats = {
+        correct: stats.correct + (result.correct ? 1 : 0),
+        total: stats.total + 1,
+      };
       setJudgeResult(result);
-      setStats((s) => ({
-        correct: s.correct + (result.correct ? 1 : 0),
-        total: s.total + 1,
-      }));
+      setStats(nextStats);
+      persist({
+        syncCloud: true,
+        judgeResult: result,
+        stats: nextStats,
+      });
     } catch (e) {
       message.error('评判失败：' + (e instanceof Error ? e.message : '未知错误'));
     } finally {
