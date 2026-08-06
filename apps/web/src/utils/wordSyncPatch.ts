@@ -4,7 +4,7 @@
  * Push: diff local words against vocab bank; skip untouched bank copies.
  * Pull: merge patches into existing local rows (never wipe the whole list).
  *
- * Local-only fields (never uploaded): synonymDiff (AI 近义辨析缓存).
+ * Local-only in legacy blob sync: (none for synonymDiff — use relational API).
  */
 
 import { loadAllVocabBank, type VocabBankEntry } from '@/json/vocab';

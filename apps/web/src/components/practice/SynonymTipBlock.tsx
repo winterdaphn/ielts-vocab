@@ -6,7 +6,7 @@ import { useWordsStore, useUserWords } from '@/store/useWords';
 import type { RelatedWord } from '@/types/word';
 
 interface Props {
-  /** Persist synonymDiff onto this local word id */
+  /** Persist synonymDiff（辨析本体；本句 replace 不入库） */
   wordId: string;
   headword: string;
   translation?: string;

@@ -9,6 +9,8 @@
  * 1s 内同一词多次变更会合并 fields；content 与 progress 可打在同一次 PATCH。
  */
 import type { Word } from '@/types/word';
+import { toPersistedSynonymDiff } from '@/utils/synonymDiffStorage';
+import type { StoredSynonymDiff } from '@/types/word';
 import { useSettings } from '@/store/useSettings';
 import { useWordsStore } from '@/store/useWords';
 import { useCategories } from '@/store/useCategories';
@@ -84,6 +86,7 @@ const CONTENT_KEYS = new Set([
   'collocations',
   'dictCollocations',
   'examples',
+  'synonymDiff',
 ]);
 
 const TRACKED_KEYS = [...CONTENT_KEYS, ...PROGRESS_KEYS];
@@ -110,7 +113,11 @@ export function diffWordFields(
   if (!prev) return fields;
   for (const key of TRACKED_KEYS) {
     const a = fieldValue(prev, key);
-    const b = fieldValue(next, key);
+    let b = fieldValue(next, key);
+    if (key === 'synonymDiff' && b && typeof b === 'object') {
+      const sd = b as StoredSynonymDiff;
+      if (sd.key) b = toPersistedSynonymDiff(sd.key, sd);
+    }
     if (JSON.stringify(a) !== JSON.stringify(b)) {
       fields[key] = b;
     }

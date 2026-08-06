@@ -54,7 +54,29 @@ function asJson(v, fallback) {
   return v;
 }
 
+function sanitizeSynonymDiff(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const key = String(raw.key || '').trim();
+  if (!key) return null;
+  const summary = String(raw.summary || '').slice(0, 200);
+  const itemsIn = Array.isArray(raw.items) ? raw.items : [];
+  const items = [];
+  for (const it of itemsIn) {
+    if (!it || typeof it !== 'object') continue;
+    const word = String(it.word || '').trim().toLowerCase().slice(0, 64);
+    if (!word) continue;
+    items.push({
+      word,
+      focus: String(it.focus || '').slice(0, 80),
+      usage: String(it.usage || '').slice(0, 120),
+    });
+  }
+  if (!summary && items.length === 0) return null;
+  return { key, summary, items, contrasts: [] };
+}
+
 function rowToWord(row) {
+  const synonymDiff = sanitizeSynonymDiff(row.synonym_diff);
   return {
     id: row.word_id,
     word: row.word,
@@ -70,6 +92,7 @@ function rowToWord(row) {
     collocations: row.collocations || [],
     dictCollocations: row.dict_collocations || [],
     examples: row.examples || [],
+    ...(synonymDiff ? { synonymDiff } : {}),
     crossedOut: !!row.crossed_out,
     starred: !!row.starred,
     ease: Number(row.ease) || 2.5,
@@ -115,6 +138,7 @@ function normalizeWordBody(body, wordIdParam) {
     correctReviews: Number(body.correctReviews ?? body.correct_reviews ?? 0),
     createdAt: body.createdAt ?? body.created_at ?? Date.now(),
     updatedAt: body.updatedAt ?? body.updated_at ?? Date.now(),
+    synonymDiff: sanitizeSynonymDiff(body.synonymDiff ?? body.synonym_diff),
   };
 }
 
@@ -130,13 +154,15 @@ async function upsertWord(pool, userId, w) {
     `INSERT INTO words (
       user_id, word_id, word, translation, phonetic_us, phonetic_uk, pos, mnemonic,
       categories, synonyms, similars, derivatives, collocations, dict_collocations, examples,
+      synonym_diff,
       crossed_out, starred, ease, interval_days, streak, next_review,
       total_reviews, correct_reviews, created_at, updated_at
     ) VALUES (
       $1,$2,$3,$4,$5,$6,$7,$8,
       $9::jsonb,$10::jsonb,$11::jsonb,$12::jsonb,$13::jsonb,$14::jsonb,$15::jsonb,
-      $16,$17,$18,$19,$20,$21,
-      $22,$23,$24,$25
+      $16::jsonb,
+      $17,$18,$19,$20,$21,$22,
+      $23,$24,$25,$26
     )
     ON CONFLICT (user_id, word_id) DO UPDATE SET
       word = EXCLUDED.word,
@@ -152,6 +178,7 @@ async function upsertWord(pool, userId, w) {
       collocations = EXCLUDED.collocations,
       dict_collocations = EXCLUDED.dict_collocations,
       examples = EXCLUDED.examples,
+      synonym_diff = EXCLUDED.synonym_diff,
       crossed_out = EXCLUDED.crossed_out,
       starred = EXCLUDED.starred,
       ease = EXCLUDED.ease,
@@ -178,6 +205,7 @@ async function upsertWord(pool, userId, w) {
       JSON.stringify(w.collocations || []),
       JSON.stringify(w.dictCollocations || []),
       JSON.stringify(w.examples || []),
+      JSON.stringify(w.synonymDiff || null),
       w.crossedOut,
       w.starred,
       w.ease,
@@ -242,6 +270,10 @@ export async function ensureTables(pool) {
   await pool.query(`
     CREATE INDEX IF NOT EXISTS words_user_updated_idx
     ON words (user_id, updated_at);
+  `);
+  await pool.query(`
+    ALTER TABLE words
+    ADD COLUMN IF NOT EXISTS synonym_diff JSONB;
   `);
   await pool.query(`
     CREATE TABLE IF NOT EXISTS user_prefs (
@@ -508,6 +540,14 @@ export async function buildApp(pool, { logger = false } = {}) {
       );
     }
     if (body.examples !== undefined) add('examples', JSON.stringify(body.examples || []));
+    if (body.synonymDiff !== undefined || body.synonym_diff !== undefined) {
+      add(
+        'synonym_diff',
+        JSON.stringify(
+          sanitizeSynonymDiff(body.synonymDiff ?? body.synonym_diff) || null
+        )
+      );
+    }
     if (body.ease !== undefined) add('ease', Number(body.ease));
     if (body.interval !== undefined || body.interval_days !== undefined) {
       add('interval_days', Number(body.interval ?? body.interval_days));

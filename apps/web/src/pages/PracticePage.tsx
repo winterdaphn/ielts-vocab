@@ -27,7 +27,8 @@ export default function PracticePage() {
   if (s.phase === 'selecting' && !s.hasModeParam) {
     return (
       <PracticeModeSelect
-        onStart={(m) => s.startPractice(m, s.scope, s.difficulty)}
+        onStart={(m) => s.startPracticeFromModeSelect(m)}
+        onStartClozeBatch={() => s.startPracticeFromModeSelect('cloze')}
         onBack={() => s.navigate('/today')}
       />
     );
@@ -55,8 +56,16 @@ export default function PracticePage() {
       <PracticeDone
         correct={s.stats.correct}
         total={s.stats.total}
+        sessionTotal={s.total}
         remaining={s.remainingCount}
+        mode={s.mode}
         onContinue={() => s.startPractice(s.mode, s.scope, s.difficulty)}
+        onRetestSame={() => s.retestSessionWords()}
+        onRetestAsCloze={
+          s.mode === 'choice'
+            ? () => s.retestSessionWords('cloze')
+            : undefined
+        }
         onHome={s.exitPractice}
       />
     );

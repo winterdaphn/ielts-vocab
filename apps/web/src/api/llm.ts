@@ -1042,25 +1042,22 @@ Return JSON ONLY:
   "items": [
     {"word":"${head}","focus":"该词语义侧重","usage":"语域/搭配/场景，≤30字"},
     ${itemPeerExample}
-  ],
-  "contrasts": [
-    "A vs B：关键差异（何时用哪个）"
   ]
 }
 
 Rules:
 - items 必须包含中心词 + 列表中每个近义词（按给定拼写，勿改成别的词）
-- focus / usage / contrasts / summary 均为中文；usage 可含短英文搭配
-- contrasts 2–4 条，挑最容易混的对比；勿空话
+- focus / usage / summary 均为中文；usage 可含短英文搭配
+- 不要输出 contrasts / A vs B 对比列表；差异写进各词的 focus/usage（及 replaceNote）即可
 - 面向雅思/学术英语，点明语域（正式/口语）、情感色彩、搭配限制
 - 不要编造离谱词源；不确定就写「语感上更…」
-- 每条 focus≤20字，usage≤36字，contrast≤48字，summary≤70字
+- 每条 focus≤20字，usage≤36字，summary≤70字
 ${sentence ? '- 每个近义词 item 必须有 replaceOk (boolean) 与 replaceNote；中心词不要带这两项' : ''}`;
 
   const text = await callLLM([{ role: 'user', content: prompt }], settings, {
     temperature: 0.35,
     jsonMode: true,
-    maxTokens: sentence ? 1600 : 1200,
+    maxTokens: sentence ? 1400 : 1000,
     modelTier: 'high',
   });
 
@@ -1068,7 +1065,6 @@ ${sentence ? '- 每个近义词 item 必须有 replaceOk (boolean) 与 replaceNo
     const parsed = parseJsonLoose<{
       summary?: string;
       items?: unknown;
-      contrasts?: unknown;
     }>(text);
     const allowed = new Set([head.toLowerCase(), ...peers.map((p) => p.word)]);
     const peerSet = new Set(peers.map((p) => p.word));
@@ -1099,22 +1095,110 @@ ${sentence ? '- 每个近义词 item 必须有 replaceOk (boolean) 与 replaceNo
       }
       items.push(item);
     }
-    const contrasts = Array.isArray(parsed.contrasts)
-      ? parsed.contrasts
-          .map((c) => String(c || '').trim().slice(0, 80))
-          .filter(Boolean)
-          .slice(0, 6)
-      : [];
     return {
       summary: String(parsed.summary || '')
         .trim()
         .slice(0, 140),
       items,
-      contrasts,
+      contrasts: [],
       ...(sentence ? { sentence } : {}),
     };
   } catch {
     return empty;
+  }
+}
+
+/**
+ * 仅判断各近义词能否在给定句子里替换中心词（做题语境，不重复生成整段辨析）。
+ */
+export async function judgeSynonymReplaceInSentence(
+  headword: string,
+  translation: string,
+  synonyms: RelatedWord[],
+  sentence: string,
+  settings: Settings
+): Promise<
+  Pick<SynonymDiffItem, 'word' | 'replaceOk' | 'replaceNote'>[]
+> {
+  const head = headword.trim();
+  const sent = String(sentence || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 280);
+  if (!head || !sent || !settings.apiKey) return [];
+
+  const peers = synonyms
+    .map((s) => ({
+      word: String(s.word || '')
+        .trim()
+        .toLowerCase(),
+      gloss: String(s.gloss || '').trim().slice(0, 24),
+    }))
+    .filter((s) => s.word && s.word !== head.toLowerCase())
+    .slice(0, 8);
+  if (!peers.length) return [];
+
+  const peerLines = peers
+    .map((p) => `- ${p.word}${p.gloss ? `（${p.gloss}）` : ''}`)
+    .join('\n');
+  const gloss = (translation || '').trim().slice(0, 100);
+  const peerNames = peers.map((p) => p.word).join(', ');
+
+  const prompt = `你是雅思词汇教练。中心词「${head}」出现在下列句子中（可能为变形或挖空位）。请 ONLY 判断每个近义词能否在该句中自然替换中心词。
+
+中心词: "${head}"
+释义提示: "${gloss || 'N/A'}"
+句子:
+"${sent}"
+
+近义词:
+${peerLines}
+
+Return JSON ONLY:
+{
+  "items": [
+    {"word":"peer","replaceOk":true,"replaceNote":"≤28字中文，为何可/不可"}
+  ]
+}
+
+Rules:
+- items 必须覆盖且仅包含: ${peerNames}
+- replaceOk=true 仅当语法、搭配、语域、语义在本句均成立
+- replaceNote ≤28字；中心词「${head}」不要出现在 items 里`;
+
+  const text = await callLLM([{ role: 'user', content: prompt }], settings, {
+    temperature: 0.25,
+    jsonMode: true,
+    maxTokens: 600,
+    modelTier: 'high',
+  });
+
+  try {
+    const parsed = parseJsonLoose<{ items?: unknown }>(text);
+    const allowed = new Set(peers.map((p) => p.word));
+    const itemsRaw = Array.isArray(parsed.items) ? parsed.items : [];
+    const out: Pick<SynonymDiffItem, 'word' | 'replaceOk' | 'replaceNote'>[] =
+      [];
+    for (const raw of itemsRaw) {
+      if (!raw || typeof raw !== 'object') continue;
+      const o = raw as Record<string, unknown>;
+      const w = String(o.word || '')
+        .trim()
+        .toLowerCase();
+      if (!w || !allowed.has(w)) continue;
+      if (out.some((it) => it.word === w)) continue;
+      if (typeof o.replaceOk !== 'boolean') continue;
+      out.push({
+        word: w,
+        replaceOk: o.replaceOk,
+        replaceNote: String(o.replaceNote || '')
+          .trim()
+          .slice(0, 48),
+      });
+    }
+    return out;
+  } catch {
+    return [];
   }
 }
 

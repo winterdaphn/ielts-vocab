@@ -52,6 +52,7 @@ import {
   selectNewWords,
   selectReviewWords,
   selectStarredWords,
+  shuffle,
   SESSION_SIZE,
   type Mode,
   type Question,
@@ -125,6 +126,9 @@ export function usePracticeSession() {
   const [stats, setStats] = useState({ correct: 0, total: 0 });
 
   const sessionIdRef = useRef(0);
+  /** 再次测试：同一批词重练，不写入 SRS / 学习统计 */
+  const skipReviewRef = useRef(false);
+  const modeSelectBatchRef = useRef<Word[]>([]);
   const cloudPracticeSessionIdRef = useRef<string | null>(readCloudMeta()?.sessionId ?? null);
   const inflightRef = useRef<Set<string>>(new Set());
   const prefetchRunningRef = useRef(false);
@@ -323,6 +327,12 @@ export function usePracticeSession() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasModeParam, wantResume, words.length > 0]);
+
+  // 模式选择页：固定本批词，选词/输入填空共用同一 50 词
+  useEffect(() => {
+    if (phase !== 'selecting' || hasModeParam || words.length === 0) return;
+    modeSelectBatchRef.current = pickSessionWords(words, scope ?? initialScope);
+  }, [phase, hasModeParam, scope, initialScope, words]);
 
   // 本机进度：含预取 queue（续做要用句）
   useEffect(() => {
@@ -780,7 +790,8 @@ export function usePracticeSession() {
   async function startPractice(
     m: Mode,
     nextScope?: StudyScope,
-    nextDifficulty?: SentenceDifficulty
+    nextDifficulty?: SentenceDifficulty,
+    options?: { pool?: Word[]; skipReview?: boolean }
   ) {
     // 只清本机：云端旧 active 由后面 createPracticeSession 一次性删掉，避免 abandon+create 重复
     clearPracticeProgress({ cloud: false });
@@ -789,7 +800,11 @@ export function usePracticeSession() {
     setScope(s);
     setDifficulty(d);
     difficultyRef.current = d;
-    const pool = pickSessionWords(words, s);
+    skipReviewRef.current = !!options?.skipReview;
+    const pool =
+      options?.pool && options.pool.length > 0
+        ? options.pool
+        : pickSessionWords(words, s);
     if (pool.length === 0) {
       message.info(
         s === 'new'
@@ -875,6 +890,27 @@ export function usePracticeSession() {
     setTimeout(() => {
       if (sessionIdRef.current === sid) kickPrefetch(sid, pool, m, 0);
     }, 300);
+  }
+
+  /** 模式选择页开始：与本页「选词填空」共用同一批词 */
+  function startPracticeFromModeSelect(m: Mode) {
+    const s = scope ?? initialScope;
+    const d = difficulty ?? initialDifficulty;
+    const pool =
+      modeSelectBatchRef.current.length > 0
+        ? modeSelectBatchRef.current
+        : pickSessionWords(words, s);
+    void startPractice(m, s, d, { pool });
+  }
+
+  /** 用本轮同一批词再测（打乱顺序；默认不写 SRS） */
+  function retestSessionWords(nextMode?: Mode) {
+    if (!sessionWords.length) return;
+    const m = nextMode ?? mode;
+    const pool = shuffle(
+      sessionWords.map((w) => latestWordSnapshot(w))
+    );
+    void startPractice(m, scope, difficulty, { pool, skipReview: true });
   }
 
   async function exitPractice() {
@@ -1038,7 +1074,7 @@ export function usePracticeSession() {
   }
 
   async function next() {
-    if (current) {
+    if (current && !skipReviewRef.current) {
       const wasCorrect =
         mode === 'choice'
           ? picked === current.example.answer
@@ -1065,6 +1101,21 @@ export function usePracticeSession() {
       message.info(
         wasCorrect ? `答对 · 下次复习：${when}` : `答错 · 已回退，${when}再练`
       );
+    } else if (current && skipReviewRef.current) {
+      const wasCorrect =
+        mode === 'choice'
+          ? picked === current.example.answer
+          : judgeResult?.correct;
+      const cloudId = cloudPracticeSessionIdRef.current;
+      if (cloudId) {
+        syncCloudItemAttempt(cloudId, idx, {
+          correct: !!wasCorrect,
+          picked,
+          userText,
+          judgeResult,
+          answeredAt: Date.now(),
+        });
+      }
     }
     if (idx + 1 >= total) {
       setPhase('done');
@@ -1360,6 +1411,8 @@ export function usePracticeSession() {
     setUserText,
     setHintShown,
     startPractice,
+    startPracticeFromModeSelect,
+    retestSessionWords,
     pickAnswer,
     submitClozeInput,
     submitTranslate,

@@ -23,7 +23,7 @@ export interface Collocation {
   gloss: string;
 }
 
-/** AI 近义辨析（仅本地 IndexedDB，不进云端 sync） */
+/** AI 近义辨析（summary/items 可同步云端；replaceOk 仅会话内） */
 export interface SynonymDiffItem {
   word: string;
   /** 语义侧重 / 语域（中文） */
@@ -42,14 +42,15 @@ export interface SynonymDiffItem {
 export interface SynonymDiffResult {
   summary: string;
   items: SynonymDiffItem[];
+  /** @deprecated 不再生成/展示 A vs B 对比；保留空数组以兼容旧缓存 */
   contrasts: string[];
   /** 做替换判断时用的句子（可选） */
   sentence?: string;
 }
 
-/** Persisted cache: result + fingerprint of headword + synonyms + sentence */
+/** Persisted cache: base diff + fingerprint headword + peers（不含句子） */
 export interface StoredSynonymDiff extends SynonymDiffResult {
-  /** head|peers|sentence — invalidate when近义或句子变化 */
+  /** head|peers — 近义列表变则失效 */
   key: string;
 }
 
@@ -71,7 +72,7 @@ export interface Word {
   /** Near-synonyms for richer expression */
   synonyms?: RelatedWord[];
   /**
-   * AI 近义用法辨析缓存。只存本机 DB，wordToSyncPatch 不会上传。
+   * AI 近义用法辨析（summary/items 同步云端；本句 replace 字段不入库）。
    */
   synonymDiff?: StoredSynonymDiff;
   /** Orthographic look-alikes only (形近词), not sound-alikes or semantic near-misses */

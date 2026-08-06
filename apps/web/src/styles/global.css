@@ -1425,17 +1425,6 @@ input, textarea, select {
   color: var(--text-light);
 }
 
-.synonym-diff-contrasts {
-  margin: 10px 0 0;
-  padding-left: 1.1em;
-  font-size: 12px;
-  color: var(--text);
-}
-
-.synonym-diff-contrasts li + li {
-  margin-top: 4px;
-}
-
 .tip-section-toggle.ant-btn:hover {
   opacity: 1;
   color: var(--accent) !important;

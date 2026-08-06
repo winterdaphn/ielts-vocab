@@ -3,6 +3,8 @@
  */
 import type { Settings } from '@/types/settings';
 import type { Word } from '@/types/word';
+import { toPersistedSynonymDiff } from '@/utils/synonymDiffStorage';
+import type { StoredSynonymDiff } from '@/types/word';
 
 export class WordsApiError extends Error {
   status: number;
@@ -30,34 +32,42 @@ async function readJson(resp: Response): Promise<Record<string, unknown>> {
   }
 }
 
+/** 上传云端：仅 summary/items，不含本句 replace */
+function synonymDiffForApi(w: Word): Record<string, unknown> | undefined {
+  const sd = w.synonymDiff;
+  if (!sd?.key || (!sd.summary && !sd.items?.length)) return undefined;
+  return toPersistedSynonymDiff(sd.key, sd) as unknown as Record<string, unknown>;
+}
+
 /** Strip local-only fields before upload */
 export function wordToApiBody(w: Word): Record<string, unknown> {
-  const { synonymDiff: _sd, ...rest } = w as Word & { synonymDiff?: unknown };
+  const synonymDiff = synonymDiffForApi(w);
   return {
-    id: rest.id,
-    word: rest.word,
-    translation: rest.translation || '',
-    phoneticUs: rest.phoneticUs || '',
-    phoneticUk: rest.phoneticUk || '',
-    partOfSpeech: rest.partOfSpeech || '',
-    mnemonic: rest.mnemonic || '',
-    category: rest.category || [],
-    synonyms: rest.synonyms || [],
-    similars: rest.similars || [],
-    derivatives: rest.derivatives || [],
-    collocations: rest.collocations || [],
-    dictCollocations: rest.dictCollocations || [],
-    examples: rest.examples || [],
-    crossedOut: !!rest.crossedOut,
-    starred: !!rest.starred,
-    ease: rest.ease ?? 2.5,
-    interval: rest.interval ?? 0,
-    streak: rest.streak ?? 0,
-    nextReview: rest.nextReview ?? Date.now(),
-    totalReviews: rest.totalReviews ?? 0,
-    correctReviews: rest.correctReviews ?? 0,
-    createdAt: rest.createdAt ?? Date.now(),
-    updatedAt: (rest as Word & { updatedAt?: number }).updatedAt ?? Date.now(),
+    id: w.id,
+    word: w.word,
+    translation: w.translation || '',
+    phoneticUs: w.phoneticUs || '',
+    phoneticUk: w.phoneticUk || '',
+    partOfSpeech: w.partOfSpeech || '',
+    mnemonic: w.mnemonic || '',
+    category: w.category || [],
+    synonyms: w.synonyms || [],
+    similars: w.similars || [],
+    derivatives: w.derivatives || [],
+    collocations: w.collocations || [],
+    dictCollocations: w.dictCollocations || [],
+    examples: w.examples || [],
+    crossedOut: !!w.crossedOut,
+    starred: !!w.starred,
+    ease: w.ease ?? 2.5,
+    interval: w.interval ?? 0,
+    streak: w.streak ?? 0,
+    nextReview: w.nextReview ?? Date.now(),
+    totalReviews: w.totalReviews ?? 0,
+    correctReviews: w.correctReviews ?? 0,
+    createdAt: w.createdAt ?? Date.now(),
+    updatedAt: (w as Word & { updatedAt?: number }).updatedAt ?? Date.now(),
+    ...(synonymDiff ? { synonymDiff } : {}),
   };
 }
 
@@ -67,6 +77,18 @@ function parseWord(raw: unknown): Word | null {
   const id = String(o.id || '').trim();
   const word = String(o.word || id).trim();
   if (!id && !word) return null;
+  const rawSd = o.synonymDiff ?? o.synonym_diff;
+  let synonymDiff: StoredSynonymDiff | undefined;
+  if (rawSd && typeof rawSd === 'object') {
+    const sd = rawSd as Record<string, unknown>;
+    const key = String(sd.key || '').trim();
+    if (key) {
+      synonymDiff = toPersistedSynonymDiff(key, {
+        summary: String(sd.summary || ''),
+        items: Array.isArray(sd.items) ? (sd.items as StoredSynonymDiff['items']) : [],
+      });
+    }
+  }
   return {
     id: id || word.toLowerCase(),
     word,
@@ -94,6 +116,7 @@ function parseWord(raw: unknown): Word | null {
     correctReviews: Number(o.correctReviews ?? 0),
     createdAt: Number(o.createdAt ?? Date.now()),
     updatedAt: Number(o.updatedAt ?? Date.now()),
+    ...(synonymDiff ? { synonymDiff } : {}),
   } as Word & { updatedAt: number };
 }
 

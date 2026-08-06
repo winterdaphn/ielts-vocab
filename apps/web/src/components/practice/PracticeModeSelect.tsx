@@ -1,12 +1,19 @@
 import { Button, Space } from 'antd';
 import type { Mode } from '@/utils/practiceSelect';
+import { SESSION_SIZE } from '@/utils/practiceSelect';
 
 interface Props {
   onStart: (mode: Mode) => void;
+  /** 选词模式时：同一批 50 词改用输入填空 */
+  onStartClozeBatch?: () => void;
   onBack: () => void;
 }
 
-export default function PracticeModeSelect({ onStart, onBack }: Props) {
+export default function PracticeModeSelect({
+  onStart,
+  onStartClozeBatch,
+  onBack,
+}: Props) {
   return (
     <div>
       <div className="app-header">
@@ -21,6 +28,11 @@ export default function PracticeModeSelect({ onStart, onBack }: Props) {
           <Button size="large" block onClick={() => onStart('choice')}>
             选词填空
           </Button>
+          {onStartClozeBatch ? (
+            <Button size="large" block onClick={onStartClozeBatch}>
+              输入填空 · 本批 {SESSION_SIZE} 词（与选词相同词单）
+            </Button>
+          ) : null}
           <Button size="large" block onClick={() => onStart('translate')}>
             句子翻译
           </Button>
