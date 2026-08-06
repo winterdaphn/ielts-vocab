@@ -124,37 +124,7 @@ export default function MarkableSentence({
           derivatives = info.derivatives || [];
           dictCollocations = info.dictCollocations || [];
         } catch {
-          /* fall through to free dict */
-        }
-      }
-
-      if (!translation || !phoneticUs || !phoneticUk) {
-        try {
-          const resp = await fetch(
-            `https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(lemma)}`
-          );
-          if (resp.ok) {
-            const data = await resp.json();
-            if (Array.isArray(data) && data[0]) {
-              const fallback =
-                data[0].phonetic ||
-                data[0].phonetics?.find((p: { text?: string }) => p.text)?.text ||
-                '';
-              for (const p of data[0].phonetics || []) {
-                const t = p?.text || '';
-                const a = p?.audio || '';
-                if (t && /-us\b|_us_|en-us|us\.mp3/i.test(a) && !phoneticUs) phoneticUs = t;
-                if (t && /-uk\b|_uk_|en-uk|uk\.mp3/i.test(a) && !phoneticUk) phoneticUk = t;
-              }
-              if (!phoneticUs) phoneticUs = fallback;
-              if (!phoneticUk) phoneticUk = fallback;
-              partOfSpeech = partOfSpeech || data[0].meanings?.[0]?.partOfSpeech || '';
-              const def = data[0].meanings?.[0]?.definitions?.[0]?.definition;
-              if (!translation && def) translation = def;
-            }
-          }
-        } catch {
-          /* ignore */
+          /* 有道失败则仅保留词表/AI 能补的信息 */
         }
       }
 
