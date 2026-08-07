@@ -166,6 +166,13 @@ export default function WordDetailPage() {
     navigate(wordDetailPath(word), { replace: true });
   }, [word, routeId, navigate]);
 
+  const bankExtras = useMemo(
+    () => (word ? getBankLexisExtras(word.word) : { derivatives: [], dictCollocations: [] }),
+    // bankTick refreshes after lazy vocab load
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [word?.word, bankTick]
+  );
+
   if (!id || !word) {
     return (
       <div className="app-card empty">
@@ -179,12 +186,6 @@ export default function WordDetailPage() {
   }
 
   const stage = getWordStage(word);
-  const bankExtras = useMemo(
-    () => (word ? getBankLexisExtras(word.word) : { derivatives: [], dictCollocations: [] }),
-    // bankTick refreshes after lazy vocab load
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [word?.word, bankTick]
-  );
   const synonyms = word.synonyms || [];
   const similars = word.similars || [];
   const derivatives =
