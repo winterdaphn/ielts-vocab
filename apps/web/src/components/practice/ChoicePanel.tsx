@@ -59,28 +59,23 @@ export default function ChoicePanel({
         blankMode={showAnswer ? 'revealed' : 'hidden'}
         openInListDetail={showAnswer}
       />
-      <div className="mark-tip">点句子里不认识的词 → 加入生词表</div>
       {showZh && zhText ? (
-        <div className="chinese-sentence" style={{ marginBottom: 12 }}>
+        <div className="chinese-sentence" style={{ marginBottom: 12, marginTop: 12 }}>
           <div className="text-light" style={{ fontSize: 12, marginBottom: 4 }}>
             整句意思
           </div>
           {zhText}
         </div>
-      ) : (
-        <div className="text-light" style={{ fontSize: 12, marginBottom: 12, opacity: 0.55 }}>
-          需要帮助？点「提示」看整句翻译
-        </div>
-      )}
+      ) : null}
       {!showAnswer && !hintShown && (
         <Button
           block
           size="large"
           onClick={onHint}
           disabled={disabled}
-          style={{ marginBottom: 12 }}
+          style={{ marginTop: 12, marginBottom: 12 }}
         >
-          提示
+          提示 · 看整句翻译
         </Button>
       )}
       <div className="cloze-options">

@@ -11,7 +11,6 @@ import { useSearchParams } from 'react-router-dom';
 import { usePracticeSession } from '@/hooks/usePracticeSession';
 import { isClozeFamily } from '@/utils/practiceSelect';
 import { modeLabel, scopeLabel, difficultyLabel } from '@/utils/practiceSession';
-import { sentenceSourceLabel } from '@/api/llm';
 import PracticeHeader from '@/components/practice/PracticeHeader';
 import PracticeModeSelect from '@/components/practice/PracticeModeSelect';
 import PracticeLoading from '@/components/practice/PracticeLoading';
@@ -134,12 +133,6 @@ function WordPracticePage() {
           >
             {difficultyLabel(s.difficulty)}
           </span>
-          <span
-            className={`sentence-source-tag source-${current.source || 'unknown'}`}
-            title="本题例句来源（调试）"
-          >
-            {sentenceSourceLabel(current.source)}
-          </span>
         </div>
 
         {s.mode === 'translate' || s.showAnswer ? (
@@ -192,12 +185,7 @@ function WordPracticePage() {
               </div>
             )}
           </div>
-        ) : (
-          <div className="text-light" style={{ fontSize: 13, marginBottom: 14 }}>
-            🔍 词不告诉你，看语境猜
-            {isNewCard ? ' · 新词' : ' · 复习'}
-          </div>
-        )}
+        ) : null}
 
         {s.mode === 'cloze' ? (
           <ClozePanel

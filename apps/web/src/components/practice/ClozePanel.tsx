@@ -120,21 +120,16 @@ export default function ClozePanel({
       ) : (
         sentence
       )}
-      <div className="mark-tip">点句子里不认识的词 → 加入生词表</div>
       {showAnswer || hintShown ? (
         current.example.zh ? (
           <ClozeChineseMeaning zh={current.example.zh} word={current.word} />
         ) : null
-      ) : (
-        <div className="text-light" style={{ fontSize: 12, marginBottom: 12, opacity: 0.55 }}>
-          需要帮助？点「提示」看整句翻译
-        </div>
-      )}
+      ) : null}
       {!showAnswer ? (
-        <div style={{ display: 'flex', gap: 10, width: '100%' }}>
+        <div style={{ display: 'flex', gap: 10, width: '100%', marginTop: 12 }}>
           {!hintShown && (
             <Button size="large" onClick={onHint} disabled={judging} style={{ flex: 1 }}>
-              提示
+              提示 · 看整句翻译
             </Button>
           )}
           <Button
