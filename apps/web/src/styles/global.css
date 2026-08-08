@@ -2063,6 +2063,14 @@ button.related-word-en.is-link:hover {
   margin-bottom: 4px;
 }
 
+.sentence-speak-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
 .sentence-row .practice-sentence {
   flex: 1;
   margin-bottom: 0;

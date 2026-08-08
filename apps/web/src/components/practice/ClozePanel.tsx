@@ -1,8 +1,7 @@
-import { useEffect, useState } from 'react';
 import { Button } from 'antd';
-import { SoundOutlined } from '@ant-design/icons';
 import MarkableSentence from '@/components/MarkableSentence';
 import SpeakButton from '@/components/SpeakButton';
+import SentenceSpeakBar from '@/components/practice/SentenceSpeakBar';
 import SentenceStructureTip from '@/components/practice/SentenceStructureTip';
 import CollapsibleTip from '@/components/practice/CollapsibleTip';
 import SynonymTipBlock from '@/components/practice/SynonymTipBlock';
@@ -10,7 +9,6 @@ import RelatedWordsList from '@/components/RelatedWordsList';
 import DerivativesList from '@/components/DerivativesList';
 import type { Question } from '@/utils/practiceSelect';
 import type { JudgeResult } from '@/hooks/usePracticeSession';
-import { speakEnglish, stopSpeaking } from '@/utils/speak';
 import { resolveClozeChinese, type SentenceStructureAnalysis } from '@/api/llm';
 import type { RelatedWord, Derivative, Word } from '@/types/word';
 
@@ -69,24 +67,7 @@ export default function ClozePanel({
   onSubmit,
   onRequestStructure,
 }: Props) {
-  const [speaking, setSpeaking] = useState(false);
-
-  // Stop TTS when leaving this question / hiding the button
-  useEffect(() => {
-    return () => {
-      stopSpeaking();
-      setSpeaking(false);
-    };
-  }, [current.word.id, showAnswer]);
-
-  function handleSpeak() {
-    const text = current.example.en;
-    if (!text?.trim()) return;
-    speakEnglish(text, {
-      onStart: () => setSpeaking(true),
-      onEnd: () => setSpeaking(false),
-    });
-  }
+  const canSpeakSentence = showAnswer || hintShown || !!judgeResult;
 
   const sentence = (
     <MarkableSentence
@@ -104,22 +85,8 @@ export default function ClozePanel({
 
   return (
     <>
-      {showAnswer ? (
-        <div className="sentence-row">
-          {sentence}
-          <button
-            type="button"
-            className={`speak-sentence-btn${speaking ? ' speaking' : ''}`}
-            title="朗读整句"
-            aria-label="朗读整句"
-            onClick={handleSpeak}
-          >
-            <SoundOutlined />
-          </button>
-        </div>
-      ) : (
-        sentence
-      )}
+      {canSpeakSentence ? <SentenceSpeakBar text={current.example.en} /> : null}
+      {sentence}
       {showAnswer || hintShown ? (
         current.example.zh ? (
           <ClozeChineseMeaning zh={current.example.zh} word={current.word} />

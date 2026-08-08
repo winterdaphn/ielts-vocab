@@ -1,6 +1,7 @@
 import { Button } from 'antd';
 import type { CSSProperties } from 'react';
 import MarkableSentence from '@/components/MarkableSentence';
+import SentenceSpeakBar from '@/components/practice/SentenceSpeakBar';
 import SentenceStructureTip from '@/components/practice/SentenceStructureTip';
 import CollapsibleTip from '@/components/practice/CollapsibleTip';
 import SynonymTipBlock from '@/components/practice/SynonymTipBlock';
@@ -50,9 +51,11 @@ export default function ChoicePanel({
     ? resolveClozeChinese(current.example.zh, current.word).text
     : '';
   const correct = showAnswer && picked === current.example.answer;
+  const canSpeakSentence = showAnswer || hintShown;
 
   return (
     <>
+      {canSpeakSentence ? <SentenceSpeakBar text={current.example.en} /> : null}
       <MarkableSentence
         text={current.example.en}
         blankWord={current.example.blank || current.word.word}
