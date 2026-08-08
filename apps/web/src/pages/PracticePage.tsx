@@ -20,6 +20,7 @@ import ChoicePanel from '@/components/practice/ChoicePanel';
 import TranslatePanel from '@/components/practice/TranslatePanel';
 import SpeakButton from '@/components/SpeakButton';
 import PhoneticDisplay from '@/components/PhoneticDisplay';
+import SentenceSpeakButton from '@/components/practice/SentenceSpeakBar';
 import DeckPracticePage from '@/pages/DeckPracticePage';
 
 export default function PracticePage() {
@@ -98,6 +99,12 @@ function WordPracticePage() {
   const answerWord =
     s.judgeResult?.expected || current.example.blank || current.word.word;
   const isNewCard = !!current.wasNew;
+  const showWordHead = s.mode === 'translate' || s.showAnswer;
+  const showPhoneticRow =
+    isClozeFamily(s.mode) &&
+    (s.showAnswer || s.hintShown || (s.mode === 'cloze' && !!s.judgeResult));
+  const hasPhonetic =
+    !!(current.word.phoneticUs || current.word.phoneticUk || current.word.phonetic);
 
   return (
     <div>
@@ -135,8 +142,8 @@ function WordPracticePage() {
           </span>
         </div>
 
-        {s.mode === 'translate' || s.showAnswer ? (
-          <div style={{ marginBottom: 14 }}>
+        {showWordHead ? (
+          <div style={{ marginBottom: showPhoneticRow ? 8 : 14 }}>
             <div
               className="word-display"
               style={{
@@ -176,7 +183,7 @@ function WordPracticePage() {
                 </>
               )}
             </div>
-            {(current.word.phoneticUs || current.word.phoneticUk || current.word.phonetic) && (
+            {s.mode === 'translate' && hasPhonetic && (
               <div style={{ color: 'var(--text-light)', fontSize: 13, marginBottom: 4 }}>
                 <PhoneticDisplay word={current.word} withSpeak />
                 {current.word.partOfSpeech ? (
@@ -184,6 +191,27 @@ function WordPracticePage() {
                 ) : null}
               </div>
             )}
+          </div>
+        ) : null}
+
+        {showPhoneticRow ? (
+          <div className="practice-phonetic-row">
+            <div className="practice-phonetic-row__main">
+              {hasPhonetic ? (
+                <PhoneticDisplay word={current.word} withSpeak />
+              ) : (
+                <span className="text-light" style={{ fontSize: 13 }}>
+                  {current.word.partOfSpeech || ''}
+                </span>
+              )}
+              {s.showAnswer && current.word.partOfSpeech && hasPhonetic ? (
+                <span className="text-light" style={{ fontSize: 13 }}>
+                  {' '}
+                  · {current.word.partOfSpeech}
+                </span>
+              ) : null}
+            </div>
+            <SentenceSpeakButton text={current.example.en} />
           </div>
         ) : null}
 

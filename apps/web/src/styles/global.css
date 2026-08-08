@@ -2063,12 +2063,24 @@ button.related-word-en.is-link:hover {
   margin-bottom: 4px;
 }
 
-.sentence-speak-bar {
+.practice-phonetic-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  margin-bottom: 8px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+
+.practice-phonetic-row__main {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-light);
+  font-size: 13px;
+}
+
+.sentence-speak-btn {
+  flex-shrink: 0;
 }
 
 .sentence-row .practice-sentence {

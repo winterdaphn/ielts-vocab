@@ -1,7 +1,6 @@
 import { Button } from 'antd';
 import MarkableSentence from '@/components/MarkableSentence';
 import SpeakButton from '@/components/SpeakButton';
-import SentenceSpeakBar from '@/components/practice/SentenceSpeakBar';
 import SentenceStructureTip from '@/components/practice/SentenceStructureTip';
 import CollapsibleTip from '@/components/practice/CollapsibleTip';
 import SynonymTipBlock from '@/components/practice/SynonymTipBlock';
@@ -67,8 +66,6 @@ export default function ClozePanel({
   onSubmit,
   onRequestStructure,
 }: Props) {
-  const canSpeakSentence = showAnswer || hintShown || !!judgeResult;
-
   const sentence = (
     <MarkableSentence
       text={current.example.en}
@@ -85,7 +82,6 @@ export default function ClozePanel({
 
   return (
     <>
-      {canSpeakSentence ? <SentenceSpeakBar text={current.example.en} /> : null}
       {sentence}
       {showAnswer || hintShown ? (
         current.example.zh ? (
