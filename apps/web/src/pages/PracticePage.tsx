@@ -100,9 +100,7 @@ function WordPracticePage() {
     s.judgeResult?.expected || current.example.blank || current.word.word;
   const isNewCard = !!current.wasNew;
   const showWordHead = s.mode === 'translate' || s.showAnswer;
-  const showPhoneticRow =
-    isClozeFamily(s.mode) &&
-    (s.showAnswer || s.hintShown || (s.mode === 'cloze' && !!s.judgeResult));
+  const showPhoneticRow = isClozeFamily(s.mode) && s.showAnswer;
   const hasPhonetic =
     !!(current.word.phoneticUs || current.word.phoneticUk || current.word.phonetic);
 

@@ -885,6 +885,19 @@ export async function buildApp(pool, { logger = false } = {}) {
 
   await app.register(cors, { origin: corsOrigin() });
 
+  // Allow POST with Content-Type: application/json and empty body (complete / abandon)
+  app.addContentTypeParser('application/json', { parseAs: 'string' }, (_req, body, done) => {
+    try {
+      if (!body || String(body).trim() === '') {
+        done(null, {});
+        return;
+      }
+      done(null, JSON.parse(body));
+    } catch (err) {
+      done(err, undefined);
+    }
+  });
+
   async function requireAuth(req, reply) {
     const token = getBearer(req);
     if (!token) {
@@ -2056,6 +2069,7 @@ export async function buildApp(pool, { logger = false } = {}) {
   });
 
   async function endPracticeSession(pool, userId, sessionId) {
+    await pool.query(`DELETE FROM practice_session_items WHERE session_id = $1`, [sessionId]);
     await pool.query(
       `DELETE FROM practice_sessions WHERE session_id = $1 AND user_id = $2`,
       [sessionId, userId]

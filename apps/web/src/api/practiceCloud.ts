@@ -273,7 +273,7 @@ export async function completePracticeSession(
       '/api/practice/sessions/' +
       encodeURIComponent(sessionId) +
       '/complete',
-    { method: 'POST', headers: headers(settings) }
+    { method: 'POST', headers: headers(settings), body: '{}' }
   );
   if (!resp.ok && resp.status !== 404) {
     const data = await readJson(resp);
@@ -290,7 +290,7 @@ export async function abandonPracticeSession(
       '/api/practice/sessions/' +
       encodeURIComponent(sessionId) +
       '/abandon',
-    { method: 'POST', headers: headers(settings) }
+    { method: 'POST', headers: headers(settings), body: '{}' }
   );
   if (!resp.ok && resp.status !== 404) {
     const data = await readJson(resp);
