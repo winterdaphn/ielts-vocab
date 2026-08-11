@@ -80,6 +80,87 @@ function looksLikeJsonModeUnsupported(status: number, body: string): boolean {
   );
 }
 
+function isProviderSuccessCode(code: number): boolean {
+  return code === 0 || code === 200;
+}
+
+/** Unwrap { code, data, msg } envelopes (e.g. agentrs.jd.com). */
+function unwrapProviderPayload(raw: unknown): unknown {
+  if (!raw || typeof raw !== 'object') return raw;
+  const obj = raw as Record<string, unknown>;
+
+  if (obj.choices || obj.output) return raw;
+
+  if ('code' in obj) {
+    const code = Number(obj.code);
+    if (!Number.isFinite(code) || !isProviderSuccessCode(code)) {
+      const msg = String(obj.msg || obj.message || `API 错误 ${obj.code}`);
+      throw new LLMError(msg);
+    }
+    if (obj.data != null) return obj.data;
+  }
+
+  return raw;
+}
+
+function extractChatContent(payload: unknown): string {
+  if (typeof payload === 'string') return payload;
+  if (!payload || typeof payload !== 'object') return '';
+
+  const obj = payload as Record<string, unknown>;
+  const choices = obj.choices;
+  if (Array.isArray(choices) && choices.length > 0) {
+    const first = choices[0];
+    if (first && typeof first === 'object') {
+      const message = (first as Record<string, unknown>).message;
+      if (message && typeof message === 'object') {
+        const content = (message as Record<string, unknown>).content;
+        if (typeof content === 'string') return content;
+        if (Array.isArray(content)) {
+          return content
+            .map((part) => {
+              if (!part || typeof part !== 'object') return '';
+              const p = part as Record<string, unknown>;
+              return typeof p.text === 'string' ? p.text : '';
+            })
+            .join('');
+        }
+      }
+      const text = (first as Record<string, unknown>).text;
+      if (typeof text === 'string') return text;
+    }
+  }
+
+  const output = obj.output;
+  if (Array.isArray(output)) {
+    for (const item of output) {
+      if (!item || typeof item !== 'object') continue;
+      const parts = (item as Record<string, unknown>).content;
+      if (!Array.isArray(parts)) continue;
+      const text = parts
+        .map((part) => {
+          if (!part || typeof part !== 'object') return '';
+          const p = part as Record<string, unknown>;
+          return typeof p.text === 'string' ? p.text : '';
+        })
+        .join('');
+      if (text) return text;
+    }
+  }
+
+  if (typeof obj.content === 'string') return obj.content;
+  if (typeof obj.text === 'string') return obj.text;
+  return '';
+}
+
+function extractFinishReason(payload: unknown): string | undefined {
+  if (!payload || typeof payload !== 'object') return undefined;
+  const choices = (payload as Record<string, unknown>).choices;
+  if (!Array.isArray(choices) || !choices[0] || typeof choices[0] !== 'object') return undefined;
+  const finish = (choices[0] as Record<string, unknown>).finish_reason;
+  return typeof finish === 'string' ? finish : undefined;
+}
+
 export async function callLLM(
   messages: ChatMessage[],
   settings: Settings,
@@ -137,9 +218,10 @@ export async function callLLM(
     throw new LLMError(`API ${resp.status}: ${text.slice(0, 200)}`);
   }
 
-  const data = await resp.json();
-  const content = data.choices?.[0]?.message?.content ?? '';
-  const finish = data.choices?.[0]?.finish_reason;
+  const raw = await resp.json();
+  const payload = unwrapProviderPayload(raw);
+  const content = extractChatContent(payload);
+  const finish = extractFinishReason(payload);
   if (finish === 'length') {
     console.warn('[llm] response truncated (finish_reason=length); raise max_tokens');
   }
