@@ -1161,18 +1161,22 @@ export async function buildApp(pool, { logger = false } = {}) {
       return reply.code(400).send({ error: 'empty_patch' });
     }
 
+    let contentUpdatedAt = null;
+    let progressUpdatedAt = null;
+
     if (contentTouched) {
       add('updated_at', new Date());
       vals.push(req.user.id, wordId);
       const result = await pool.query(
         `UPDATE words SET ${sets.join(', ')}
          WHERE user_id = $${i++} AND word_id = $${i}
-         RETURNING word_id`,
+         RETURNING updated_at`,
         vals
       );
       if (result.rowCount === 0) {
         return reply.code(404).send({ error: 'word_not_found' });
       }
+      contentUpdatedAt = new Date(result.rows[0].updated_at).getTime();
     } else {
       const exists = await pool.query(
         `SELECT 1 FROM words WHERE user_id = $1 AND word_id = $2`,
@@ -1184,11 +1188,16 @@ export async function buildApp(pool, { logger = false } = {}) {
     }
 
     if (progressTouched) {
-      await patchSrsProgress(pool, req.user.id, 'word', wordId, progressFields);
+      const srs = await patchSrsProgress(pool, req.user.id, 'word', wordId, progressFields);
+      progressUpdatedAt = srs?.updatedAt ?? null;
     }
 
-    const merged = await fetchWordMerged(pool, req.user.id, wordId);
-    return { ok: true, word: merged };
+    return {
+      ok: true,
+      wordId,
+      ...(contentUpdatedAt != null ? { updatedAt: contentUpdatedAt } : {}),
+      ...(progressUpdatedAt != null ? { progressUpdatedAt } : {}),
+    };
   });
 
   app.patch('/api/words/:wordId/progress', { preHandler: requireAuth }, async (req, reply) => {
@@ -1228,9 +1237,12 @@ export async function buildApp(pool, { logger = false } = {}) {
     if (Object.keys(progressFields).filter((k) => k !== 'updatedAt').length === 0) {
       return reply.code(400).send({ error: 'empty_patch' });
     }
-    await patchSrsProgress(pool, req.user.id, 'word', wordId, progressFields);
-    const merged = await fetchWordMerged(pool, req.user.id, wordId);
-    return { ok: true, word: merged };
+    const srs = await patchSrsProgress(pool, req.user.id, 'word', wordId, progressFields);
+    return {
+      ok: true,
+      wordId,
+      ...(srs?.updatedAt != null ? { progressUpdatedAt: srs.updatedAt } : {}),
+    };
   });
 
   app.delete('/api/words/:wordId', { preHandler: requireAuth }, async (req, reply) => {

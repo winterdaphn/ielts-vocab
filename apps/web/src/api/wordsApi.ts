@@ -125,6 +125,14 @@ function parseWord(raw: unknown): Word | null {
   } as Word & { updatedAt: number };
 }
 
+function applyContentPatch(
+  base: Word,
+  content: Record<string, unknown>,
+  updatedAt: number
+): Word {
+  return { ...base, ...content, updatedAt } as Word;
+}
+
 function splitPatchFields(fields: Record<string, unknown>): {
   content: Record<string, unknown>;
   progress: Record<string, unknown>;
@@ -263,7 +271,13 @@ export async function patchWordFields(
       }
       throw new WordsApiError(String(data.error || `部分更新失败 ${resp.status}`), resp.status);
     }
-    word = parseWord(data.word);
+    if (fallbackWord) {
+      word = applyContentPatch(
+        fallbackWord,
+        content,
+        Number(data.updatedAt ?? Date.now())
+      );
+    }
   }
 
   if (hasProgress) {

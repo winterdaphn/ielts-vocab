@@ -83,11 +83,21 @@ async function main() {
     payload: { streak: 2, nextReview: Date.now() + 3600000, starred: true },
   });
   assert(patch.statusCode === 200, 'patch ' + patch.body);
-  assert(patch.json().word.streak === 2, 'streak');
-  assert(patch.json().word.starred === true, 'starred');
+  assert(patch.json().ok === true, 'patch ok');
+  assert(patch.json().wordId === 'elated', 'patch wordId');
+  assert(typeof patch.json().progressUpdatedAt === 'number', 'progressUpdatedAt');
+
+  const afterProgress = await app.inject({
+    method: 'GET',
+    url: '/api/words',
+    headers: auth,
+  });
+  assert(afterProgress.statusCode === 200, 'list after progress patch');
+  assert(afterProgress.json().words[0].streak === 2, 'streak');
+  assert(afterProgress.json().words[0].starred === true, 'starred');
   // Progress must not bump words content mtime
   assert(
-    patch.json().word.updatedAt === contentAtBefore,
+    afterProgress.json().words[0].updatedAt === contentAtBefore,
     'progress must not bump words.updated_at'
   );
 
