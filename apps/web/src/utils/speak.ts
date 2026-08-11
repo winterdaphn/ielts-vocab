@@ -44,6 +44,11 @@ function waitForVoices(maxMs = 900): Promise<SpeechSynthesisVoice[]> {
   });
 }
 
+function isApplePlatform(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  return /iPhone|iPad|iPod|Macintosh|Mac OS X/i.test(navigator.userAgent);
+}
+
 /** Prefer natural / enhanced English voices (iOS Samantha, macOS Daniel, etc.). */
 function pickEnglishVoice(
   voices: SpeechSynthesisVoice[],
@@ -51,7 +56,8 @@ function pickEnglishVoice(
 ): SpeechSynthesisVoice | null {
   if (!voices.length) return null;
   const langPrimary = accent === 'uk' ? 'en-gb' : 'en-us';
-  const quality = /enhanced|premium|natural|neural|samantha|aaron|nicky|daniel|karen|moira|alex|ava|siri|google.*english/i;
+  const quality =
+    /enhanced|premium|natural|neural|samantha|aaron|nicky|daniel|karen|moira|alex|ava|siri|google.*english/i;
 
   const byLang = (prefix: string) =>
     voices.find((v) => v.lang.toLowerCase().startsWith(prefix) && quality.test(v.name)) ||
@@ -61,9 +67,123 @@ function pickEnglishVoice(
     byLang(langPrimary) ||
     voices.find((v) => v.lang.toLowerCase().startsWith('en') && quality.test(v.name)) ||
     voices.find((v) => v.lang.toLowerCase().startsWith('en')) ||
-    voices[0] ||
     null
   );
+}
+
+function scheduleSynthesisEndGuards(
+  synth: SpeechSynthesis,
+  text: string,
+  end: () => void
+): void {
+  // Chromium/Windows: queue can stay pending forever — clear loading if speech never starts.
+  setTimeout(() => {
+    if (!synth.speaking) {
+      try {
+        synth.cancel();
+      } catch {
+        /* ignore */
+      }
+      end();
+    }
+  }, 600);
+
+  // Some builds never fire onend even while audio plays.
+  setTimeout(end, Math.min(120_000, Math.max(4_000, text.length * 90)));
+}
+
+/** Windows-safe path — matches pre-enhancement behavior (lang only, no voice object). */
+function speakSynthesisSimple(
+  text: string,
+  accent: SpeakAccent,
+  opts?: { onStart?: () => void; onEnd?: () => void }
+): void {
+  const synth = window.speechSynthesis;
+  if (!synth) {
+    opts?.onEnd?.();
+    return;
+  }
+
+  synth.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = accent === 'uk' ? 'en-GB' : 'en-US';
+  u.rate = 0.9;
+
+  let ended = false;
+  const end = () => {
+    if (ended) return;
+    ended = true;
+    opts?.onEnd?.();
+  };
+
+  u.onend = end;
+  u.onerror = () => end();
+
+  opts?.onStart?.();
+  synth.speak(u);
+  scheduleSynthesisEndGuards(synth, text, end);
+}
+
+/** macOS/iOS — pick enhanced voice when available. */
+function speakSynthesisEnhanced(
+  text: string,
+  accent: SpeakAccent,
+  voices: SpeechSynthesisVoice[],
+  opts?: { onStart?: () => void; onEnd?: () => void }
+): void {
+  const synth = window.speechSynthesis;
+  if (!synth) {
+    opts?.onEnd?.();
+    return;
+  }
+
+  synth.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = accent === 'uk' ? 'en-GB' : 'en-US';
+  u.rate = 0.88;
+  u.pitch = 1;
+  const voice = pickEnglishVoice(voices, accent);
+  if (voice) u.voice = voice;
+
+  let ended = false;
+  const end = () => {
+    if (ended) return;
+    ended = true;
+    opts?.onEnd?.();
+  };
+
+  u.onend = end;
+  u.onerror = () => end();
+
+  opts?.onStart?.();
+  synth.speak(u);
+  if (synth.paused) {
+    try {
+      synth.resume();
+    } catch {
+      /* ignore */
+    }
+  }
+  scheduleSynthesisEndGuards(synth, text, end);
+}
+
+function speakSynthesis(
+  text: string,
+  accent: SpeakAccent,
+  opts?: { onStart?: () => void; onEnd?: () => void }
+): void {
+  if (!isApplePlatform()) {
+    speakSynthesisSimple(text, accent, opts);
+    return;
+  }
+
+  const voices = refreshVoices();
+  if (voices.length) {
+    speakSynthesisEnhanced(text, accent, voices, opts);
+    return;
+  }
+
+  void waitForVoices().then((loaded) => speakSynthesisEnhanced(text, accent, loaded, opts));
 }
 
 export function stopSpeaking(): void {
@@ -105,77 +225,6 @@ function playAudioUrl(url: string): Promise<void> {
     };
     audio.play().catch(reject);
   });
-}
-
-function isApplePlatform(): boolean {
-  if (typeof navigator === 'undefined') return false;
-  return /iPhone|iPad|iPod|Macintosh|Mac OS X/i.test(navigator.userAgent);
-}
-
-/** Must run synchronously inside the user click handler — async breaks Windows Chrome. */
-function speakSynthesisNow(
-  text: string,
-  accent: SpeakAccent,
-  voices: SpeechSynthesisVoice[],
-  opts?: { onStart?: () => void; onEnd?: () => void }
-): void {
-  const synth = window.speechSynthesis;
-  if (!synth) {
-    opts?.onEnd?.();
-    return;
-  }
-
-  synth.cancel();
-  const u = new SpeechSynthesisUtterance(text);
-  u.lang = accent === 'uk' ? 'en-GB' : 'en-US';
-  u.rate = 0.88;
-  u.pitch = 1;
-  const voice = pickEnglishVoice(voices, accent);
-  if (voice) u.voice = voice;
-
-  let ended = false;
-  const end = () => {
-    if (ended) return;
-    ended = true;
-    clearTimeout(safetyTimer);
-    opts?.onEnd?.();
-  };
-
-  u.onend = end;
-  u.onerror = () => end();
-
-  opts?.onStart?.();
-  synth.speak(u);
-  // iOS WebKit: synthesis sometimes stays paused until resume()
-  if (synth.paused) {
-    try {
-      synth.resume();
-    } catch {
-      /* ignore */
-    }
-  }
-
-  // Chromium on Windows can fail silently without firing onend/onerror.
-  const safetyTimer = setTimeout(() => {
-    if (!synth.speaking && !synth.pending) end();
-  }, 800);
-}
-
-function speakSynthesis(text: string, accent: SpeakAccent, opts?: { onStart?: () => void; onEnd?: () => void }): void {
-  const voices = refreshVoices();
-  if (voices.length) {
-    speakSynthesisNow(text, accent, voices, opts);
-    return;
-  }
-
-  // macOS/iOS: voices may load after first paint — async wait is OK there.
-  if (isApplePlatform()) {
-    void waitForVoices().then((loaded) => speakSynthesisNow(text, accent, loaded, opts));
-    return;
-  }
-
-  // Windows / other: keep sync path so user-gesture activation is preserved.
-  speakSynthesisNow(text, accent, [], opts);
 }
 
 /** Speak text; single words try Youdao MP3 first. Sentences use system speechSynthesis. */
