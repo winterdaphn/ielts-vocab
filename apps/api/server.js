@@ -41,6 +41,34 @@ function corsOrigin() {
   return ALLOWED_ORIGINS.split(',').map((s) => s.trim()).filter(Boolean);
 }
 
+/** Block SSRF when proxying user-supplied LLM base URLs. */
+function isAllowedLlmUpstream(apiBase) {
+  try {
+    const u = new URL(String(apiBase || '').replace(/\/$/, '') + '/chat/completions');
+    if (u.protocol !== 'https:') return false;
+    const host = u.hostname.toLowerCase();
+    if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host.endsWith('.local')) {
+      return false;
+    }
+    if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) {
+      const [a, b] = host.split('.').map(Number);
+      if (a === 10) return false;
+      if (a === 127) return false;
+      if (a === 192 && b === 168) return false;
+      if (a === 172 && b >= 16 && b <= 31) return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function normalizeProxyApiKey(raw) {
+  let key = String(raw || '').trim();
+  if (/^bearer\s+/i.test(key)) key = key.replace(/^bearer\s+/i, '').trim();
+  return key;
+}
+
 function parseSince(raw) {
   if (raw == null || raw === '') return null;
   const n = Number(raw);
@@ -2165,6 +2193,50 @@ export async function buildApp(pool, { logger = false } = {}) {
       data: row.data,
       updatedAt: new Date(row.updated_at).getTime(),
     };
+  });
+
+  /** LLM proxy — server-side fetch avoids browser Origin blocks (e.g. JoyAgent). */
+  app.post('/api/llm/chat/completions', async (req, reply) => {
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    const apiBase = String(body.apiBase || '').trim();
+    const apiKey = normalizeProxyApiKey(body.apiKey);
+    if (!apiBase) {
+      return reply.code(400).send({ error: 'missing_api_base' });
+    }
+    if (!apiKey) {
+      return reply.code(400).send({ error: 'missing_api_key' });
+    }
+    if (!isAllowedLlmUpstream(apiBase)) {
+      return reply.code(400).send({ error: 'invalid_api_base' });
+    }
+
+    const upstreamBody = { ...body };
+    delete upstreamBody.apiBase;
+    delete upstreamBody.apiKey;
+    if (!upstreamBody.model || !Array.isArray(upstreamBody.messages)) {
+      return reply.code(400).send({ error: 'invalid_llm_body' });
+    }
+
+    const url = apiBase.replace(/\/$/, '') + '/chat/completions';
+    let upstream;
+    try {
+      upstream = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer ' + apiKey,
+        },
+        body: JSON.stringify(upstreamBody),
+      });
+    } catch (err) {
+      console.error('[llm-proxy] fetch failed', err);
+      return reply.code(502).send({ error: 'llm_upstream_unreachable' });
+    }
+
+    const text = await upstream.text();
+    reply.code(upstream.status);
+    reply.header('Content-Type', upstream.headers.get('content-type') || 'application/json');
+    return reply.send(text);
   });
 
   app.get('/api/youdao', async (req, reply) => {

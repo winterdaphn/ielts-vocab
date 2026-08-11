@@ -80,85 +80,18 @@ function looksLikeJsonModeUnsupported(status: number, body: string): boolean {
   );
 }
 
-function isProviderSuccessCode(code: number): boolean {
-  return code === 0 || code === 200;
+function normalizeApiKey(raw: string | undefined): string {
+  let key = String(raw || '').trim();
+  if (/^bearer\s+/i.test(key)) key = key.replace(/^bearer\s+/i, '').trim();
+  return key;
 }
 
-/** Unwrap { code, data, msg } envelopes (e.g. agentrs.jd.com). */
-function unwrapProviderPayload(raw: unknown): unknown {
-  if (!raw || typeof raw !== 'object') return raw;
-  const obj = raw as Record<string, unknown>;
-
-  if (obj.choices || obj.output) return raw;
-
-  if ('code' in obj) {
-    const code = Number(obj.code);
-    if (!Number.isFinite(code) || !isProviderSuccessCode(code)) {
-      const msg = String(obj.msg || obj.message || `API 错误 ${obj.code}`);
-      throw new LLMError(msg);
-    }
-    if (obj.data != null) return obj.data;
-  }
-
-  return raw;
-}
-
-function extractChatContent(payload: unknown): string {
-  if (typeof payload === 'string') return payload;
-  if (!payload || typeof payload !== 'object') return '';
-
-  const obj = payload as Record<string, unknown>;
-  const choices = obj.choices;
-  if (Array.isArray(choices) && choices.length > 0) {
-    const first = choices[0];
-    if (first && typeof first === 'object') {
-      const message = (first as Record<string, unknown>).message;
-      if (message && typeof message === 'object') {
-        const content = (message as Record<string, unknown>).content;
-        if (typeof content === 'string') return content;
-        if (Array.isArray(content)) {
-          return content
-            .map((part) => {
-              if (!part || typeof part !== 'object') return '';
-              const p = part as Record<string, unknown>;
-              return typeof p.text === 'string' ? p.text : '';
-            })
-            .join('');
-        }
-      }
-      const text = (first as Record<string, unknown>).text;
-      if (typeof text === 'string') return text;
-    }
-  }
-
-  const output = obj.output;
-  if (Array.isArray(output)) {
-    for (const item of output) {
-      if (!item || typeof item !== 'object') continue;
-      const parts = (item as Record<string, unknown>).content;
-      if (!Array.isArray(parts)) continue;
-      const text = parts
-        .map((part) => {
-          if (!part || typeof part !== 'object') return '';
-          const p = part as Record<string, unknown>;
-          return typeof p.text === 'string' ? p.text : '';
-        })
-        .join('');
-      if (text) return text;
-    }
-  }
-
-  if (typeof obj.content === 'string') return obj.content;
-  if (typeof obj.text === 'string') return obj.text;
-  return '';
-}
-
-function extractFinishReason(payload: unknown): string | undefined {
-  if (!payload || typeof payload !== 'object') return undefined;
-  const choices = (payload as Record<string, unknown>).choices;
-  if (!Array.isArray(choices) || !choices[0] || typeof choices[0] !== 'object') return undefined;
-  const finish = (choices[0] as Record<string, unknown>).finish_reason;
-  return typeof finish === 'string' ? finish : undefined;
+/** Same-origin / worker API proxy (avoids browser Origin blocks on some providers). */
+function resolveLlmProxyUrl(settings: Settings): string | null {
+  const base = settings.workerUrl?.replace(/\/$/, '');
+  if (base) return `${base}/api/llm/chat/completions`;
+  if (typeof location !== 'undefined') return '/api/llm/chat/completions';
+  return null;
 }
 
 export async function callLLM(
@@ -166,14 +99,16 @@ export async function callLLM(
   settings: Settings,
   options: CallOptions = {}
 ): Promise<string> {
-  if (!settings.apiKey) throw new LLMError('未设置 API Key');
+  const apiKey = normalizeApiKey(settings.apiKey);
+  if (!apiKey) throw new LLMError('未设置 API Key');
   if (!settings.apiBase) throw new LLMError('未设置 API Base URL');
 
   const model =
     resolveModel(settings, options.modelTier ?? 'mid');
-  const url = settings.apiBase.replace(/\/$/, '') + '/chat/completions';
+  const directUrl = settings.apiBase.replace(/\/$/, '') + '/chat/completions';
+  const proxyUrl = resolveLlmProxyUrl(settings);
 
-  async function post(useJsonMode: boolean): Promise<Response> {
+  function buildOpenAiBody(useJsonMode: boolean): Record<string, unknown> {
     const body: Record<string, unknown> = {
       model,
       messages,
@@ -181,14 +116,31 @@ export async function callLLM(
     };
     if (options.maxTokens) body.max_tokens = options.maxTokens;
     if (useJsonMode) body.response_format = { type: 'json_object' };
+    return body;
+  }
 
-    return fetch(url, {
+  async function postDirect(useJsonMode: boolean): Promise<Response> {
+    return fetch(directUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: 'Bearer ' + settings.apiKey,
+        Authorization: 'Bearer ' + apiKey,
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify(buildOpenAiBody(useJsonMode)),
+      signal: options.signal,
+    });
+  }
+
+  async function postViaProxy(useJsonMode: boolean): Promise<Response | null> {
+    if (!proxyUrl) return null;
+    return fetch(proxyUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        apiBase: settings.apiBase.replace(/\/$/, ''),
+        apiKey,
+        ...buildOpenAiBody(useJsonMode),
+      }),
       signal: options.signal,
     });
   }
@@ -198,7 +150,14 @@ export async function callLLM(
   }
 
   let usedJson = !!options.jsonMode;
-  let resp = await post(usedJson);
+
+  async function send(useJsonMode: boolean): Promise<Response> {
+    const proxied = await postViaProxy(useJsonMode);
+    if (proxied && proxied.status !== 404) return proxied;
+    return postDirect(useJsonMode);
+  }
+
+  let resp = await send(usedJson);
 
   if (!resp.ok && usedJson) {
     const errText = await resp.text().catch(() => '');
@@ -207,7 +166,7 @@ export async function callLLM(
         '[llm] response_format/json_object unsupported, retrying without it'
       );
       usedJson = false;
-      resp = await post(false);
+      resp = await send(false);
     } else {
       throw new LLMError(`API ${resp.status}: ${errText.slice(0, 200)}`);
     }
@@ -218,10 +177,9 @@ export async function callLLM(
     throw new LLMError(`API ${resp.status}: ${text.slice(0, 200)}`);
   }
 
-  const raw = await resp.json();
-  const payload = unwrapProviderPayload(raw);
-  const content = extractChatContent(payload);
-  const finish = extractFinishReason(payload);
+  const data = await resp.json();
+  const content = data.choices?.[0]?.message?.content ?? '';
+  const finish = data.choices?.[0]?.finish_reason;
   if (finish === 'length') {
     console.warn('[llm] response truncated (finish_reason=length); raise max_tokens');
   }
