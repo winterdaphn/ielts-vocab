@@ -1321,16 +1321,17 @@ export function usePracticeSession() {
 
   async function toggleStarred() {
     if (!current) return;
-    const nextStarred = !current.word.starred;
-    const updated = { ...current.word, starred: nextStarred };
+    const latest = latestWordSnapshot(current.word);
+    const nextStarred = !latest.starred;
+    const updated = { ...latest, starred: nextStarred };
     await updateWord(updated);
     setSessionWords((prev) =>
-      prev.map((w) => (w.id === updated.id ? { ...w, starred: nextStarred } : w))
+      prev.map((w) => (w.id === updated.id ? updated : w))
     );
     setQueueBoth((prev) =>
       prev.map((item) =>
         item && item.word.id === updated.id
-          ? { ...item, word: { ...item.word, starred: nextStarred } }
+          ? { ...item, word: updated }
           : item
       )
     );
