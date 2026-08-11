@@ -115,7 +115,12 @@ export async function callLLM(
       temperature: options.temperature ?? 0.7,
     };
     if (options.maxTokens) body.max_tokens = options.maxTokens;
-    if (useJsonMode) body.response_format = { type: 'json_object' };
+    if (useJsonMode) {
+      body.response_format = { type: 'json_object' };
+      // GLM / DeepSeek 等思考模型：JSON 任务关闭 thinking，避免 token 全进 reasoning_content
+      body.thinking = { type: 'disabled' };
+      body.enable_thinking = false;
+    }
     return body;
   }
 
@@ -178,12 +183,22 @@ export async function callLLM(
   }
 
   const data = await resp.json();
-  const content = data.choices?.[0]?.message?.content ?? '';
+  const message = data.choices?.[0]?.message;
+  const content = String(message?.content ?? '').trim();
   const finish = data.choices?.[0]?.finish_reason;
   if (finish === 'length') {
     console.warn('[llm] response truncated (finish_reason=length); raise max_tokens');
   }
-  if (!String(content).trim()) {
+  if (!content) {
+    const reasoning = String(message?.reasoning_content ?? '').trim();
+    if (finish === 'length' && reasoning) {
+      throw new LLMError(
+        '思考模型把额度用在推理上，JSON 未输出（finish_reason=length）。请增大 max_tokens，或高档换非思考模型（如 DeepSeek-V4-Flash）。'
+      );
+    }
+    if (finish === 'length') {
+      throw new LLMError('回复被截断（finish_reason=length），请换模型或增大 max_tokens');
+    }
     throw new LLMError('API 返回空内容，请换模型或检查额度');
   }
   return content;
@@ -1092,12 +1107,13 @@ Rules:
 - 面向雅思/学术英语，点明语域（正式/口语）、情感色彩、搭配限制
 - 不要编造离谱词源；不确定就写「语感上更…」
 - 每条 focus≤20字，usage≤36字，summary≤70字
+- 直接输出 JSON，不要输出思考过程或 chain-of-thought
 ${sentence ? '- 每个近义词 item 必须有 replaceOk (boolean) 与 replaceNote；中心词不要带这两项' : ''}`;
 
   const text = await callLLM([{ role: 'user', content: prompt }], settings, {
     temperature: 0.35,
     jsonMode: true,
-    maxTokens: sentence ? 1400 : 1000,
+    maxTokens: sentence ? 4096 : 3072,
     modelTier: 'high',
   });
 
@@ -1209,7 +1225,7 @@ Rules:
   const text = await callLLM([{ role: 'user', content: prompt }], settings, {
     temperature: 0.25,
     jsonMode: true,
-    maxTokens: 600,
+    maxTokens: 2048,
     modelTier: 'high',
   });
 
