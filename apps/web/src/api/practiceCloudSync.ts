@@ -19,6 +19,7 @@ import {
   checkPracticeSession,
   completePracticeSession,
   createPracticeSession,
+  deleteActivePracticeSessions,
   fetchActivePracticeSession,
   patchPracticeSession,
   putPracticeItemsBatch,
@@ -42,6 +43,8 @@ type SessionPatch = {
   idx: number;
   stats: { correct: number; total: number };
   uiState: Record<string, unknown>;
+  /** 与本地 savedAt 对齐，供服务端 client_updated_at LWW */
+  clientUpdatedAt: number;
 };
 
 function settings() {
@@ -111,6 +114,7 @@ function sessionPatchKey(p: SessionPatch): string {
     idx: p.idx,
     stats: p.stats,
     uiState: p.uiState,
+    clientUpdatedAt: p.clientUpdatedAt,
   });
 }
 
@@ -162,9 +166,15 @@ async function drainCloudSessionPatch(opts?: { keepalive?: boolean }): Promise<v
           idx: patch.idx,
           stats: patch.stats,
           uiState: patch.uiState,
+          clientUpdatedAt: patch.clientUpdatedAt,
         },
         opts
       );
+      if (updated?.gone) {
+        writeCloudMeta(null);
+        lastSessionPatchKey = null;
+        continue;
+      }
       if (updated) {
         writeCloudMeta({
           sessionId: updated.sessionId,
@@ -354,35 +364,57 @@ export async function flushCloudItemPatches(sessionId?: string): Promise<void> {
   await Promise.all([...ids].map((id) => ensureCloudItemsFlush(id)));
 }
 
-/** 本轮练完：先 flush 会话头 + 题目行，再把云端会话删掉 */
+/** 本轮练完：先 flush，再删云端会话；仅删除成功后才清 meta */
 export async function endCloudPracticeSession(): Promise<void> {
   const meta = readCloudMeta();
+  if (!meta?.sessionId) {
+    await purgeActiveCloudPractice();
+    return;
+  }
   await flushCloudSessionPatch();
-  if (meta?.sessionId) await flushCloudItemPatches(meta.sessionId);
-  writeCloudMeta(null);
+  await flushCloudItemPatches(meta.sessionId);
   const s = settings();
-  if (!s.syncToken || !meta?.sessionId) return;
-  try {
+  if (s.syncToken) {
     await completePracticeSession(s, meta.sessionId);
     console.info('[practice-cloud] session completed', meta.sessionId);
-  } catch (e) {
-    console.warn('[practice-cloud] complete failed', e);
   }
+  writeCloudMeta(null);
+  lastSessionPatchKey = null;
 }
 
-/** 放弃本轮：先 flush，再删云端会话 */
+/** 放弃本轮：先 flush，再删云端会话；仅删除成功后才清 meta */
 export async function abandonCloudPracticeSession(): Promise<void> {
   const meta = readCloudMeta();
-  await flushCloudSessionPatch();
-  if (meta?.sessionId) await flushCloudItemPatches(meta.sessionId);
-  writeCloudMeta(null);
-  const s = settings();
-  if (!s.syncToken || !meta?.sessionId) return;
-  try {
-    await abandonPracticeSession(s, meta.sessionId);
-  } catch (e) {
-    console.warn('[practice-cloud] abandon failed', e);
+  if (!meta?.sessionId) {
+    await purgeActiveCloudPractice();
+    return;
   }
+  await flushCloudSessionPatch();
+  await flushCloudItemPatches(meta.sessionId);
+  const s = settings();
+  if (s.syncToken) {
+    await abandonPracticeSession(s, meta.sessionId);
+    console.info('[practice-cloud] session abandoned', meta.sessionId);
+  }
+  writeCloudMeta(null);
+  lastSessionPatchKey = null;
+}
+
+/** 删掉服务器上所有 active 会话（无 sessionId 或 meta 已丢时的兜底） */
+export async function purgeActiveCloudPractice(): Promise<void> {
+  const s = settings();
+  if (!s.syncToken) {
+    clearCloudPracticeMeta();
+    return;
+  }
+  await deleteActivePracticeSessions(s);
+  clearCloudPracticeMeta();
+}
+
+/** 仅清本机记住的 sessionId（开新练前；服务器 active 由 POST /sessions 删除） */
+export function clearCloudPracticeMeta(): void {
+  writeCloudMeta(null);
+  lastSessionPatchKey = null;
 }
 
 /** 首页发现「题已做完但云端仍是 active」时收尾，避免继续卡片误显示 */
@@ -390,12 +422,17 @@ export async function completeStaleCloudPractice(sessionId: string): Promise<voi
   const s = settings();
   if (!s.syncToken || !sessionId) return;
   const meta = readCloudMeta();
-  if (meta?.sessionId === sessionId) writeCloudMeta(null);
   try {
     await completePracticeSession(s, sessionId);
     console.info('[practice-cloud] stale session completed', sessionId);
   } catch (e) {
     console.warn('[practice-cloud] stale complete failed', e);
+    throw e;
+  } finally {
+    if (meta?.sessionId === sessionId) {
+      writeCloudMeta(null);
+      lastSessionPatchKey = null;
+    }
   }
 }
 

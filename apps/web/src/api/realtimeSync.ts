@@ -20,7 +20,11 @@ import {
   clearPracticeSession,
   normalizePracticeSyncPayload,
 } from '@/utils/practiceSession';
-import { abandonCloudPracticeSession, endCloudPracticeSession } from '@/api/practiceCloudSync';
+import {
+  abandonCloudPracticeSession,
+  clearCloudPracticeMeta,
+  endCloudPracticeSession,
+} from '@/api/practiceCloudSync';
 import {
   batchPutWords,
   deleteWordRemote,
@@ -53,6 +57,33 @@ function syncLog(message: string, detail?: unknown) {
 }
 
 let pullInFlight: Promise<{ merged: number }> | null = null;
+
+/** 本轮打开 App 是否已做过一次 pull（push 前先拉，避免旧 Dexie 盖远程 progressUpdatedAt） */
+let syncBootstrapDone = false;
+let syncBootstrapPromise: Promise<void> | null = null;
+
+export function resetSyncBootstrap() {
+  syncBootstrapDone = false;
+  syncBootstrapPromise = null;
+}
+
+/** 登录后 / 冷启动：先增量拉远程，再允许 push 队列。 */
+export async function ensureSyncBootstrap(): Promise<void> {
+  const s = settings();
+  if (!s.syncToken) return;
+  if (syncBootstrapDone) return;
+  if (!syncBootstrapPromise) {
+    syncBootstrapPromise = pullIncremental({ reason: 'cold-start' })
+      .then(() => {
+        syncBootstrapDone = true;
+      })
+      .catch((e) => {
+        syncBootstrapPromise = null;
+        throw e;
+      });
+  }
+  await syncBootstrapPromise;
+}
 
 interface QueueItem {
   kind: SyncKind;
@@ -203,6 +234,7 @@ export function enqueueWord(word: Word, kind?: SyncKind, prev?: Word | null) {
       correctReviews: next.correctReviews,
       crossedOut: next.crossedOut,
       starred: !!next.starred,
+      updatedAt: next.progressUpdatedAt ?? now,
     };
     queue.set(word.id, {
       kind: 'progress',
@@ -238,6 +270,11 @@ export async function flushSyncQueue(): Promise<void> {
   if (flushing) return;
   const s = settings();
   if (!s.syncToken) return;
+  try {
+    await ensureSyncBootstrap();
+  } catch {
+    /* pull 失败仍尝试 push，服务端 LWW 兜底 */
+  }
   // Always try deck queue even if word queue empty
   void flushDeckSyncQueue();
   if (queue.size === 0) return;
@@ -492,18 +529,27 @@ export function schedulePracticePrefsPush(): void {
 /** 清除本地未完成练习；默认同时处理云端会话。
  * 新开一轮请传 `{ cloud: false }`：本机清掉即可，随后 POST /sessions 会删旧 active，避免 abandon + create 双请求。
  */
-export function clearPracticeProgress(opts?: {
+export async function clearPracticeProgress(opts?: {
   completed?: boolean;
   /** 默认 true；新开练时应 false，交给 create 删旧会话 */
   cloud?: boolean;
-}): void {
+}): Promise<void> {
   clearPracticeSession();
   if (practicePrefsPushTimer) {
     clearTimeout(practicePrefsPushTimer);
     practicePrefsPushTimer = null;
   }
-  if (opts?.cloud !== false) {
-    void (opts?.completed ? endCloudPracticeSession() : abandonCloudPracticeSession());
+  try {
+    if (opts?.cloud === false) {
+      clearCloudPracticeMeta();
+    } else if (opts?.completed) {
+      await endCloudPracticeSession();
+    } else {
+      await abandonCloudPracticeSession();
+    }
+  } catch (e) {
+    console.warn('[practice] cloud session cleanup failed', e);
+    throw e;
   }
   void pushPrefsNow();
 }
@@ -542,6 +588,7 @@ export async function pushAllWordsNow(): Promise<number> {
 export async function pullOnLogin(): Promise<{ merged: number }> {
   const s = settings();
   if (!s.syncToken) return { merged: 0 };
+  resetSyncBootstrap();
   // Force full pull once by clearing since
   const prev = s.lastSyncAt;
   const prevSrs = s.lastSrsSyncAt;
@@ -554,7 +601,9 @@ export async function pullOnLogin(): Promise<{ merged: number }> {
     lastFrameSyncAt: 0,
   });
   try {
-    return await pullIncremental({ reason: 'login', applyPracticePrefs: true });
+    const result = await pullIncremental({ reason: 'login', applyPracticePrefs: true });
+    syncBootstrapDone = true;
+    return result;
   } catch (e) {
     useSettings.getState().update({
       lastSyncAt: prev,

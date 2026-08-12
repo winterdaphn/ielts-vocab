@@ -16,7 +16,7 @@ import { useSettings } from '@/store/useSettings';
 import { useUserWords } from '@/store/useWords';
 
 import { useSyncStatus } from '@/store/useSyncStatus';
-import { flushSyncQueue, pullIncremental, pullOnLogin, pushPrefsNow } from '@/api/realtimeSync';
+import { flushSyncQueue, pullIncremental, pullOnLogin, pushPrefsNow, ensureSyncBootstrap } from '@/api/realtimeSync';
 import { flushCloudSessionPatch, flushCloudItemPatches } from '@/api/practiceCloudSync';
 
 import { prefetchVocabBank } from '@/json/vocab';
@@ -75,6 +75,16 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
     void ensureVocabBankRelated();
 
   }, [username]);
+
+
+
+  useEffect(() => {
+
+    if (!settings.syncToken || !username) return;
+
+    void ensureSyncBootstrap().catch(() => {});
+
+  }, [settings.syncToken, username]);
 
 
 

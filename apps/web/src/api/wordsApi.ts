@@ -282,7 +282,13 @@ export async function patchWordFields(
 
   if (hasProgress) {
     try {
-      const srs = await patchSrsFields(settings, 'word', wordId, progress);
+      const progUpdatedAt = Number(
+        word?.progressUpdatedAt ?? fallbackWord?.progressUpdatedAt ?? Date.now()
+      );
+      const srs = await patchSrsFields(settings, 'word', wordId, {
+        ...progress,
+        updatedAt: progUpdatedAt,
+      });
       if (srs) {
         const base = word || fallbackWord;
         if (base) word = applySrsToWord(base, srs);

@@ -93,7 +93,9 @@ export default function TodayPage() {
         void completeStaleCloudPractice(remote.sessionId);
         return;
       }
-      const preferred = choosePracticeSession(readSavedPracticeSession(), snap);
+      const preferred = choosePracticeSession(readSavedPracticeSession(), snap, {
+        remoteUpdatedAt: remote.updatedAt,
+      });
       if (preferred !== snap) {
         setRemoteSummary(null);
         return;
@@ -160,9 +162,8 @@ export default function TodayPage() {
         content: '开始新练习会覆盖未完成的进度，确定吗？',
         okText: '确定',
         cancelText: '取消',
-        onOk: () => {
-          // 只清本机进度卡片；云端旧会话留给 startPractice → create 删除
-          clearPracticeProgress({ cloud: false });
+        onOk: async () => {
+          await clearPracticeProgress({ cloud: false });
           setSavedTick((n) => n + 1);
           go();
         },
@@ -183,10 +184,14 @@ export default function TodayPage() {
       okText: '放弃',
       okButtonProps: { danger: true },
       cancelText: '取消',
-      onOk: () => {
-        clearPracticeProgress();
-        setSavedTick((n) => n + 1);
-        message.success('已清除进度');
+      onOk: async () => {
+        try {
+          await clearPracticeProgress();
+          setSavedTick((n) => n + 1);
+          message.success('已清除进度');
+        } catch {
+          message.error('清除失败，请检查网络后重试');
+        }
       },
     });
   }

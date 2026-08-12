@@ -8,7 +8,7 @@ interface Props {
   total: number;
   mode: Mode;
   error?: string;
-  onExit: () => void;
+  onBeforeExit?: () => void;
   onRetry?: () => void;
 }
 
@@ -17,7 +17,7 @@ export default function PracticeLoading({
   total,
   mode,
   error,
-  onExit,
+  onBeforeExit,
   onRetry,
 }: Props) {
   const modeText =
@@ -25,7 +25,7 @@ export default function PracticeLoading({
 
   return (
     <div>
-      <PracticeHeader idx={idx} total={total} onExit={onExit} />
+      <PracticeHeader idx={idx} total={total} onBeforeExit={onBeforeExit} />
       <div className="app-card" style={{ textAlign: 'center', padding: '60px 20px' }}>
         {error ? (
           <>

@@ -126,7 +126,10 @@ export async function patchSrsFields(
     {
       method: 'PATCH',
       headers: authHeaders(settings),
-      body: JSON.stringify({ ...fields, updatedAt: Date.now() }),
+      body: JSON.stringify({
+        ...fields,
+        updatedAt: Number(fields.updatedAt ?? Date.now()),
+      }),
     }
   );
   const data = await readJson(resp);

@@ -18,6 +18,7 @@ import {
 import { applyReview, isNew, formatNextReview } from '@/utils/scheduler';
 import {
   clearPracticeProgress,
+  ensureSyncBootstrap,
 } from '@/api/realtimeSync';
 import {
   cloudSessionFromSaved,
@@ -294,6 +295,7 @@ export function usePracticeSession() {
     if (overrides.syncCloud === false) return;
     const cloudId = cloudPracticeSessionIdRef.current;
     if (cloudId) {
+      const savedAt = readSavedPracticeSession()?.savedAt ?? Date.now();
       scheduleCloudSessionPatch({
         sessionId: cloudId,
         idx: overrides.idx ?? idx,
@@ -305,6 +307,7 @@ export function usePracticeSession() {
           judgeResult:
             overrides.judgeResult !== undefined ? overrides.judgeResult : judgeResult,
         },
+        clientUpdatedAt: savedAt,
       });
     }
   }
@@ -339,7 +342,7 @@ export function usePracticeSession() {
     if (phase === 'asking' || phase === 'waiting' || phase === 'judging') {
       persist({ syncCloud: false });
     } else if (phase === 'done') {
-      clearPracticeProgress({ completed: true });
+      void clearPracticeProgress({ completed: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase, idx, queue, showAnswer, hintShown, translateHintLevel, translateHints, picked, judgeResult, stats]);
@@ -507,6 +510,7 @@ export function usePracticeSession() {
             picked: s.picked,
             judgeResult: s.judgeResult,
           },
+          clientUpdatedAt: readSavedPracticeSession()?.savedAt ?? Date.now(),
         });
       }
       void flushCloudSessionPatch(keepalive ? { keepalive: true } : undefined);
@@ -618,13 +622,20 @@ export function usePracticeSession() {
   }
 
   async function resumePractice() {
+    try {
+      await ensureSyncBootstrap();
+    } catch {
+      /* 拉取失败仍尝试用本机恢复 */
+    }
     const local = readSavedPracticeSession();
     const remote = await loadActiveCloudPractice();
     const remoteSaved =
       remote && remote.idx < remote.items.length
         ? cloudSessionFromSaved(remote)
         : null;
-    const saved = choosePracticeSession(local, remoteSaved);
+    const saved = choosePracticeSession(local, remoteSaved, {
+      remoteUpdatedAt: remote?.updatedAt,
+    });
     if (saved && remoteSaved && saved === remoteSaved && remote) {
       cloudPracticeSessionIdRef.current = remote.sessionId;
     }
@@ -635,7 +646,7 @@ export function usePracticeSession() {
     }
     const hydrated = hydratePracticeSession(saved, words);
     if (!hydrated) {
-      clearPracticeProgress();
+      await clearPracticeProgress();
       message.info('进度已失效，请重新开始');
       navigate('/today');
       return;
@@ -793,8 +804,13 @@ export function usePracticeSession() {
     nextDifficulty?: SentenceDifficulty,
     options?: { pool?: Word[]; skipReview?: boolean }
   ) {
+    try {
+      await ensureSyncBootstrap();
+    } catch {
+      /* 拉取失败仍允许开练 */
+    }
     // 只清本机：云端旧 active 由后面 createPracticeSession 一次性删掉，避免 abandon+create 重复
-    clearPracticeProgress({ cloud: false });
+    await clearPracticeProgress({ cloud: false });
     const s = nextScope ?? scope ?? initialScope;
     const d = nextDifficulty ?? difficulty ?? initialDifficulty;
     setScope(s);
@@ -913,17 +929,28 @@ export function usePracticeSession() {
     void startPractice(m, scope, difficulty, { pool, skipReview: true });
   }
 
-  async function exitPractice() {
+  function prepareExitPractice() {
+    if (exitingRef.current) return;
     exitingRef.current = true;
-    if (phase === 'asking' || phase === 'waiting' || phase === 'judging') {
+    const shouldSave =
+      phase === 'asking' || phase === 'waiting' || phase === 'judging';
+    if (shouldSave) {
       persist();
       const cloudId = cloudPracticeSessionIdRef.current;
-      await flushCloudSessionPatch();
-      if (cloudId) await flushCloudItemPatches(cloudId);
-      message.info('进度已保存，可随时继续');
+      void flushCloudSessionPatch({ keepalive: true });
+      if (cloudId) void flushCloudItemPatches(cloudId);
     }
     cancelSessionWork();
-    navigate('/today');
+  }
+
+  function exitPractice() {
+    const shouldSave =
+      phase === 'asking' || phase === 'waiting' || phase === 'judging';
+    prepareExitPractice();
+    navigate('/today', { replace: true });
+    if (shouldSave) {
+      message.info('进度已保存，可随时继续');
+    }
   }
 
   // When advancing, wait if next question not ready yet
@@ -1119,7 +1146,7 @@ export function usePracticeSession() {
     }
     if (idx + 1 >= total) {
       setPhase('done');
-      clearPracticeProgress({ completed: true });
+      void clearPracticeProgress({ completed: true });
       setLS('done-' + todayKey(), '1');
       const lastDay = getLS('last-day');
       const today = new Date().toDateString();
@@ -1421,6 +1448,7 @@ export function usePracticeSession() {
     requestStructureTip,
     next,
     exitPractice,
+    prepareExitPractice,
     regenerateCurrent,
     retryGenerate,
     toggleStarred,

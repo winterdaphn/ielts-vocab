@@ -128,7 +128,8 @@ export function readSavedPracticeSession(): SavedPracticeSession | null {
 /** Prefer forward progress for the same round; otherwise prefer the newer round. */
 export function choosePracticeSession(
   local: SavedPracticeSession | null,
-  remote: SavedPracticeSession | null
+  remote: SavedPracticeSession | null,
+  opts?: { remoteUpdatedAt?: number }
 ): SavedPracticeSession | null {
   const active = (saved: SavedPracticeSession | null) =>
     !!saved && saved.idx < saved.wordIds.length;
@@ -151,6 +152,9 @@ export function choosePracticeSession(
     if (localAnswered !== remoteAnswered) {
       return localAnswered > remoteAnswered ? local : remote;
     }
+    const remoteAt = opts?.remoteUpdatedAt ?? remote.savedAt ?? 0;
+    const localAt = local.savedAt ?? 0;
+    if (remoteAt !== localAt) return remoteAt > localAt ? remote : local;
   }
   return (local.savedAt || 0) >= (remote.savedAt || 0) ? local : remote;
 }
@@ -324,6 +328,21 @@ export function savePracticeSession(payload: {
   }
   if (!payload.sessionWords.length) return;
 
+  const prev = readSavedPracticeSession();
+  const wordIds = payload.sessionWords.map((w) => w.id);
+  const sameRound =
+    !!prev &&
+    parsePracticeMode(prev.mode) === parsePracticeMode(payload.mode) &&
+    parseStudyScope(prev.scope ?? 'mixed') === parseStudyScope(payload.scope ?? 'mixed') &&
+    parseSentenceDifficulty(prev.difficulty ?? 'medium') ===
+      parseSentenceDifficulty(payload.difficulty ?? 'medium') &&
+    prev.wordIds.length === wordIds.length &&
+    prev.wordIds.every((id, i) => id === wordIds[i]);
+  const progressed =
+    !sameRound ||
+    payload.idx > (prev?.idx ?? 0) ||
+    (payload.stats?.total ?? 0) > (prev?.stats?.total ?? 0);
+
   const examples: Record<string, WordExample> = {};
   payload.queue.forEach((q, i) => {
     const w = payload.sessionWords[i];
@@ -332,7 +351,7 @@ export function savePracticeSession(payload: {
 
   const data: SavedPracticeSession = {
     version: 1,
-    savedAt: Date.now(),
+    savedAt: progressed ? Date.now() : (prev?.savedAt ?? Date.now()),
     mode: payload.mode,
     scope: payload.scope || 'mixed',
     difficulty: payload.difficulty || 'medium',

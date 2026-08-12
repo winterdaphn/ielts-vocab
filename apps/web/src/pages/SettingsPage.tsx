@@ -523,6 +523,8 @@ function AccountSettings() {
     await dbClearForUser(username);
     setWords([]);
     clearCryptoCache();
+    const { resetSyncBootstrap } = await import('@/api/realtimeSync');
+    resetSyncBootstrap();
     clearAuth();
     message.success('已退出登录');
     navigate('/login');

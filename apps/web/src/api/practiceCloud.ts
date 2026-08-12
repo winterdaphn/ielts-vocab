@@ -185,19 +185,27 @@ export async function patchPracticeSession(
     idx?: number;
     stats?: { correct: number; total: number };
     uiState?: Record<string, unknown>;
+    clientUpdatedAt?: number;
   },
   opts?: { keepalive?: boolean }
-): Promise<{ sessionId: string; revision: number } | null> {
+): Promise<{ sessionId: string; revision: number; gone?: boolean } | null> {
+  const { clientUpdatedAt, ...rest } = patch;
   const resp = await fetch(
     getBase(settings) + '/api/practice/sessions/' + encodeURIComponent(sessionId),
     {
       method: 'PATCH',
       headers: headers(settings),
-      body: JSON.stringify({ ...patch, clientUpdatedAt: Date.now() }),
+      body: JSON.stringify({
+        ...rest,
+        clientUpdatedAt: clientUpdatedAt ?? Date.now(),
+      }),
       keepalive: !!opts?.keepalive,
     }
   );
   const data = await readJson(resp);
+  if (resp.status === 404) {
+    return { sessionId, revision: 0, gone: true };
+  }
   if (!resp.ok) return null;
   // 新：轻量 { sessionId, revision }；旧：整包 session（兼容过渡）
   const legacy = data.session as { sessionId?: string; revision?: number } | undefined;
@@ -295,5 +303,19 @@ export async function abandonPracticeSession(
   if (!resp.ok && resp.status !== 404) {
     const data = await readJson(resp);
     throw new PracticeCloudError(String(data.error || '放弃练习失败'), resp.status);
+  }
+}
+
+/** 删除当前用户所有 active 练习会话（meta 丢失时的兜底） */
+export async function deleteActivePracticeSessions(
+  settings: Settings
+): Promise<void> {
+  const resp = await fetch(getBase(settings) + '/api/practice/active', {
+    method: 'DELETE',
+    headers: headers(settings),
+  });
+  if (!resp.ok && resp.status !== 404) {
+    const data = await readJson(resp);
+    throw new PracticeCloudError(String(data.error || '删除练习会话失败'), resp.status);
   }
 }

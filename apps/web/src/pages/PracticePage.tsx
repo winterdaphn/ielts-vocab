@@ -56,7 +56,7 @@ function WordPracticePage() {
         total={s.total}
         mode={s.mode}
         error={s.genError}
-        onExit={s.exitPractice}
+        onBeforeExit={s.prepareExitPractice}
         onRetry={s.genError ? s.retryGenerate : undefined}
       />
     );
@@ -110,7 +110,7 @@ function WordPracticePage() {
         idx={s.idx}
         total={s.total}
         progressPct={s.progressPct}
-        onExit={s.exitPractice}
+        onBeforeExit={s.prepareExitPractice}
       />
 
       <div className="practice-card">

@@ -243,6 +243,20 @@ async function upsertSrsProgress(pool, userId, p) {
 
 /** Partial update of srs_progress; only keys present in `fields`. */
 async function patchSrsProgress(pool, userId, targetType, targetId, fields) {
+  const clientUpdatedAt = Number(fields.updatedAt ?? fields.updated_at ?? 0);
+
+  const existing = await pool.query(
+    `SELECT * FROM srs_progress
+     WHERE user_id = $1 AND target_type = $2 AND target_id = $3`,
+    [userId, targetType, targetId]
+  );
+  if (existing.rowCount > 0) {
+    const serverAt = new Date(existing.rows[0].updated_at).getTime();
+    if (clientUpdatedAt > 0 && clientUpdatedAt < serverAt) {
+      return rowToSrs(existing.rows[0]);
+    }
+  }
+
   const sets = [];
   const vals = [];
   let i = 1;
@@ -1892,6 +1906,11 @@ export async function buildApp(pool, { logger = false } = {}) {
     const sessionId = sess.rows[0].session_id;
     const full = await loadPracticeSession(pool, req.user.id, sessionId);
     return { ok: true, session: full };
+  });
+
+  app.delete('/api/practice/active', { preHandler: requireAuth }, async (req) => {
+    await deleteActivePracticeSessions(pool, req.user.id);
+    return { ok: true };
   });
 
   app.get('/api/practice/sessions/:sessionId', { preHandler: requireAuth }, async (req, reply) => {

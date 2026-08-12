@@ -796,7 +796,11 @@ input, textarea, select {
   align-items: center;
   gap: 12px;
   margin-bottom: 16px;
-  padding: 0 4px;
+  padding: max(4px, env(safe-area-inset-top, 0px)) 4px 4px;
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  background: var(--bg);
 }
 
 .practice-header .back-btn {
@@ -805,9 +809,25 @@ input, textarea, select {
   color: var(--text-light);
   cursor: pointer;
   font-size: 18px;
-  padding: 4px 8px;
-  font-family: inherit;
+  padding: 0;
+  min-width: 44px;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 1;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  text-decoration: none;
+  border-radius: 10px;
   line-height: 1;
+}
+
+.practice-header .back-btn:active {
+  color: var(--accent);
+  background: rgba(46, 107, 92, 0.08);
 }
 
 .practice-header .back-btn:hover {
