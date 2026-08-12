@@ -28,6 +28,7 @@ interface ChunksState {
     source: ChunkSource;
     exampleEn?: string;
     exampleZh?: string;
+    explanation?: string;
   }) => Promise<{ chunk: Chunk; existed: boolean }>;
   upsertChunk: (chunk: Chunk) => Promise<void>;
   updateChunk: (chunk: Chunk) => Promise<void>;
@@ -44,6 +45,7 @@ export const useChunksStore = create<ChunksState>(() => ({
     source,
     exampleEn,
     exampleZh,
+    explanation,
   }) => {
     const userId = useAuth.getState().username;
     if (!userId) throw new Error('not_logged_in');
@@ -67,6 +69,7 @@ export const useChunksStore = create<ChunksState>(() => ({
       source,
       exampleEn: exampleEn || '',
       exampleZh: exampleZh || '',
+      explanation: explanation || '',
       createdAt: now,
       updatedAt: now,
     };

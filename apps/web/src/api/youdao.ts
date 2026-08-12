@@ -352,3 +352,16 @@ export async function lookupYoudaoWord(
   }
   return result;
 }
+
+/** 查英文搭配/短语的中文释义（不做词形还原，适合语块添加） */
+export async function lookupYoudaoPhrase(
+  phrase: string,
+  settings: Settings
+): Promise<{ gloss: string }> {
+  const typed = phrase.trim().replace(/\s+/g, ' ');
+  if (!typed) throw new YoudaoError('请输入搭配');
+  const json = await fetchYoudaoJson(typed, settings);
+  const gloss = formatEcTranslation(json, 100);
+  if (!gloss) throw new YoudaoError(`有道未找到「${typed}」`);
+  return { gloss };
+}

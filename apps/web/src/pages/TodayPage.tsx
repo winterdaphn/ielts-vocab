@@ -7,25 +7,12 @@ import { isDue, isNew } from '@/utils/scheduler';
 import { useAuth } from '@/store/useAuth';
 import { getLS } from '@/utils/date';
 import { clearPracticeProgress } from '@/api/realtimeSync';
-import {
-  cloudSessionFromSaved,
-  loadActiveCloudPractice,
-  completeStaleCloudPractice,
-} from '@/api/practiceCloudSync';
+import { loadActiveCloudPractice } from '@/api/practiceCloudSync';
 import {
   getSavedPracticeSummary,
   readSavedPracticeSession,
-  choosePracticeSession,
-  isPracticeSessionFinished,
-  modeLabel,
-  scopeLabel,
-  difficultyLabel,
-  parsePracticeMode,
-  parseStudyScope,
-  parseSentenceDifficulty,
   type StudyScope,
   type SentenceDifficulty,
-  type PracticeSummary,
 } from '@/utils/practiceSession';
 import { countByScope } from '@/utils/practiceSelect';
 import { useChunkDueStats } from '@/store/useChunks';
@@ -55,12 +42,10 @@ export default function TodayPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const [savedTick, setSavedTick] = useState(0);
-  const [remoteSummary, setRemoteSummary] = useState<PracticeSummary | null>(null);
   const [scope, setScope] = useState<StudyScope>('mixed');
   const [difficulty, setDifficulty] = useState<SentenceDifficulty>('medium');
 
-  const localSaved = useMemo(() => getSavedPracticeSummary(), [savedTick, words.length]);
-  const saved = remoteSummary ?? localSaved;
+  const saved = useMemo(() => getSavedPracticeSummary(), [savedTick, words.length]);
   const scopeCounts = useMemo(() => countByScope(words), [words]);
   const chunkStats = useChunkDueStats();
   const frameStats = useFrameDueStats();
@@ -72,57 +57,13 @@ export default function TodayPage() {
     }
   }, [location.pathname, location.key]);
 
-  // 云端续做：只跟路由/登录走，不要依赖 savedTick（否则会 check+active 打两遍）
+  // 云端续做：拉取后 reconcile 到 localStorage，再刷新摘要
   useEffect(() => {
-    if (location.pathname !== '/today' || !settings.syncToken) {
-      setRemoteSummary(null);
-      return;
-    }
+    if (location.pathname !== '/today' || !settings.syncToken) return;
     let cancelled = false;
-    void (async () => {
-      // 直接拉 active 即可，不必先 check revision（多一次请求）
-      const remote = await loadActiveCloudPractice();
-      if (cancelled) return;
-      if (!remote) {
-        setRemoteSummary(null);
-        return;
-      }
-      const snap = cloudSessionFromSaved(remote);
-      if (isPracticeSessionFinished(snap)) {
-        setRemoteSummary(null);
-        void completeStaleCloudPractice(remote.sessionId);
-        return;
-      }
-      const preferred = choosePracticeSession(readSavedPracticeSession(), snap, {
-        remoteUpdatedAt: remote.updatedAt,
-      });
-      if (preferred !== snap) {
-        setRemoteSummary(null);
-        return;
-      }
-      const total = snap.wordIds.length;
-      const idx = Math.min(snap.idx, total);
-      const mode = parsePracticeMode(snap.mode);
-      const sc = parseStudyScope(snap.scope);
-      const diff = parseSentenceDifficulty(snap.difficulty);
-      setRemoteSummary({
-        mode,
-        modeLabel: modeLabel(mode),
-        scope: sc,
-        scopeLabel: scopeLabel(sc),
-        difficulty: diff,
-        difficultyLabel: difficultyLabel(diff),
-        current: idx + 1,
-        total,
-        when: new Date(remote.updatedAt).toLocaleString('zh-CN', {
-          month: 'numeric',
-          day: 'numeric',
-          hour: '2-digit',
-          minute: '2-digit',
-        }),
-        answered: snap.stats?.total ?? 0,
-      });
-    })();
+    void loadActiveCloudPractice().then(() => {
+      if (!cancelled) setSavedTick((n) => n + 1);
+    });
     return () => {
       cancelled = true;
     };

@@ -26,7 +26,11 @@ import {
   type CloudPracticeSession,
 } from '@/api/practiceCloud';
 import type { PracticeMode, SentenceDifficulty, StudyScope } from '@/utils/practiceSession';
-import { isPracticeSessionFinished } from '@/utils/practiceSession';
+import {
+  isPracticeSessionFinished,
+  readSavedPracticeSession,
+  reconcilePracticeSession,
+} from '@/utils/practiceSession';
 import { getLS, setLS, delLS } from '@/utils/date';
 
 /** localStorage 键：记住当前云端会话 id + revision，用来做续做/冲突检测 */
@@ -460,6 +464,11 @@ export async function loadActiveCloudPractice(): Promise<CloudPracticeSession | 
     return null;
   }
   bindCloudSession(remote);
+  const remoteSaved = cloudSessionFromSaved(remote);
+  const localRaw = readSavedPracticeSession();
+  const local =
+    localRaw && !isPracticeSessionFinished(localRaw) ? localRaw : null;
+  reconcilePracticeSession(local, remoteSaved, { remoteUpdatedAt: remote.updatedAt });
   return remote;
 }
 

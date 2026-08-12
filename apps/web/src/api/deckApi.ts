@@ -50,6 +50,7 @@ function parseChunk(raw: unknown): Chunk | null {
     source: (o.source as Chunk['source']) || 'manual',
     exampleEn: String(o.exampleEn || o.example_en || ''),
     exampleZh: String(o.exampleZh || o.example_zh || ''),
+    explanation: String(o.explanation || ''),
     createdAt: Number(o.createdAt || Date.now()),
     updatedAt: Number(o.updatedAt || Date.now()),
   };
@@ -91,6 +92,7 @@ export function chunkToApiBody(c: Chunk): Record<string, unknown> {
     source: c.source,
     exampleEn: c.exampleEn || '',
     exampleZh: c.exampleZh || '',
+    explanation: c.explanation || '',
     createdAt: c.createdAt,
     updatedAt: c.updatedAt || Date.now(),
   };

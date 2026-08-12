@@ -159,6 +159,52 @@ export function choosePracticeSession(
   return (local.savedAt || 0) >= (remote.savedAt || 0) ? local : remote;
 }
 
+function sessionsSameProgress(
+  a: SavedPracticeSession,
+  b: SavedPracticeSession
+): boolean {
+  return (
+    a.idx === b.idx &&
+    (a.stats?.correct ?? 0) === (b.stats?.correct ?? 0) &&
+    (a.stats?.total ?? 0) === (b.stats?.total ?? 0) &&
+    a.wordIds.length === b.wordIds.length &&
+    a.wordIds.every((id, i) => id === b.wordIds[i]) &&
+    parsePracticeMode(a.mode) === parsePracticeMode(b.mode) &&
+    parseStudyScope(a.scope) === parseStudyScope(b.scope) &&
+    parseSentenceDifficulty(a.difficulty) === parseSentenceDifficulty(b.difficulty)
+  );
+}
+
+/** 写入本机 practice-session（localStorage） */
+export function writePracticeSessionLocal(saved: SavedPracticeSession): void {
+  try {
+    setLS('practice-session', JSON.stringify(saved));
+  } catch {
+    /* quota / private mode */
+  }
+}
+
+/**
+ * 合并本地/云端练习进度，并把胜出方写回本机。
+ * 否则每次进首页都会先读旧 localStorage 再跳远程。
+ */
+export function reconcilePracticeSession(
+  local: SavedPracticeSession | null,
+  remote: SavedPracticeSession | null,
+  opts?: { remoteUpdatedAt?: number }
+): SavedPracticeSession | null {
+  const chosen = choosePracticeSession(local, remote, opts);
+  if (!chosen) return null;
+
+  if (!local || !sessionsSameProgress(local, chosen)) {
+    writePracticeSessionLocal({
+      ...chosen,
+      examples: { ...(local?.examples || {}), ...(chosen.examples || {}) },
+    });
+  }
+  return chosen;
+}
+
 /** 题已全部作答或 idx 已越界 → 不应再展示「继续练习」 */
 export function isPracticeSessionFinished(
   snap: Pick<SavedPracticeSession, 'wordIds' | 'idx' | 'stats'>
@@ -170,14 +216,15 @@ export function isPracticeSessionFinished(
   return false;
 }
 
-export function getSavedPracticeSummary(): PracticeSummary | null {
-  const saved = readSavedPracticeSession();
-  if (!saved) return null;
-  if (isPracticeSessionFinished(saved)) return null;
+export function savedSessionToSummary(
+  saved: SavedPracticeSession,
+  opts?: { whenAt?: number }
+): PracticeSummary {
   const total = saved.wordIds.length;
   const idx = Math.min(saved.idx || 0, total);
   const scope = parseStudyScope(saved.scope);
   const difficulty = parseSentenceDifficulty(saved.difficulty);
+  const whenAt = opts?.whenAt ?? saved.savedAt ?? 0;
   return {
     mode: parsePracticeMode(saved.mode),
     modeLabel: modeLabel(parsePracticeMode(saved.mode)),
@@ -187,8 +234,8 @@ export function getSavedPracticeSummary(): PracticeSummary | null {
     difficultyLabel: difficultyLabel(difficulty),
     current: idx + 1,
     total,
-    when: saved.savedAt
-      ? new Date(saved.savedAt).toLocaleString('zh-CN', {
+    when: whenAt
+      ? new Date(whenAt).toLocaleString('zh-CN', {
           month: 'numeric',
           day: 'numeric',
           hour: '2-digit',
@@ -197,6 +244,13 @@ export function getSavedPracticeSummary(): PracticeSummary | null {
       : '',
     answered: saved.stats?.total ?? 0,
   };
+}
+
+export function getSavedPracticeSummary(): PracticeSummary | null {
+  const saved = readSavedPracticeSession();
+  if (!saved) return null;
+  if (isPracticeSessionFinished(saved)) return null;
+  return savedSessionToSummary(saved);
 }
 
 export function clearPracticeSession(): void {

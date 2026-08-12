@@ -39,6 +39,8 @@ import {
   readSavedPracticeSession,
   savePracticeSession,
   choosePracticeSession,
+  reconcilePracticeSession,
+  isPracticeSessionFinished,
   parsePracticeMode,
   parseStudyScope,
   parseSentenceDifficulty,
@@ -631,13 +633,15 @@ export function usePracticeSession() {
     } catch {
       /* 拉取失败仍尝试用本机恢复 */
     }
-    const local = readSavedPracticeSession();
+    const localRaw = readSavedPracticeSession();
+    const activeLocal =
+      localRaw && !isPracticeSessionFinished(localRaw) ? localRaw : null;
     const remote = await loadActiveCloudPractice();
     const remoteSaved =
       remote && remote.idx < remote.items.length
         ? cloudSessionFromSaved(remote)
         : null;
-    const saved = choosePracticeSession(local, remoteSaved, {
+    const saved = reconcilePracticeSession(activeLocal, remoteSaved, {
       remoteUpdatedAt: remote?.updatedAt,
     });
     if (saved && remoteSaved && saved === remoteSaved && remote) {
@@ -675,7 +679,13 @@ export function usePracticeSession() {
       saved.wordIds.length === remoteSaved.wordIds.length &&
       saved.wordIds.every((id, i) => id === remoteSaved.wordIds[i]);
     let createdFreshCloud = false;
-    if (saved === local && (!remote || !sameRemoteRound)) {
+    const localWon =
+      !!activeLocal &&
+      !!saved &&
+      choosePracticeSession(activeLocal, remoteSaved, {
+        remoteUpdatedAt: remote?.updatedAt,
+      }) === activeLocal;
+    if (localWon && (!remote || !sameRemoteRound)) {
       const wasNewByWordId: Record<string, boolean> = {};
       for (const word of hydrated.sessionWords) {
         wasNewByWordId[word.id] = wasNewRef.current.get(word.id) ?? isNew(word);

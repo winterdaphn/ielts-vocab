@@ -633,6 +633,10 @@ export async function ensureTables(pool) {
       ON chunks (user_id, updated_at);
   `);
   await pool.query(`
+    ALTER TABLE chunks
+    ADD COLUMN IF NOT EXISTS explanation TEXT NOT NULL DEFAULT '';
+  `);
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS frames (
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       frame_id TEXT NOT NULL,
@@ -679,6 +683,7 @@ function rowToChunk(row) {
     source: row.source || 'manual',
     exampleEn: row.example_en || '',
     exampleZh: row.example_zh || '',
+    explanation: row.explanation || '',
     createdAt: row.created_at ? new Date(row.created_at).getTime() : Date.now(),
     updatedAt: row.updated_at ? new Date(row.updated_at).getTime() : Date.now(),
   };
@@ -701,6 +706,7 @@ function normalizeChunkBody(body, chunkIdParam) {
     source: String(body.source || 'manual'),
     exampleEn: String(body.exampleEn || body.example_en || ''),
     exampleZh: String(body.exampleZh || body.example_zh || ''),
+    explanation: String(body.explanation || ''),
     createdAt: body.createdAt ?? body.created_at ?? Date.now(),
     updatedAt: body.updatedAt ?? body.updated_at ?? Date.now(),
   };
@@ -714,9 +720,9 @@ async function upsertChunk(pool, userId, c) {
   const result = await pool.query(
     `INSERT INTO chunks (
       user_id, chunk_id, phrase, phrase_key, gloss, kind, tags,
-      anchor_word_id, source, example_en, example_zh, created_at, updated_at
+      anchor_word_id, source, example_en, example_zh, explanation, created_at, updated_at
     ) VALUES (
-      $1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11,$12,$13
+      $1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11,$12,$13,$14
     )
     ON CONFLICT (user_id, chunk_id) DO UPDATE SET
       phrase = EXCLUDED.phrase,
@@ -728,6 +734,7 @@ async function upsertChunk(pool, userId, c) {
       source = EXCLUDED.source,
       example_en = EXCLUDED.example_en,
       example_zh = EXCLUDED.example_zh,
+      explanation = EXCLUDED.explanation,
       updated_at = EXCLUDED.updated_at
     RETURNING *`,
     [
@@ -742,6 +749,7 @@ async function upsertChunk(pool, userId, c) {
       c.source,
       c.exampleEn,
       c.exampleZh,
+      c.explanation || '',
       createdAt,
       updatedAt,
     ]
@@ -1547,6 +1555,9 @@ export async function buildApp(pool, { logger = false } = {}) {
     }
     if (body.exampleZh !== undefined || body.example_zh !== undefined) {
       add('example_zh', String(body.exampleZh ?? body.example_zh ?? ''));
+    }
+    if (body.explanation !== undefined) {
+      add('explanation', String(body.explanation || ''));
     }
     if (sets.length === 0) return reply.code(400).send({ error: 'empty_patch' });
     add('updated_at', new Date());

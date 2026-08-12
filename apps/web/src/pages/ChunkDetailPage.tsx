@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Button, Input, App } from 'antd';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useChunksStore, useChunksWithProgress } from '@/store/useChunks';
+import ChunkExplanationView from '@/components/ChunkExplanationView';
 import {
   formatNextReview,
   ladderProgressLabel,
@@ -22,8 +23,7 @@ export default function ChunkDetailPage() {
   const chunk = useMemo(() => items.find((c) => c.id === id), [items, id]);
   const [editing, setEditing] = useState(false);
   const [gloss, setGloss] = useState('');
-  const [exampleEn, setExampleEn] = useState('');
-  const [exampleZh, setExampleZh] = useState('');
+  const [explanation, setExplanation] = useState('');
 
   if (!chunk) {
     return (
@@ -45,8 +45,7 @@ export default function ChunkDetailPage() {
 
   function startEdit() {
     setGloss(chunk!.gloss);
-    setExampleEn(chunk!.exampleEn || '');
-    setExampleZh(chunk!.exampleZh || '');
+    setExplanation(chunk!.explanation || '');
     setEditing(true);
   }
 
@@ -54,8 +53,7 @@ export default function ChunkDetailPage() {
     await updateChunk({
       ...chunk!,
       gloss: gloss.trim(),
-      exampleEn: exampleEn.trim(),
-      exampleZh: exampleZh.trim(),
+      explanation: explanation.trim(),
     });
     setEditing(false);
     message.success('已保存');
@@ -76,17 +74,12 @@ export default function ChunkDetailPage() {
       <div className="app-card" style={{ marginTop: 12 }}>
         {editing ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <Input value={gloss} onChange={(e) => setGloss(e.target.value)} placeholder="释义" />
+            <Input value={gloss} onChange={(e) => setGloss(e.target.value)} placeholder="列表用短释义" />
             <Input.TextArea
-              rows={2}
-              value={exampleEn}
-              onChange={(e) => setExampleEn(e.target.value)}
-              placeholder="例句英文"
-            />
-            <Input
-              value={exampleZh}
-              onChange={(e) => setExampleZh(e.target.value)}
-              placeholder="例句中文"
+              rows={10}
+              value={explanation}
+              onChange={(e) => setExplanation(e.target.value)}
+              placeholder="AI 讲解（Markdown）"
             />
             <div style={{ display: 'flex', gap: 8 }}>
               <Button type="primary" onClick={() => void saveEdit()}>
@@ -97,18 +90,24 @@ export default function ChunkDetailPage() {
           </div>
         ) : (
           <>
-            <p style={{ margin: '0 0 8px', fontSize: 16 }}>{chunk.gloss || '（无释义）'}</p>
-            {chunk.exampleEn ? (
-              <p style={{ margin: '0 0 4px' }}>
-                <i>{chunk.exampleEn}</i>
-                {chunk.exampleZh ? (
-                  <span className="text-light"> {chunk.exampleZh}</span>
-                ) : null}
-              </p>
+            {chunk.explanation?.trim() ? (
+              <ChunkExplanationView text={chunk.explanation} />
             ) : (
-              <p className="text-light" style={{ fontSize: 13 }}>
-                暂无例句
-              </p>
+              <>
+                <p style={{ margin: '0 0 8px', fontSize: 16 }}>{chunk.gloss || '（无释义）'}</p>
+                {chunk.exampleEn ? (
+                  <p style={{ margin: '0 0 4px' }}>
+                    <i>{chunk.exampleEn}</i>
+                    {chunk.exampleZh ? (
+                      <span className="text-light"> {chunk.exampleZh}</span>
+                    ) : null}
+                  </p>
+                ) : (
+                  <p className="text-light" style={{ fontSize: 13 }}>
+                    暂无例句
+                  </p>
+                )}
+              </>
             )}
             {chunk.anchorWordId ? (
               <p style={{ marginTop: 8 }}>

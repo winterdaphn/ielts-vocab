@@ -16,6 +16,7 @@ export type { SynonymDiffItem, SynonymDiffResult };
 import { PROVIDERS } from '@/config/providers';
 import { areInflectionVariants, findInflectedFormInSentence, resolveLemma, isPlausibleLemmaReduction } from '@/utils/inflections';
 import { categoryLabel, normalizeCategories } from '@/config/categories';
+import { formatChunkExplanation } from '@/utils/chunkExplanation';
 
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
@@ -1333,6 +1334,87 @@ Rules:
   } catch {
     return [];
   }
+}
+
+export interface ChunkDetails {
+  gloss: string;
+  exampleEn: string;
+  exampleZh: string;
+  explanation: string;
+}
+
+/** 为搭配本生成完整 AI 讲解（Markdown）+ 列表用字段 */
+export async function generateChunkExplanation(
+  phrase: string,
+  settings: Settings,
+  opts?: { hintGloss?: string }
+): Promise<ChunkDetails | null> {
+  if (!phrase.trim() || !settings.apiKey) return null;
+  const hint = (opts?.hintGloss || '').trim().slice(0, 80);
+  const prompt = `你是雅思英语教练。为学习者详细讲解一个英文固定搭配/语块。
+
+搭配：「${phrase.trim()}」
+${hint ? `中文释义参考（可采纳）：${hint}` : ''}
+
+Return JSON ONLY:
+{
+  "summary": "开头 1–2 句：说明含义与用法（用「意为…，用于…，常含…」风格，中文）",
+  "coreMeanings": "核心释义，顿号或逗号分隔",
+  "phoneticUk": "英式音标，如 [tɜːnd aʊt tu bi]",
+  "phoneticUs": "美式音标",
+  "grammar": "语法结构说明",
+  "exampleEn": "典型例句英文，必须包含该搭配",
+  "exampleZh": "例句中文",
+  "notes": "补充 1–2 段：用法、时态、语域等",
+  "gloss": "列表卡片短释义（≤16字）"
+}
+
+Rules:
+- 面向中国雅思学习者；中文讲解，例句英文。
+- exampleEn 12–22 词；音标不确定可留空字符串。`;
+
+  const text = await callLLM([{ role: 'user', content: prompt }], settings, {
+    temperature: 0.4,
+    jsonMode: true,
+    maxTokens: 1200,
+    modelTier: 'mid',
+  });
+
+  try {
+    const parsed = parseJsonLoose<Record<string, unknown>>(text);
+    const exampleEn = String(parsed.exampleEn || '').trim();
+    const exampleZh = String(parsed.exampleZh || '').trim();
+    const coreMeanings = String(parsed.coreMeanings || '').trim();
+    const gloss = String(parsed.gloss || hint || coreMeanings || '')
+      .trim()
+      .slice(0, 40);
+    if (!exampleEn && !coreMeanings && !gloss) return null;
+
+    const explanation = formatChunkExplanation(phrase.trim(), {
+      summary: String(parsed.summary || '').trim(),
+      coreMeanings: coreMeanings || gloss,
+      phoneticUk: String(parsed.phoneticUk || '').trim() || undefined,
+      phoneticUs: String(parsed.phoneticUs || '').trim() || undefined,
+      grammar: String(parsed.grammar || '').trim() || undefined,
+      exampleEn,
+      exampleZh,
+      notes: String(parsed.notes || '').trim() || undefined,
+      gloss,
+    });
+
+    return { gloss, exampleEn, exampleZh, explanation };
+  } catch {
+    return null;
+  }
+}
+
+/** @deprecated 使用 generateChunkExplanation */
+export async function generateChunkDetails(
+  phrase: string,
+  settings: Settings,
+  opts?: { hintGloss?: string }
+): Promise<ChunkDetails | null> {
+  return generateChunkExplanation(phrase, settings, opts);
 }
 
 /** 词根词缀 / 联想助记（中文）— mirrors example.html generateMnemonicTip */

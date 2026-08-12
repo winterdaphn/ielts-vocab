@@ -14,6 +14,8 @@ export interface Chunk {
   source: ChunkSource;
   exampleEn?: string;
   exampleZh?: string;
+  /** AI / 手工整理的 Markdown 风格讲解（详情页主内容） */
+  explanation?: string;
   createdAt: number;
   updatedAt?: number;
 }

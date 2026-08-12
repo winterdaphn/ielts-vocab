@@ -2,6 +2,11 @@ import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { Button, Card, Input, Segmented, Select, App } from 'antd';
 import { useSearchParams } from 'react-router-dom';
 import AddWordPanel from '@/components/AddWordPanel';
+import { useSettings } from '@/store/useSettings';
+import { generateChunkExplanation } from '@/api/llm';
+import { lookupYoudaoPhrase, YoudaoError, canUseYoudao } from '@/api/youdao';
+import ChunkExplanationView from '@/components/ChunkExplanationView';
+import { formatYoudaoExplanation } from '@/utils/chunkExplanation';
 import { useChunksStore } from '@/store/useChunks';
 import { useFramesStore, FRAME_PACK } from '@/store/useFrames';
 import { normalizePhraseKey } from '@/types/chunk';
@@ -74,6 +79,7 @@ export default function AddContentPanel() {
 
 function AddChunkPanel() {
   const { message } = App.useApp();
+  const settings = useSettings();
   const addFromCollocation = useChunksStore((s) => s.addFromCollocation);
   const findByPhraseKey = useChunksStore((s) => s.findByPhraseKey);
 
@@ -81,8 +87,21 @@ function AddChunkPanel() {
   const [gloss, setGloss] = useState('');
   const [exampleEn, setExampleEn] = useState('');
   const [exampleZh, setExampleZh] = useState('');
+  const [explanation, setExplanation] = useState('');
   const [alreadyExists, setAlreadyExists] = useState<boolean | null>(null);
   const [saving, setSaving] = useState(false);
+  const [generating, setGenerating] = useState(false);
+
+  const canLookup = canUseYoudao(settings);
+  const canAi = !!settings.apiKey;
+  const canGenerate = canLookup || canAi;
+  const generateLabel = canAi
+    ? canLookup
+      ? '有道 + AI 解释'
+      : 'AI 解释'
+    : canLookup
+      ? '有道查释义'
+      : '无法填充';
 
   const hasPreview = !!phrase.trim();
 
@@ -106,7 +125,72 @@ function AddChunkPanel() {
     setGloss('');
     setExampleEn('');
     setExampleZh('');
+    setExplanation('');
     setAlreadyExists(null);
+  }
+
+  async function handleGenerate() {
+    if (!phrase.trim()) {
+      message.warning('请先输入英文搭配');
+      return;
+    }
+    if (!canGenerate) {
+      message.error('需要有道代理（登录同源 /api）或配置 AI API Key');
+      return;
+    }
+    setGenerating(true);
+    try {
+      let glossHint = gloss.trim();
+      let fromYoudao = false;
+
+      if (canLookup) {
+        try {
+          const yd = await lookupYoudaoPhrase(phrase.trim(), settings);
+          if (yd.gloss) {
+            glossHint = yd.gloss;
+            setGloss(yd.gloss);
+            fromYoudao = true;
+          }
+        } catch {
+          /* 有道无结果时继续走 AI */
+        }
+      }
+
+      if (canAi) {
+        const details = await generateChunkExplanation(phrase.trim(), settings, {
+          hintGloss: glossHint,
+        });
+        if (details) {
+          setGloss(details.gloss);
+          setExampleEn(details.exampleEn);
+          setExampleZh(details.exampleZh);
+          setExplanation(details.explanation);
+          message.success(fromYoudao ? '已用有道 + AI 生成讲解' : '已用 AI 生成讲解');
+          return;
+        }
+        if (!fromYoudao && !glossHint) {
+          message.warning('AI 未返回有效内容，请手动填写');
+          return;
+        }
+      }
+
+      if (fromYoudao && glossHint) {
+        setExplanation(formatYoudaoExplanation(phrase.trim(), glossHint));
+        message.success(canAi ? '有道已有释义，AI 生成失败' : '已用有道填充释义');
+      } else {
+        message.warning('未查到内容，请手动填写');
+      }
+    } catch (e) {
+      const msg =
+        e instanceof YoudaoError
+          ? e.message
+          : e instanceof Error
+            ? e.message
+            : '未知错误';
+      message.error('生成失败：' + msg);
+    } finally {
+      setGenerating(false);
+    }
   }
 
   async function handleSubmit() {
@@ -122,6 +206,7 @@ function AddChunkPanel() {
         source: 'manual',
         exampleEn: exampleEn.trim(),
         exampleZh: exampleZh.trim(),
+        explanation: explanation.trim(),
       });
       message.success(existed ? '已在搭配本' : '已加入搭配本');
       if (!existed) clearAll();
@@ -139,61 +224,48 @@ function AddChunkPanel() {
         <Input
           value={phrase}
           onChange={(e) => setPhrase(e.target.value)}
+          onPressEnter={() => phrase.trim() && canGenerate && void handleGenerate()}
           placeholder="例如: take into account / play a role in"
           size="large"
           style={{ fontFamily: 'Georgia, serif' }}
         />
-        <label style={{ ...fieldLabelStyle, marginTop: 12 }}>中文释义（可选）</label>
-        <Input
-          value={gloss}
-          onChange={(e) => setGloss(e.target.value)}
-          placeholder="简要中文意思"
-        />
-        <label style={{ ...fieldLabelStyle, marginTop: 12 }}>例句（可选）</label>
-        <Input.TextArea
-          value={exampleEn}
-          onChange={(e) => setExampleEn(e.target.value)}
-          placeholder="英文例句"
-          autoSize={{ minRows: 2, maxRows: 4 }}
-        />
-        <Input.TextArea
-          className="mt-2"
-          value={exampleZh}
-          onChange={(e) => setExampleZh(e.target.value)}
-          placeholder="例句中文（可选）"
-          autoSize={{ minRows: 2, maxRows: 4 }}
-        />
-        <div className="flex-row mt-2" style={{ justifyContent: 'flex-end' }}>
+        <div className="flex-row mt-2" style={{ justifyContent: 'flex-end', gap: 8 }}>
           <Button onClick={clearAll}>清空</Button>
+          <Button
+            type="primary"
+            loading={generating}
+            disabled={!canGenerate}
+            onClick={() => void handleGenerate()}
+          >
+            {generateLabel}
+          </Button>
         </div>
+        {(explanation.trim() || gloss.trim() || hasPreview) && (
+          <>
+            <label style={{ ...fieldLabelStyle, marginTop: 12 }}>AI 讲解（可编辑）</label>
+            <Input.TextArea
+              value={explanation}
+              onChange={(e) => setExplanation(e.target.value)}
+              placeholder="点上方按钮生成，或直接粘贴/编辑 Markdown 风格讲解"
+              autoSize={{ minRows: 6, maxRows: 16 }}
+            />
+          </>
+        )}
       </div>
 
       {hasPreview && (
         <div className="app-card" style={{ marginBottom: 12 }}>
           <h3 style={{ marginBottom: 12, fontSize: 14 }}>预览</h3>
-          <div style={{ fontFamily: 'Georgia, serif', fontSize: 18, marginBottom: 8 }}>
+          <div style={{ fontFamily: 'Georgia, serif', fontSize: 18, marginBottom: 12 }}>
             {phrase.trim()}
           </div>
-          {gloss.trim() ? (
-            <div style={{ fontSize: 14, color: 'var(--text)' }}>{gloss.trim()}</div>
+          {explanation.trim() ? (
+            <ChunkExplanationView text={explanation} />
+          ) : gloss.trim() ? (
+            <div style={{ fontSize: 14 }}>{gloss.trim()}</div>
           ) : (
             <div className="text-light" style={{ fontSize: 13 }}>
-              未填释义
-            </div>
-          )}
-          {exampleEn.trim() && (
-            <div className="mt-2" style={{ fontSize: 13, lineHeight: 1.55 }}>
-              <span className="text-light" style={{ fontSize: 12 }}>
-                例句
-              </span>
-              <br />
-              {exampleEn.trim()}
-              {exampleZh.trim() ? (
-                <>
-                  <br />
-                  <span className="text-light">{exampleZh.trim()}</span>
-                </>
-              ) : null}
+              点「{generateLabel}」生成讲解，或直接保存短语
             </div>
           )}
           {alreadyExists && (
@@ -212,6 +284,8 @@ function AddChunkPanel() {
       <div className="app-card" style={{ marginBottom: 12 }}>
         <h3 style={{ fontSize: 14, marginBottom: 8 }}>提示</h3>
         <ul style={hintListStyle}>
+          <li>输入搭配后点「AI 解释」，会生成核心释义、发音、语法、例句等完整讲解</li>
+          <li>讲解以 Markdown 保存，详情页直接展示；列表仍用短释义</li>
           <li>也可在词详情页的词典搭配旁点「加入搭配本」</li>
           <li>相同英文搭配（忽略大小写与空格）只会保留一条</li>
         </ul>
