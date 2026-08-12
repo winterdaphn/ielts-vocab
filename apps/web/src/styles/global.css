@@ -857,6 +857,20 @@ input, textarea, select {
   text-align: right;
 }
 
+.practice-next-kbd {
+  margin-left: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  opacity: 0.72;
+  letter-spacing: 0.02em;
+}
+
+@media (max-width: 480px) {
+  .practice-next-kbd {
+    display: none;
+  }
+}
+
 .practice-star-btn {
   display: inline-flex;
   align-items: center;

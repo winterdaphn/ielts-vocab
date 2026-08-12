@@ -182,6 +182,8 @@ export function usePracticeSession() {
   const total = sessionWords.length;
   const progressPct = Math.min(100, Math.round((idx / Math.max(total, 1)) * 100));
   const canGoNext = mode === 'choice' ? showAnswer : !!judgeResult;
+  const nextRef = useRef<() => void>(() => {});
+  const prevPhaseRef = useRef<Phase>(phase);
   const remainingCount =
     scope === 'new'
       ? selectNewWords(words).length
@@ -341,9 +343,11 @@ export function usePracticeSession() {
   useEffect(() => {
     if (phase === 'asking' || phase === 'waiting' || phase === 'judging') {
       persist({ syncCloud: false });
-    } else if (phase === 'done') {
+    } else if (phase === 'done' && prevPhaseRef.current !== 'done') {
+      // 仅进入 done 时收尾一次；勿在 next() 里重复 complete
       void clearPracticeProgress({ completed: true });
     }
+    prevPhaseRef.current = phase;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase, idx, queue, showAnswer, hintShown, translateHintLevel, translateHints, picked, judgeResult, stats]);
 
@@ -1146,7 +1150,6 @@ export function usePracticeSession() {
     }
     if (idx + 1 >= total) {
       setPhase('done');
-      void clearPracticeProgress({ completed: true });
       setLS('done-' + todayKey(), '1');
       const lastDay = getLS('last-day');
       const today = new Date().toDateString();
@@ -1176,6 +1179,35 @@ export function usePracticeSession() {
       kickPrefetch(sessionIdRef.current, sessionWords, mode, idx + 1);
     }
   }
+
+  nextRef.current = () => {
+    void next();
+  };
+
+  // 揭晓/判题结果页：Enter → 下一题（对齐 example.html feedback 阶段）
+  useEffect(() => {
+    if (phase !== 'asking' || !canGoNext || regenerating) return;
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.isComposing || e.repeat) return;
+      if (e.key !== 'Enter') return;
+
+      const el = e.target as HTMLElement | null;
+      if (el?.isContentEditable) return;
+      if (el) {
+        const tag = el.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA') {
+          if (e.shiftKey) return;
+          e.preventDefault();
+        }
+      }
+
+      nextRef.current();
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [phase, canGoNext, regenerating, idx]);
 
   async function requestStructureTip() {
     if (!current) return;

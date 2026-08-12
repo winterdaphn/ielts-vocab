@@ -277,8 +277,10 @@ function WordPracticePage() {
             disabled={s.regenerating}
             style={{ marginTop: 16 }}
             icon={<RightOutlined />}
+            title="Enter"
           >
             {s.idx + 1 >= s.total ? '完成' : '下一题 →'}
+            <span className="practice-next-kbd">Enter</span>
           </Button>
         )}
       </div>

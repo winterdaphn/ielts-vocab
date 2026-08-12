@@ -365,21 +365,33 @@ export async function flushCloudItemPatches(sessionId?: string): Promise<void> {
 }
 
 /** 本轮练完：先 flush，再删云端会话；仅删除成功后才清 meta */
+let endCloudInFlight: Promise<void> | null = null;
+
 export async function endCloudPracticeSession(): Promise<void> {
-  const meta = readCloudMeta();
-  if (!meta?.sessionId) {
-    await purgeActiveCloudPractice();
-    return;
+  if (endCloudInFlight) return endCloudInFlight;
+
+  endCloudInFlight = (async () => {
+    const meta = readCloudMeta();
+    if (!meta?.sessionId) {
+      await purgeActiveCloudPractice();
+      return;
+    }
+    await flushCloudSessionPatch();
+    await flushCloudItemPatches(meta.sessionId);
+    const s = settings();
+    if (s.syncToken) {
+      await completePracticeSession(s, meta.sessionId);
+      console.info('[practice-cloud] session completed', meta.sessionId);
+    }
+    writeCloudMeta(null);
+    lastSessionPatchKey = null;
+  })();
+
+  try {
+    await endCloudInFlight;
+  } finally {
+    endCloudInFlight = null;
   }
-  await flushCloudSessionPatch();
-  await flushCloudItemPatches(meta.sessionId);
-  const s = settings();
-  if (s.syncToken) {
-    await completePracticeSession(s, meta.sessionId);
-    console.info('[practice-cloud] session completed', meta.sessionId);
-  }
-  writeCloudMeta(null);
-  lastSessionPatchKey = null;
 }
 
 /** 放弃本轮：先 flush，再删云端会话；仅删除成功后才清 meta */
