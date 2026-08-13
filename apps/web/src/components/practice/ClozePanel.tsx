@@ -35,6 +35,7 @@ interface Props {
 
 function ClozeChineseMeaning({ zh, word }: { zh: string; word: Word }) {
   const { text } = resolveClozeChinese(zh, word);
+  if (!text) return null;
   return (
     <div className="chinese-sentence" style={{ marginBottom: 12 }}>
       <div className="text-light" style={{ fontSize: 12, marginBottom: 4 }}>

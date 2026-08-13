@@ -1687,9 +1687,8 @@ ${
   mode === 'translate'
     ? `- translateChinese MUST be fully Chinese (no English/Latin words; do not leave the target word in Chinese)
 - translateReference MUST contain the exact target word (or a common inflection) as a standalone word`
-    : `- clozeEnglish MUST contain the exact target word (or a common inflection) as a standalone word — write the REAL WORD, never replace it with _ / ____ / _______ / [blank]
-- clozeChinese MUST be a full Chinese translation (no English/Latin words; do not leave the target word in Chinese)
-- clozeChinese MUST translate the blank/target word into Chinese naturally — never use _ / ____ blanks, and do not wrap the Chinese gloss in corner brackets`
+    : `- clozeEnglish MUST contain the exact target word (or a common inflection) — never _ / ____ / [blank]
+- clozeChinese MUST be a full Chinese translation of the whole sentence (no English, no _ blanks; not just a dictionary gloss like "进化 .")`
 }`;
 }
 

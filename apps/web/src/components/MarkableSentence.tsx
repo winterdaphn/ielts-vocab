@@ -5,7 +5,7 @@ import { useUserWords, useWordsStore, makeNewWord } from '@/store/useWords';
 import { useSettings } from '@/store/useSettings';
 import { areInflectionVariants, resolveLemma, isPlausibleLemmaReduction } from '@/utils/inflections';
 import { isMarkableToken, normalizeMarkWord } from '@/utils/markWords';
-import { resolveLemmaWithAI, suggestCategoriesWithAI, generateRelatedWords } from '@/api/llm';
+import { resolveLemmaWithAI, suggestCategoriesWithAI, generateRelatedWords, getClozeExpectedForm } from '@/api/llm';
 import { lookupYoudaoWord, canUseYoudao } from '@/api/youdao';
 import type { Collocation, Derivative, RelatedWord } from '@/types/word';
 import { useCategories } from '@/store/useCategories';
@@ -234,6 +234,102 @@ export default function MarkableSentence({
     } finally {
       hide();
       setBusy(false);
+    }
+  }
+
+  function escapeReg(s: string): string {
+    return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  function renderBlank(part: string, key: string) {
+    if (blankMode === 'input') {
+      return (
+        <input
+          key={key}
+          type="text"
+          className="blank-input"
+          value={blankValue}
+          disabled={blankDisabled}
+          placeholder="填入单词"
+          autoComplete="off"
+          spellCheck={false}
+          autoFocus
+          onChange={(e) => onBlankChange?.(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              onBlankEnter?.();
+            }
+          }}
+        />
+      );
+    }
+    return (
+      <span key={key} className={`cloze-blank ${blankMode === 'revealed' ? 'revealed' : ''}`}>
+        {blankMode === 'revealed' ? part : '　'}
+      </span>
+    );
+  }
+
+  function renderTextParts(segment: string, keyPrefix: string) {
+    const parts = segment.split(/(\b)/);
+    return parts.map((part, i) => {
+      if (!part) return null;
+
+      if (!/^[A-Za-z][A-Za-z'-]*$/.test(part) || !isMarkableToken(part)) {
+        return <span key={`${keyPrefix}-${i}`}>{part}</span>;
+      }
+
+      const lower = part.toLowerCase();
+      const related = findRelated(lower) || findRelated(resolveLemma(lower));
+      const inList = !!(related && !related.entry.crossedOut);
+      const showInList =
+        inList && (blankMode === 'revealed' || !blankWord);
+      const tip = related
+        ? related.exact
+          ? openInListDetail
+            ? '已在词表 · 点击查看详情'
+            : '已在词表'
+          : openInListDetail
+            ? `词表已有「${related.entry.word}」· 点击查看`
+            : `已有词形「${related.entry.word}」`
+        : '点击加入生词（自动还原原形）';
+
+      return (
+        <span
+          key={`${keyPrefix}-${i}`}
+          className={`markable-word${showInList ? ' in-list' : ''}${justMarked === lower ? ' just-marked' : ''}`}
+          title={tip}
+          role="button"
+          tabIndex={0}
+          onClick={() => handleClick(part)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              handleClick(part);
+            }
+          }}
+        >
+          {part}
+        </span>
+      );
+    });
+  }
+
+  if (blankWord) {
+    const token = getClozeExpectedForm(blankWord, text) || blankWord;
+    const match = new RegExp(escapeReg(token), 'i').exec(text);
+    if (match && match.index !== undefined) {
+      const before = text.slice(0, match.index);
+      const blankPart = match[0];
+      const after = text.slice(match.index + blankPart.length);
+      return (
+        <div className={className}>
+          {renderTextParts(before, 'b')}
+          {renderBlank(blankPart, 'blank')}
+          {renderTextParts(after, 'a')}
+        </div>
+      );
     }
   }
 
