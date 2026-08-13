@@ -11,10 +11,12 @@ import {
   wordStageLabel,
 } from '@/utils/scheduler';
 import { wordDetailPath } from '@/utils/wordId';
+import { useWordDetailEntryNav } from '@/utils/wordDetailNav';
 
 export default function ChunkDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const entryNav = useWordDetailEntryNav();
   const { message, modal } = App.useApp();
   const items = useChunksWithProgress();
   const updateChunk = useChunksStore((s) => s.updateChunk);
@@ -115,7 +117,9 @@ export default function ChunkDetailPage() {
                 <button
                   type="button"
                   className="linkish"
-                  onClick={() => navigate(wordDetailPath(chunk.anchorWordId!))}
+                  onClick={() =>
+                    navigate(wordDetailPath(chunk.anchorWordId!), { state: entryNav })
+                  }
                 >
                   {chunk.anchorWordId}
                 </button>

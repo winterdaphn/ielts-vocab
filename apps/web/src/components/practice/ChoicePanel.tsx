@@ -9,6 +9,7 @@ import DerivativesList from '@/components/DerivativesList';
 import { resolveClozeChinese, type SentenceStructureAnalysis } from '@/api/llm';
 import type { Question } from '@/utils/practiceSelect';
 import type { RelatedWord, Derivative } from '@/types/word';
+import { useWordDetailEntryNav } from '@/utils/wordDetailNav';
 
 interface Props {
   current: Question;
@@ -45,6 +46,7 @@ export default function ChoicePanel({
   onHint,
   onRequestStructure,
 }: Props) {
+  const entryNav = useWordDetailEntryNav();
   const showZh = showAnswer || hintShown;
   const zhText = current.example.zh
     ? resolveClozeChinese(current.example.zh, current.word).text
@@ -148,7 +150,11 @@ export default function ChoicePanel({
                   加载中…
                 </span>
               ) : (
-                <RelatedWordsList items={similarsTip} emptyText="暂无形近词" />
+                <RelatedWordsList
+                  items={similarsTip}
+                  emptyText="暂无形近词"
+                  linkNavState={entryNav}
+                />
               )}
             </CollapsibleTip>
           )}

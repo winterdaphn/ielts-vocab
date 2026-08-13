@@ -10,6 +10,7 @@ import type { Question } from '@/utils/practiceSelect';
 import type { JudgeResult } from '@/hooks/usePracticeSession';
 import { resolveClozeChinese, type SentenceStructureAnalysis } from '@/api/llm';
 import type { RelatedWord, Derivative, Word } from '@/types/word';
+import { useWordDetailEntryNav } from '@/utils/wordDetailNav';
 
 interface Props {
   current: Question;
@@ -67,6 +68,7 @@ export default function ClozePanel({
   onSubmit,
   onRequestStructure,
 }: Props) {
+  const entryNav = useWordDetailEntryNav();
   const sentence = (
     <MarkableSentence
       text={current.example.en}
@@ -181,7 +183,11 @@ export default function ClozePanel({
                     加载中…
                   </span>
                 ) : (
-                  <RelatedWordsList items={similarsTip} emptyText="暂无形近词" />
+                  <RelatedWordsList
+                    items={similarsTip}
+                    emptyText="暂无形近词"
+                    linkNavState={entryNav}
+                  />
                 )}
               </CollapsibleTip>
             )}

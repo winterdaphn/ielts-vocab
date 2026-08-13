@@ -1,5 +1,5 @@
 import { useMemo, useState, useEffect } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Button, App, Popconfirm, Input, Space } from 'antd';
 import {
   LeftOutlined,
@@ -51,6 +51,12 @@ import type { Collocation, RelatedWord } from '@/types/word';
 import WordCategoryEditor from '@/components/WordCategoryEditor';
 import { normalizeCategories } from '@/config/categories';
 import { findWordIndex, wordDetailPath, decodeWordRouteId } from '@/utils/wordId';
+import {
+  type WordDetailNavState,
+  wordDetailBrowseState,
+  wordDetailDrillLinkState,
+  resolveWordDetailBack,
+} from '@/utils/wordDetailNav';
 import { useChunksStore, useUserChunks } from '@/store/useChunks';
 
 type TipTab = 'mnemonic' | 'synonyms' | 'similars' | 'derivatives';
@@ -58,7 +64,9 @@ type ColoTab = 'dict' | 'mine';
 
 export default function WordDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const location = useLocation();
   const navigate = useNavigate();
+  const detailNav = (location.state ?? null) as WordDetailNavState | null;
   const { message, modal } = App.useApp();
   const words = useUserWords();
   const updateWord = useWordsStore((s) => s.updateWord);
@@ -163,8 +171,11 @@ export default function WordDetailPage() {
     if (!word || !routeId) return;
     const decoded = decodeWordRouteId(routeId);
     if (word.id === decoded) return;
-    navigate(wordDetailPath(word), { replace: true });
-  }, [word, routeId, navigate]);
+    navigate(wordDetailPath(word), {
+      replace: true,
+      state: wordDetailBrowseState(detailNav),
+    });
+  }, [word, routeId, navigate, detailNav]);
 
   const bankExtras = useMemo(
     () => (word ? getBankLexisExtras(word.word) : { derivatives: [], dictCollocations: [] }),
@@ -576,16 +587,37 @@ export default function WordDetailPage() {
     const goId = nextWord?.id || prevWord?.id;
     await removeWord(word!.id);
     message.success('已删除');
-    if (goId) navigate(wordDetailPath(goId), { replace: true });
-    else navigate('/words', { replace: true });
+    if (goId) {
+      navigate(wordDetailPath(goId), {
+        replace: true,
+        state: wordDetailBrowseState(detailNav),
+      });
+    } else navigate('/words', { replace: true });
   }
 
   function goPrev() {
-    if (prevWord) navigate(wordDetailPath(prevWord));
+    if (prevWord) {
+      navigate(wordDetailPath(prevWord), {
+        replace: true,
+        state: wordDetailBrowseState(detailNav),
+      });
+    }
   }
 
   function goNext() {
-    if (nextWord) navigate(wordDetailPath(nextWord));
+    if (nextWord) {
+      navigate(wordDetailPath(nextWord), {
+        replace: true,
+        state: wordDetailBrowseState(detailNav),
+      });
+    }
+  }
+
+  function handleBack() {
+    const idx = (window.history.state as { idx?: number } | null)?.idx;
+    const target = resolveWordDetailBack(detailNav, idx);
+    if (target.type === 'back') navigate(-1);
+    else navigate(target.path);
   }
 
   return (
@@ -595,12 +627,7 @@ export default function WordDetailPage() {
           type="button"
           className="wd-navbar-back"
           aria-label="返回"
-          onClick={() => {
-            // 练习 / 近义链进来 → 上一页；直接打开且无历史 → 词表
-            const idx = (window.history.state as { idx?: number } | null)?.idx;
-            if (typeof idx === 'number' && idx > 0) navigate(-1);
-            else navigate('/words');
-          }}
+          onClick={handleBack}
         >
           <LeftOutlined />
         </button>
@@ -755,6 +782,7 @@ export default function WordDetailPage() {
                 onAddToBank={addRelatedToBank}
                 addingKey={addingKey}
                 justAddedKey={justAddedKey}
+                linkNavState={wordDetailDrillLinkState(detailNav)}
               />
               {synonymDiff.panel}
               {showSynonymAdd && (
@@ -819,6 +847,7 @@ export default function WordDetailPage() {
                 emptyText="暂无形近词，可点「补全」或「添加」"
                 onRemove={removeSimilar}
                 removeTitle="不需要这个形近词"
+                linkNavState={wordDetailDrillLinkState(detailNav)}
               />
               {showSimilarAdd && (
                 <Space.Compact style={{ width: '100%', marginTop: 10 }}>

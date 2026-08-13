@@ -12,6 +12,7 @@ import {
 } from '@/utils/scheduler';
 import type { Word } from '@/types/word';
 import { wordDetailPath } from '@/utils/wordId';
+import { useWordDetailEntryNav } from '@/utils/wordDetailNav';
 import PhoneticDisplay from '@/components/PhoneticDisplay';
 import LetterIndexBar from '@/components/LetterIndexBar';
 import { categoryLabel, normalizeCategories, TOPIC_CATEGORIES, FUNCTION_CATEGORIES } from '@/config/categories';
@@ -147,6 +148,7 @@ const WordListRow = memo(function WordListRow({
 export default function WordsPage() {
   const { message } = App.useApp();
   const navigate = useNavigate();
+  const entryNav = useWordDetailEntryNav();
   const words = useUserWords();
   const allCategories = useCategories((s) => s.all);
   const savedUi = useMemo(() => readWordsListUi(), []);
@@ -371,9 +373,9 @@ export default function WordsPage() {
           lane: m.lane,
         })),
       });
-      navigate(wordDetailPath(id));
+      navigate(wordDetailPath(id), { state: entryNav });
     },
-    [navigate, filter, categoryFilter, search, virtualizer]
+    [navigate, entryNav, filter, categoryFilter, search, virtualizer]
   );
 
   const onToggleStarred = useCallback(

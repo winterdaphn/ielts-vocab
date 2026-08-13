@@ -2,6 +2,7 @@
 import {
   HeartFilled,
   HeartOutlined,
+  LeftOutlined,
   RightOutlined,
   ReloadOutlined,
   StarOutlined,
@@ -281,6 +282,18 @@ function WordPracticePage() {
           >
             {s.idx + 1 >= s.total ? '完成' : '下一题 →'}
             <span className="practice-next-kbd">Enter</span>
+          </Button>
+        )}
+        {s.canGoPrevious && (
+          <Button
+            block
+            size="large"
+            onClick={s.prev}
+            disabled={busy}
+            style={{ marginTop: s.canGoNext ? 8 : 16 }}
+            icon={<LeftOutlined />}
+          >
+            上一题
           </Button>
         )}
       </div>

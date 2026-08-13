@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useUserWords } from '@/store/useWords';
 import type { RelatedWord } from '@/types/word';
 import { wordToId, wordDetailPath } from '@/utils/wordId';
+import type { WordDetailNavState } from '@/utils/wordDetailNav';
 
 interface Props {
   items: RelatedWord[];
@@ -16,6 +17,8 @@ interface Props {
   justAddedKey?: string | null;
   /** Show 有道 / AI source chips (default: when any item has source) */
   showSource?: boolean;
+  /** 点击词链进入详情时的导航 state（如穿透 / 练习页 returnTo） */
+  linkNavState?: WordDetailNavState;
 }
 
 function lettersKey(s: string): string {
@@ -45,6 +48,7 @@ export default function RelatedWordsList({
   addingKey = null,
   justAddedKey = null,
   showSource,
+  linkNavState,
 }: Props) {
   const navigate = useNavigate();
   const words = useUserWords();
@@ -92,7 +96,11 @@ export default function RelatedWordsList({
                   type="button"
                   className="related-word-en is-link markable-word in-list"
                   title={`查看「${it.word}」详情`}
-                  onClick={() => navigate(wordDetailPath(targetId))}
+                  onClick={() =>
+                    navigate(wordDetailPath(targetId), {
+                      state: linkNavState,
+                    })
+                  }
                 >
                   {it.word}
                 </button>

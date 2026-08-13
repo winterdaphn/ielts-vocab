@@ -11,6 +11,7 @@ import type { Collocation, Derivative, RelatedWord } from '@/types/word';
 import { useCategories } from '@/store/useCategories';
 import { mergeSynonymSources } from '@/utils/vocabBankRelated';
 import { wordDetailPath, wordToId } from '@/utils/wordId';
+import { useWordDetailEntryNav, type WordDetailNavState } from '@/utils/wordDetailNav';
 
 interface Props {
   text: string;
@@ -25,6 +26,8 @@ interface Props {
   className?: string;
   /** 已揭晓/判题后：词表内单词点击进详情，不再只 toast */
   openInListDetail?: boolean;
+  /** 覆盖默认的 returnTo（详情页内穿透时用 drill state） */
+  detailNavState?: WordDetailNavState;
 }
 
 /**
@@ -41,9 +44,11 @@ export default function MarkableSentence({
   onBlankEnter,
   className = 'cloze-sentence',
   openInListDetail = false,
+  detailNavState,
 }: Props) {
   const { message } = App.useApp();
   const navigate = useNavigate();
+  const entryNav = useWordDetailEntryNav();
   const words = useUserWords();
   const addWord = useWordsStore((s) => s.addWord);
   const updateWord = useWordsStore((s) => s.updateWord);
@@ -68,7 +73,9 @@ export default function MarkableSentence({
 
   function goWordDetail(entry: (typeof words)[0]) {
     const id = entry.id || wordToId(entry.word);
-    navigate(wordDetailPath(id));
+    navigate(wordDetailPath(id), {
+      state: detailNavState ?? entryNav,
+    });
   }
 
   async function handleClick(raw: string) {

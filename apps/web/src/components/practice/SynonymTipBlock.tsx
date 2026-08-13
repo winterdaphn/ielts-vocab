@@ -4,6 +4,7 @@ import { useSynonymDiffAssist } from '@/components/SynonymDiffAssist';
 import { useQuickAddRelatedWord } from '@/hooks/useQuickAddRelatedWord';
 import { useWordsStore, useUserWords } from '@/store/useWords';
 import type { RelatedWord } from '@/types/word';
+import { useWordDetailEntryNav } from '@/utils/wordDetailNav';
 
 interface Props {
   /** Persist synonymDiff（辨析本体；本句 replace 不入库） */
@@ -30,6 +31,7 @@ export default function SynonymTipBlock({
   defaultOpen = false,
 }: Props) {
   const words = useUserWords();
+  const entryNav = useWordDetailEntryNav();
   const updateWord = useWordsStore((s) => s.updateWord);
   const local = words.find((w) => w.id === wordId);
   const { addRelatedToBank, addingKey, justAddedKey } = useQuickAddRelatedWord();
@@ -68,6 +70,7 @@ export default function SynonymTipBlock({
           onAddToBank={addRelatedToBank}
           addingKey={addingKey}
           justAddedKey={justAddedKey}
+          linkNavState={entryNav}
         />
       )}
       {panel}

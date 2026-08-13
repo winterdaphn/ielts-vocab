@@ -131,6 +131,22 @@ export function usePracticeSession() {
   const sessionIdRef = useRef(0);
   /** 再次测试：同一批词重练，不写入 SRS / 学习统计 */
   const skipReviewRef = useRef(false);
+  /** 已作答题目的 UI 快照，支持返回上一题 */
+  const cardStatesRef = useRef<
+    Map<
+      number,
+      {
+        showAnswer: boolean;
+        picked: string | null;
+        judgeResult: JudgeResult;
+        hintShown: boolean;
+        translateHintLevel: number;
+        translateHints: TranslateHints | null;
+      }
+    >
+  >(new Map());
+  /** 已写入 SRS 的题号，返回后再点下一题不重复计分 */
+  const reviewedIndicesRef = useRef<Set<number>>(new Set());
   const modeSelectBatchRef = useRef<Word[]>([]);
   const cloudPracticeSessionIdRef = useRef<string | null>(readCloudMeta()?.sessionId ?? null);
   const inflightRef = useRef<Set<string>>(new Set());
@@ -235,6 +251,77 @@ export function usePracticeSession() {
     abortRef.current = null;
   }
 
+  function resetNavigationHistory() {
+    cardStatesRef.current = new Map();
+    reviewedIndicesRef.current = new Set();
+  }
+
+  function snapshotCurrentCard() {
+    return {
+      showAnswer,
+      picked,
+      judgeResult,
+      hintShown,
+      translateHintLevel,
+      translateHints,
+    };
+  }
+
+  function applyCardSnapshot(s: ReturnType<typeof snapshotCurrentCard>) {
+    setShowAnswer(s.showAnswer);
+    setPicked(s.picked);
+    setJudgeResult(s.judgeResult);
+    setHintShown(s.hintShown);
+    setTranslateHintLevel(s.translateHintLevel);
+    setTranslateHints(s.translateHints);
+  }
+
+  function resetFreshCardUi() {
+    setPicked(null);
+    setShowAnswer(false);
+    setHintShown(false);
+    setTranslateHintLevel(0);
+    setTranslateHints(null);
+    setJudgeResult(null);
+  }
+
+  function resetTransientUi() {
+    setTranslateHintLoading(false);
+    setMnemonicTip('');
+    setMnemonicLoading(false);
+    setSynonymsTip([]);
+    setSimilarsTip([]);
+    setRelatedLoading(false);
+    setStructureTip(null);
+    setStructureLoading(false);
+    setUserText('');
+    setPhase('asking');
+  }
+
+  function goToCard(target: number) {
+    const saved = cardStatesRef.current.get(target);
+    if (saved) {
+      applyCardSnapshot(saved);
+    } else if (reviewedIndicesRef.current.has(target) || target < stats.total) {
+      applyCardSnapshot({
+        showAnswer: mode !== 'translate',
+        picked: null,
+        judgeResult:
+          mode === 'translate'
+            ? { correct: true, feedback: '（已作答）' }
+            : null,
+        hintShown: mode === 'cloze',
+        translateHintLevel: 0,
+        translateHints: null,
+      });
+    } else {
+      resetFreshCardUi();
+    }
+    resetTransientUi();
+    setIdx(target);
+    kickPrefetch(sessionIdRef.current, sessionWords, mode, target);
+  }
+
   function beginSessionWork(): { sid: number; signal: AbortSignal } {
     try {
       abortRef.current?.abort();
@@ -247,6 +334,7 @@ export function usePracticeSession() {
     inflightRef.current = new Set();
     prefetchRunningRef.current = false;
     prefetchFailedRef.current = new Set();
+    resetNavigationHistory();
     return { sid, signal: ac.signal };
   }
 
@@ -721,6 +809,21 @@ export function usePracticeSession() {
     setUserText('');
     setJudgeResult(hydrated.judgeResult);
 
+    for (let i = 0; i < hydrated.idx; i++) {
+      reviewedIndicesRef.current.add(i);
+    }
+    if (hydrated.showAnswer || hydrated.judgeResult) {
+      reviewedIndicesRef.current.add(hydrated.idx);
+      cardStatesRef.current.set(hydrated.idx, {
+        showAnswer: hydrated.showAnswer,
+        picked: hydrated.picked,
+        judgeResult: hydrated.judgeResult,
+        hintShown: hydrated.hintShown,
+        translateHintLevel: hydrated.translateHintLevel,
+        translateHints: hydrated.translateHints,
+      });
+    }
+
     // 本机进度挂到「新建」的空云端会话：需要把本轮已有句种子推上去一次。
     // 若续做用的就是云端 active，例句已在库里，不要再 PUT。
     const cloudId = cloudPracticeSessionIdRef.current;
@@ -1115,7 +1218,13 @@ export function usePracticeSession() {
   }
 
   async function next() {
-    if (current && !skipReviewRef.current) {
+    if (canGoNext) {
+      cardStatesRef.current.set(idx, snapshotCurrentCard());
+    }
+
+    const alreadyReviewed = reviewedIndicesRef.current.has(idx);
+
+    if (current && !skipReviewRef.current && !alreadyReviewed) {
       const wasCorrect =
         mode === 'choice'
           ? picked === current.example.answer
@@ -1138,11 +1247,12 @@ export function usePracticeSession() {
           answeredAt: Date.now(),
         });
       }
+      reviewedIndicesRef.current.add(idx);
       const when = formatNextReview(updated.nextReview);
       message.info(
         wasCorrect ? `答对 · 下次复习：${when}` : `答错 · 已回退，${when}再练`
       );
-    } else if (current && skipReviewRef.current) {
+    } else if (current && skipReviewRef.current && !alreadyReviewed) {
       const wasCorrect =
         mode === 'choice'
           ? picked === current.example.answer
@@ -1157,6 +1267,7 @@ export function usePracticeSession() {
           answeredAt: Date.now(),
         });
       }
+      reviewedIndicesRef.current.add(idx);
     }
     if (idx + 1 >= total) {
       setPhase('done');
@@ -1170,25 +1281,19 @@ export function usePracticeSession() {
         setLS('last-day', today);
       }
     } else {
-      setIdx(idx + 1);
-      setPicked(null);
-      setShowAnswer(false);
-      setHintShown(false);
-      setTranslateHintLevel(0);
-      setTranslateHints(null);
-      setTranslateHintLoading(false);
-      setMnemonicTip('');
-      setMnemonicLoading(false);
-      setSynonymsTip([]);
-      setSimilarsTip([]);
-      setRelatedLoading(false);
-      setStructureTip(null);
-      setStructureLoading(false);
-      setUserText('');
-      setJudgeResult(null);
-      kickPrefetch(sessionIdRef.current, sessionWords, mode, idx + 1);
+      goToCard(idx + 1);
     }
   }
+
+  function prev() {
+    if (idx <= 0) return;
+    if (canGoNext) {
+      cardStatesRef.current.set(idx, snapshotCurrentCard());
+    }
+    goToCard(idx - 1);
+  }
+
+  const canGoPrevious = idx > 0;
 
   nextRef.current = () => {
     void next();
@@ -1476,6 +1581,7 @@ export function usePracticeSession() {
     structureAvailable: !!settings.apiKey,
     genError,
     canGoNext,
+    canGoPrevious,
     remainingCount,
     sessionSize: SESSION_SIZE,
     setUserText,
@@ -1489,6 +1595,7 @@ export function usePracticeSession() {
     requestTranslateHint,
     requestStructureTip,
     next,
+    prev,
     exitPractice,
     prepareExitPractice,
     regenerateCurrent,

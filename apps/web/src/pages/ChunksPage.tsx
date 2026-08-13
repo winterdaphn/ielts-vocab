@@ -6,6 +6,7 @@ import { useChunksWithProgress, useChunkDueStats } from '@/store/useChunks';
 import { useFramesStore, useFramesWithProgress, useFrameDueStats, FRAME_PACK } from '@/store/useFrames';
 import { formatNextReview, isDue, isMastered, isNew } from '@/utils/scheduler';
 import { wordDetailPath } from '@/utils/wordId';
+import { useWordDetailEntryNav } from '@/utils/wordDetailNav';
 import { normalizeFrameKey } from '@/types/frame';
 
 type Tab = 'chunks' | 'frames';
@@ -14,6 +15,7 @@ type Filter = 'all' | 'due' | 'new' | 'learning' | 'mastered' | 'starred';
 export default function ChunksPage() {
   const { message } = App.useApp();
   const navigate = useNavigate();
+  const entryNav = useWordDetailEntryNav();
   const [tab, setTab] = useState<Tab>('chunks');
   const [filter, setFilter] = useState<Filter>('all');
 
@@ -185,7 +187,7 @@ export default function ChunksPage() {
                           className="deck-anchor-link"
                           onClick={(e) => {
                             e.stopPropagation();
-                            navigate(wordDetailPath(c.anchorWordId!));
+                            navigate(wordDetailPath(c.anchorWordId!), { state: entryNav });
                           }}
                         >
                           {c.anchorWordId}
