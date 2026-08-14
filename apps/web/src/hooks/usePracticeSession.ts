@@ -147,6 +147,8 @@ export function usePracticeSession() {
   >(new Map());
   /** 已写入 SRS 的题号，返回后再点下一题不重复计分 */
   const reviewedIndicesRef = useRef<Set<number>>(new Set());
+  /** 本轮已到达的最远题号，支持回到前面后再前进到未作答但已浏览的题 */
+  const maxVisitedIdxRef = useRef(0);
   const modeSelectBatchRef = useRef<Word[]>([]);
   const cloudPracticeSessionIdRef = useRef<string | null>(readCloudMeta()?.sessionId ?? null);
   const inflightRef = useRef<Set<string>>(new Set());
@@ -200,6 +202,7 @@ export function usePracticeSession() {
   const total = sessionWords.length;
   const progressPct = Math.min(100, Math.round((idx / Math.max(total, 1)) * 100));
   const canGoNext = mode === 'choice' ? showAnswer : !!judgeResult;
+  const canNavigateNext = canGoNext || idx < maxVisitedIdxRef.current;
   const nextRef = useRef<() => void>(() => {});
   const prevPhaseRef = useRef<Phase>(phase);
   const remainingCount =
@@ -254,6 +257,7 @@ export function usePracticeSession() {
   function resetNavigationHistory() {
     cardStatesRef.current = new Map();
     reviewedIndicesRef.current = new Set();
+    maxVisitedIdxRef.current = 0;
   }
 
   function snapshotCurrentCard() {
@@ -299,6 +303,7 @@ export function usePracticeSession() {
   }
 
   function goToCard(target: number) {
+    maxVisitedIdxRef.current = Math.max(maxVisitedIdxRef.current, target);
     const saved = cardStatesRef.current.get(target);
     if (saved) {
       applyCardSnapshot(saved);
@@ -809,6 +814,7 @@ export function usePracticeSession() {
     setUserText('');
     setJudgeResult(hydrated.judgeResult);
 
+    maxVisitedIdxRef.current = hydrated.idx;
     for (let i = 0; i < hydrated.idx; i++) {
       reviewedIndicesRef.current.add(i);
     }
@@ -1218,8 +1224,14 @@ export function usePracticeSession() {
   }
 
   async function next() {
+    const browsingForward = !canGoNext && idx < maxVisitedIdxRef.current;
+    if (!canGoNext && !browsingForward) return;
+
     if (canGoNext) {
       cardStatesRef.current.set(idx, snapshotCurrentCard());
+    } else {
+      goToCard(idx + 1);
+      return;
     }
 
     const alreadyReviewed = reviewedIndicesRef.current.has(idx);
@@ -1287,9 +1299,7 @@ export function usePracticeSession() {
 
   function prev() {
     if (idx <= 0) return;
-    if (canGoNext) {
-      cardStatesRef.current.set(idx, snapshotCurrentCard());
-    }
+    cardStatesRef.current.set(idx, snapshotCurrentCard());
     goToCard(idx - 1);
   }
 
@@ -1301,7 +1311,7 @@ export function usePracticeSession() {
 
   // 揭晓/判题结果页：Enter → 下一题（对齐 example.html feedback 阶段）
   useEffect(() => {
-    if (phase !== 'asking' || !canGoNext || regenerating) return;
+    if (phase !== 'asking' || !canNavigateNext || regenerating) return;
 
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.isComposing || e.repeat) return;
@@ -1322,7 +1332,7 @@ export function usePracticeSession() {
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [phase, canGoNext, regenerating, idx]);
+  }, [phase, canNavigateNext, regenerating, idx]);
 
   async function requestStructureTip() {
     if (!current) return;
@@ -1581,6 +1591,7 @@ export function usePracticeSession() {
     structureAvailable: !!settings.apiKey,
     genError,
     canGoNext,
+    canNavigateNext,
     canGoPrevious,
     remainingCount,
     sessionSize: SESSION_SIZE,

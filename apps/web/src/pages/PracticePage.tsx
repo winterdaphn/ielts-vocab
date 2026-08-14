@@ -269,32 +269,37 @@ function WordPracticePage() {
           />
         )}
 
-        {s.canGoNext && (
-          <Button
-            type="primary"
-            block
-            size="large"
-            onClick={s.next}
-            disabled={s.regenerating}
-            style={{ marginTop: 16 }}
-            icon={<RightOutlined />}
-            title="Enter"
+        {(s.canNavigateNext || s.canGoPrevious) && (
+          <div
+            className="flex-row"
+            style={{ gap: 8, marginTop: 16 }}
           >
-            {s.idx + 1 >= s.total ? '完成' : '下一题 →'}
-            <span className="practice-next-kbd">Enter</span>
-          </Button>
-        )}
-        {s.canGoPrevious && (
-          <Button
-            block
-            size="large"
-            onClick={s.prev}
-            disabled={busy}
-            style={{ marginTop: s.canGoNext ? 8 : 16 }}
-            icon={<LeftOutlined />}
-          >
-            上一题
-          </Button>
+            {s.canGoPrevious && (
+              <Button
+                size="large"
+                onClick={s.prev}
+                disabled={busy}
+                icon={<LeftOutlined />}
+                style={{ flex: 1 }}
+              >
+                上一题
+              </Button>
+            )}
+            {s.canNavigateNext && (
+              <Button
+                type="primary"
+                size="large"
+                onClick={s.next}
+                disabled={s.regenerating}
+                icon={<RightOutlined />}
+                title="Enter"
+                style={{ flex: 1 }}
+              >
+                {s.idx + 1 >= s.total ? '完成' : '下一题 →'}
+                <span className="practice-next-kbd">Enter</span>
+              </Button>
+            )}
+          </div>
         )}
       </div>
 
