@@ -188,7 +188,7 @@ export async function patchPracticeSession(
     clientUpdatedAt?: number;
   },
   opts?: { keepalive?: boolean }
-): Promise<{ sessionId: string; revision: number; gone?: boolean } | null> {
+): Promise<{ sessionId: string; revision: number; gone?: boolean; applied?: boolean } | null> {
   const { clientUpdatedAt, ...rest } = patch;
   const resp = await fetch(
     getBase(settings) + '/api/practice/sessions/' + encodeURIComponent(sessionId),
@@ -212,7 +212,11 @@ export async function patchPracticeSession(
   const sid = String(data.sessionId || legacy?.sessionId || sessionId);
   const revision = Number(data.revision ?? legacy?.revision);
   if (!Number.isFinite(revision)) return null;
-  return { sessionId: sid, revision };
+  return {
+    sessionId: sid,
+    revision,
+    applied: data.applied !== false,
+  };
 }
 
 export async function putPracticeItem(

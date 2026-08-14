@@ -32,6 +32,11 @@ import {
   reconcilePracticeSession,
 } from '@/utils/practiceSession';
 import { getLS, setLS, delLS } from '@/utils/date';
+import {
+  notifyPracticeSyncFailure,
+  practiceSyncLog,
+  setPracticeSyncBoundSession,
+} from '@/utils/practiceSyncDebug';
 
 /** localStorage 键：记住当前云端会话 id + revision，用来做续做/冲突检测 */
 const META_KEY = 'practice-cloud-meta';
@@ -126,6 +131,12 @@ function sessionPatchKey(p: SessionPatch): string {
 export function bindCloudSession(session: CloudPracticeSession) {
   writeCloudMeta({ sessionId: session.sessionId, revision: session.revision });
   lastSessionPatchKey = null;
+  setPracticeSyncBoundSession(session.sessionId, 'bindCloudSession');
+  practiceSyncLog('info', 'practice-cloud', '绑定云端会话', {
+    sessionId: session.sessionId,
+    idx: session.idx,
+    revision: session.revision,
+  });
 }
 
 /** 创建云端练习会话；失败时返回 null，本机仍可离线做题 */
@@ -137,14 +148,24 @@ export async function startCloudPracticeSession(opts: {
   wasNewByWordId: Record<string, boolean>;
 }): Promise<CloudPracticeSession | null> {
   const s = settings();
-  if (!s.syncToken) return null;
+  if (!s.syncToken) {
+    practiceSyncLog('warn', 'practice-cloud', '跳过创建云端会话：无 syncToken');
+    return null;
+  }
   try {
     const session = await createPracticeSession(s, opts);
     bindCloudSession(session);
-    console.info('[practice-cloud] session created', session.sessionId);
+    practiceSyncLog('info', 'practice-cloud', '已创建云端练习会话', {
+      sessionId: session.sessionId,
+      words: opts.wordIds.length,
+    });
     return session;
   } catch (e) {
-    console.warn('[practice-cloud] create failed', e);
+    practiceSyncLog('error', 'practice-cloud', '创建云端会话失败', e);
+    notifyPracticeSyncFailure(
+      'create_session',
+      '练习进度未能同步到云端（创建会话失败），仅保存在本机'
+    );
     return null;
   }
 }
@@ -157,11 +178,18 @@ async function drainCloudSessionPatch(opts?: { keepalive?: boolean }): Promise<v
   const s = settings();
   if (!s.syncToken) {
     pendingPatch = null;
+    practiceSyncLog('warn', 'practice-cloud', '跳过 PATCH：无 syncToken');
     return;
   }
   while (pendingPatch) {
     const patch = pendingPatch;
     pendingPatch = null;
+    practiceSyncLog('info', 'practice-cloud', 'PATCH 进度', {
+      sessionId: patch.sessionId.slice(0, 8),
+      idx: patch.idx,
+      stats: patch.stats,
+      clientUpdatedAt: patch.clientUpdatedAt,
+    });
     try {
       const updated = await patchPracticeSession(
         s,
@@ -177,17 +205,58 @@ async function drainCloudSessionPatch(opts?: { keepalive?: boolean }): Promise<v
       if (updated?.gone) {
         writeCloudMeta(null);
         lastSessionPatchKey = null;
+        setPracticeSyncBoundSession(null, 'session_gone');
+        practiceSyncLog('warn', 'practice-cloud', '云端 session 已失效 (404)', {
+          sessionId: patch.sessionId,
+        });
+        notifyPracticeSyncFailure(
+          'session_gone',
+          '云端练习会话已失效，请退出后重新进入练习再同步'
+        );
         continue;
+      }
+      if (!updated) {
+        practiceSyncLog('error', 'practice-cloud', 'PATCH 请求失败 (非 2xx 或无 revision)', {
+          idx: patch.idx,
+        });
+        notifyPracticeSyncFailure(
+          'patch_http',
+          '练习进度同步失败，请检查网络后重试'
+        );
+        if (lastSessionPatchKey === sessionPatchKey(patch)) {
+          lastSessionPatchKey = null;
+        }
+        continue;
+      }
+      if (updated.applied === false) {
+        practiceSyncLog('warn', 'practice-cloud', 'PATCH 被服务端拒绝 (版本较旧)', {
+          idx: patch.idx,
+          clientUpdatedAt: patch.clientUpdatedAt,
+          serverRevision: updated.revision,
+        });
+        notifyPracticeSyncFailure(
+          'patch_stale',
+          '练习进度未上传（云端版本更新），请刷新页面后再继续'
+        );
+      } else {
+        practiceSyncLog('info', 'practice-cloud', 'PATCH 成功', {
+          idx: patch.idx,
+          revision: updated.revision,
+        });
       }
       if (updated) {
         writeCloudMeta({
           sessionId: updated.sessionId,
           revision: updated.revision,
         });
+        setPracticeSyncBoundSession(updated.sessionId, 'patch_ok');
       }
     } catch (e) {
-      console.warn('[practice-cloud] patch failed', e);
-      // 失败时允许同内容重试
+      practiceSyncLog('error', 'practice-cloud', 'PATCH 网络异常', e);
+      notifyPracticeSyncFailure(
+        'patch_network',
+        '练习进度同步失败，请检查网络后重试'
+      );
       if (lastSessionPatchKey === sessionPatchKey(patch)) {
         lastSessionPatchKey = null;
       }
@@ -220,10 +289,26 @@ function ensureCloudSessionFlush(opts?: { keepalive?: boolean }): Promise<void> 
  * 调用方不用 await；退出时请再调 flushCloudSessionPatch 等它飞完。
  */
 export function scheduleCloudSessionPatch(payload: SessionPatch) {
+  const s = settings();
+  if (!s.syncToken) {
+    practiceSyncLog('warn', 'practice-cloud', '跳过排队 PATCH：无 syncToken', { idx: payload.idx });
+    notifyPracticeSyncFailure(
+      'no_token',
+      '未连接云端账号，练习进度仅保存在本机'
+    );
+    return;
+  }
   const key = sessionPatchKey(payload);
-  if (key === lastSessionPatchKey) return;
+  if (key === lastSessionPatchKey) {
+    practiceSyncLog('info', 'practice-cloud', '跳过重复 PATCH', { idx: payload.idx });
+    return;
+  }
   lastSessionPatchKey = key;
   pendingPatch = payload;
+  practiceSyncLog('info', 'practice-cloud', '排队 PATCH', {
+    sessionId: payload.sessionId.slice(0, 8),
+    idx: payload.idx,
+  });
   void ensureCloudSessionFlush();
 }
 
@@ -295,10 +380,23 @@ async function drainCloudItemPatches(sessionId: string): Promise<void> {
   try {
     const applied = await putPracticeItemsBatch(s, sessionId, items);
     if (applied > 0) {
-      console.info('[practice-cloud] items batch', { sessionId, applied, queued: items.length });
+      practiceSyncLog('info', 'practice-cloud', '题目 batch 上传成功', {
+        sessionId: sessionId.slice(0, 8),
+        applied,
+        queued: items.length,
+      });
+    } else {
+      practiceSyncLog('warn', 'practice-cloud', '题目 batch 未写入', {
+        sessionId: sessionId.slice(0, 8),
+        queued: items.length,
+      });
     }
   } catch (e) {
-    console.warn('[practice-cloud] items batch failed', e);
+    practiceSyncLog('error', 'practice-cloud', '题目 batch 失败', e);
+    notifyPracticeSyncFailure(
+      'items_batch',
+      '练习作答记录同步失败，请检查网络'
+    );
     for (const it of items) queueItemPatch(sessionId, it);
   }
 }
@@ -337,6 +435,10 @@ export function syncCloudItemExample(
 ) {
   const s = settings();
   if (!s.syncToken) return;
+  if (!sessionId) {
+    practiceSyncLog('warn', 'practice-cloud', '跳过 example 同步：无 sessionId', { ordinal });
+    return;
+  }
   queueItemPatch(sessionId, { ordinal, example, wasNew });
   scheduleItemsFlush(sessionId);
 }
@@ -351,6 +453,15 @@ export function syncCloudItemAttempt(
 ) {
   const s = settings();
   if (!s.syncToken) return;
+  if (!sessionId) {
+    practiceSyncLog('warn', 'practice-cloud', '跳过 attempt 同步：无 sessionId', { ordinal });
+    notifyPracticeSyncFailure(
+      'no_session_attempt',
+      '练习未绑定云端，作答无法跨设备同步'
+    );
+    return;
+  }
+  practiceSyncLog('info', 'practice-cloud', '排队 attempt', { ordinal, sessionId: sessionId.slice(0, 8) });
   queueItemPatch(sessionId, { ordinal, attempt });
   scheduleItemsFlush(sessionId);
 }

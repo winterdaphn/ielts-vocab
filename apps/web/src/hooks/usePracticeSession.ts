@@ -48,6 +48,11 @@ import {
   type SentenceDifficulty,
 } from '@/utils/practiceSession';
 import {
+  notifyPracticeSyncFailure,
+  practiceSyncLog,
+  setPracticeSyncBoundSession,
+} from '@/utils/practiceSyncDebug';
+import {
   exampleFromCache,
   llmGenMode,
   pickSessionWords,
@@ -149,6 +154,14 @@ export function usePracticeSession() {
   const reviewedIndicesRef = useRef<Set<number>>(new Set());
   const modeSelectBatchRef = useRef<Word[]>([]);
   const cloudPracticeSessionIdRef = useRef<string | null>(readCloudMeta()?.sessionId ?? null);
+
+  function bindPracticeCloudId(sessionId: string | null, source: string) {
+    cloudPracticeSessionIdRef.current = sessionId;
+    setPracticeSyncBoundSession(sessionId, source);
+  }
+  if (cloudPracticeSessionIdRef.current) {
+    setPracticeSyncBoundSession(cloudPracticeSessionIdRef.current, 'init_meta');
+  }
   const inflightRef = useRef<Set<string>>(new Set());
   const prefetchRunningRef = useRef(false);
   const prefetchFromRef = useRef(0);
@@ -401,6 +414,15 @@ export function usePracticeSession() {
         },
         clientUpdatedAt: savedAt,
       });
+    } else if (settings.syncToken) {
+      practiceSyncLog('warn', 'practice-cloud', '跳过 PATCH：未绑定 cloudId', {
+        idx: overrides.idx ?? idx,
+        phase: overrides.phase ?? phase,
+      });
+      notifyPracticeSyncFailure(
+        'no_session',
+        '练习未绑定云端会话，进度无法跨设备同步'
+      );
     }
   }
 
@@ -733,7 +755,7 @@ export function usePracticeSession() {
       remoteUpdatedAt: remote?.updatedAt,
     });
     if (saved && remoteSaved && saved === remoteSaved && remote) {
-      cloudPracticeSessionIdRef.current = remote.sessionId;
+      bindPracticeCloudId(remote.sessionId, 'resume_remote_match');
     }
     if (!saved) {
       message.info('没有可继续的进度');
@@ -785,10 +807,10 @@ export function usePracticeSession() {
         wordIds: hydrated.sessionWords.map((word) => word.id),
         wasNewByWordId,
       });
-      cloudPracticeSessionIdRef.current = cloud?.sessionId || null;
+      bindPracticeCloudId(cloud?.sessionId || null, 'resume_create_cloud');
       createdFreshCloud = !!cloud;
     } else if (remote) {
-      cloudPracticeSessionIdRef.current = remote.sessionId;
+      bindPracticeCloudId(remote.sessionId, 'resume_remote');
     }
 
     setSessionWords(hydrated.sessionWords);
@@ -847,6 +869,12 @@ export function usePracticeSession() {
     }
     setPhase('asking');
     kickPrefetch(sid, hydrated.sessionWords, hydrated.mode, hydrated.idx);
+    practiceSyncLog('info', 'practice-cloud', '续做完成', {
+      idx: hydrated.idx,
+      cloudId: cloudPracticeSessionIdRef.current?.slice(0, 8) ?? null,
+      remoteIdx: remote?.idx ?? null,
+      localWon,
+    });
     message.success('已恢复练习进度');
   }
 
@@ -958,7 +986,7 @@ export function usePracticeSession() {
     for (const w of pool) {
       wasNewByWordId[w.id] = wasNewRef.current.get(w.id) ?? isNew(w);
     }
-    cloudPracticeSessionIdRef.current = null;
+    bindPracticeCloudId(null, 'start_practice');
     const cloud = await startCloudPracticeSession({
       mode: m,
       scope: s,
@@ -966,7 +994,7 @@ export function usePracticeSession() {
       wordIds: pool.map((w) => w.id),
       wasNewByWordId,
     });
-    if (cloud) cloudPracticeSessionIdRef.current = cloud.sessionId;
+    if (cloud) bindPracticeCloudId(cloud.sessionId, 'start_practice_created');
 
     const { sid } = beginSessionWork();
 

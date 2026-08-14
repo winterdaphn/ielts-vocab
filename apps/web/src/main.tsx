@@ -4,9 +4,13 @@ import { ConfigProvider, App as AntdApp } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import 'dayjs/locale/zh-cn';
 import App from './App';
+import PracticeSyncFailureBridge from '@/components/PracticeSyncFailureBridge';
 import { ieltsTheme } from './styles/theme';
 import './styles/global.css';
 import './styles/antd-overrides.scss';
+import { initVConsoleIfNeeded } from '@/utils/initVConsole';
+
+void initVConsoleIfNeeded();
 
 /** GitHub Pages + 部分手机浏览器（如夸克）刷新深链会丢 path；Hash 路由只请求 index.html */
 const useHashRouter = import.meta.env.VITE_HASH_ROUTER === 'true';
@@ -26,6 +30,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     locale={zhCN}
   >
     <AntdApp>
+      <PracticeSyncFailureBridge />
       <Router basename={routerBasename}>
         <App />
       </Router>
