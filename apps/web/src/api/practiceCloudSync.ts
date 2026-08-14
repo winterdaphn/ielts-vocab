@@ -202,7 +202,37 @@ async function drainCloudSessionPatch(opts?: { keepalive?: boolean }): Promise<v
         },
         opts
       );
-      if (updated?.gone) {
+      if (!updated) {
+        practiceSyncLog('error', 'practice-cloud', 'PATCH 无响应');
+        notifyPracticeSyncFailure('patch_empty', '练习进度同步失败，请稍后重试');
+        continue;
+      }
+      if ('error' in updated) {
+        practiceSyncLog('error', 'practice-cloud', 'PATCH 失败', updated);
+        if (updated.error === 'network' || updated.error === 'serialize_failed') {
+          notifyPracticeSyncFailure(
+            'patch_network',
+            updated.error === 'serialize_failed'
+              ? '练习进度数据无法上传，请刷新后重试'
+              : `练习进度同步失败：${updated.body || '网络异常'}`
+          );
+        } else if (updated.status === 500) {
+          notifyPracticeSyncFailure(
+            'patch_server',
+            `服务端同步失败 (500)${updated.body ? '：' + updated.body.slice(0, 80) : ''}`
+          );
+        } else {
+          notifyPracticeSyncFailure(
+            'patch_http',
+            `练习进度同步失败 (${updated.status || 'HTTP'})`
+          );
+        }
+        if (lastSessionPatchKey === sessionPatchKey(patch)) {
+          lastSessionPatchKey = null;
+        }
+        continue;
+      }
+      if (updated.gone) {
         writeCloudMeta(null);
         lastSessionPatchKey = null;
         setPracticeSyncBoundSession(null, 'session_gone');
@@ -213,19 +243,6 @@ async function drainCloudSessionPatch(opts?: { keepalive?: boolean }): Promise<v
           'session_gone',
           '云端练习会话已失效，请退出后重新进入练习再同步'
         );
-        continue;
-      }
-      if (!updated) {
-        practiceSyncLog('error', 'practice-cloud', 'PATCH 请求失败 (非 2xx 或无 revision)', {
-          idx: patch.idx,
-        });
-        notifyPracticeSyncFailure(
-          'patch_http',
-          '练习进度同步失败，请检查网络后重试'
-        );
-        if (lastSessionPatchKey === sessionPatchKey(patch)) {
-          lastSessionPatchKey = null;
-        }
         continue;
       }
       if (updated.applied === false) {
@@ -252,10 +269,13 @@ async function drainCloudSessionPatch(opts?: { keepalive?: boolean }): Promise<v
         setPracticeSyncBoundSession(updated.sessionId, 'patch_ok');
       }
     } catch (e) {
-      practiceSyncLog('error', 'practice-cloud', 'PATCH 网络异常', e);
+      practiceSyncLog('error', 'practice-cloud', 'PATCH 意外异常', {
+        message: e instanceof Error ? e.message : String(e),
+        name: e instanceof Error ? e.name : typeof e,
+      });
       notifyPracticeSyncFailure(
-        'patch_network',
-        '练习进度同步失败，请检查网络后重试'
+        'patch_unexpected',
+        `练习进度同步异常：${e instanceof Error ? e.message : '未知错误'}`
       );
       if (lastSessionPatchKey === sessionPatchKey(patch)) {
         lastSessionPatchKey = null;

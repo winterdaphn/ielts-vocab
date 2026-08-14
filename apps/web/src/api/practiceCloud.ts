@@ -60,6 +60,18 @@ async function readJson(resp: Response): Promise<Record<string, unknown>> {
   }
 }
 
+function safeJsonBody(payload: unknown): string {
+  return JSON.stringify(payload, (_key, value) => {
+    if (typeof value === 'bigint') return Number(value);
+    if (value instanceof Error) return value.message;
+    return value;
+  });
+}
+
+export type PatchPracticeSessionResult =
+  | { sessionId: string; revision: number; gone?: boolean; applied?: boolean }
+  | { error: string; status?: number; body?: string };
+
 function parseSession(raw: unknown): CloudPracticeSession | null {
   if (!raw || typeof raw !== 'object') return null;
   const o = raw as Record<string, unknown>;
@@ -188,30 +200,66 @@ export async function patchPracticeSession(
     clientUpdatedAt?: number;
   },
   opts?: { keepalive?: boolean }
-): Promise<{ sessionId: string; revision: number; gone?: boolean; applied?: boolean } | null> {
+): Promise<PatchPracticeSessionResult | null> {
   const { clientUpdatedAt, ...rest } = patch;
-  const resp = await fetch(
-    getBase(settings) + '/api/practice/sessions/' + encodeURIComponent(sessionId),
-    {
-      method: 'PATCH',
-      headers: headers(settings),
-      body: JSON.stringify({
-        ...rest,
-        clientUpdatedAt: clientUpdatedAt ?? Date.now(),
-      }),
-      keepalive: !!opts?.keepalive,
+  let body: string;
+  try {
+    body = safeJsonBody({
+      ...rest,
+      clientUpdatedAt: clientUpdatedAt ?? Date.now(),
+    });
+  } catch (e) {
+    return {
+      error: 'serialize_failed',
+      body: e instanceof Error ? e.message : String(e),
+    };
+  }
+
+  let resp: Response;
+  try {
+    resp = await fetch(
+      getBase(settings) + '/api/practice/sessions/' + encodeURIComponent(sessionId),
+      {
+        method: 'PATCH',
+        headers: headers(settings),
+        body,
+        keepalive: !!opts?.keepalive,
+      }
+    );
+  } catch (e) {
+    return {
+      error: 'network',
+      body: e instanceof Error ? e.message : String(e),
+    };
+  }
+
+  const rawText = await resp.text();
+  let data: Record<string, unknown> = {};
+  if (rawText) {
+    try {
+      data = JSON.parse(rawText) as Record<string, unknown>;
+    } catch {
+      data = {};
     }
-  );
-  const data = await readJson(resp);
+  }
+
   if (resp.status === 404) {
     return { sessionId, revision: 0, gone: true };
   }
-  if (!resp.ok) return null;
+  if (!resp.ok) {
+    return {
+      error: String(data.error || 'http_error'),
+      status: resp.status,
+      body: rawText.slice(0, 500) || String(data.message || ''),
+    };
+  }
   // 新：轻量 { sessionId, revision }；旧：整包 session（兼容过渡）
   const legacy = data.session as { sessionId?: string; revision?: number } | undefined;
   const sid = String(data.sessionId || legacy?.sessionId || sessionId);
   const revision = Number(data.revision ?? legacy?.revision);
-  if (!Number.isFinite(revision)) return null;
+  if (!Number.isFinite(revision)) {
+    return { error: 'invalid_response', status: resp.status };
+  }
   return {
     sessionId: sid,
     revision,

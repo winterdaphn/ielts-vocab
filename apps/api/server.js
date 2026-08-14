@@ -1960,51 +1960,87 @@ export async function buildApp(pool, { logger = false } = {}) {
     const body = req.body || {};
     const clientUpdatedAt = Number(body.clientUpdatedAt) || Date.now();
 
-    const cur = await pool.query(
-      `SELECT session_id, idx, stats, ui_state, revision, client_updated_at, updated_at
-       FROM practice_sessions
-       WHERE session_id = $1 AND user_id = $2 AND status = 'active'`,
-      [sessionId, req.user.id]
-    );
-    if (cur.rowCount === 0) return reply.code(404).send({ error: 'session_not_found' });
+    try {
+      const cur = await pool.query(
+        `SELECT session_id, idx, stats, ui_state, revision, client_updated_at, updated_at
+         FROM practice_sessions
+         WHERE session_id = $1 AND user_id = $2 AND status = 'active'`,
+        [sessionId, req.user.id]
+      );
+      if (cur.rowCount === 0) return reply.code(404).send({ error: 'session_not_found' });
 
-    const row = cur.rows[0];
-    // 冲突时也不回整包 items，客户端只需要 revision 做元数据
-    if (clientUpdatedAt < Number(row.client_updated_at || 0)) {
+      const row = cur.rows[0];
+      if (clientUpdatedAt < Number(row.client_updated_at || 0)) {
+        return {
+          ok: true,
+          applied: false,
+          sessionId,
+          revision: Number(row.revision) || 0,
+          updatedAt: new Date(row.updated_at).getTime(),
+        };
+      }
+
+      const idxRaw = body.idx !== undefined ? Number(body.idx) : Number(row.idx);
+      if (!Number.isFinite(idxRaw) || idxRaw < 0 || idxRaw > 500) {
+        return reply.code(400).send({ error: 'invalid_idx', idx: body.idx });
+      }
+      const idx = Math.floor(idxRaw);
+
+      const stats =
+        body.stats !== undefined && body.stats !== null
+          ? body.stats
+          : row.stats && typeof row.stats === 'object'
+            ? row.stats
+            : { correct: 0, total: 0 };
+      const uiState =
+        body.uiState !== undefined && body.uiState !== null
+          ? body.uiState
+          : row.ui_state && typeof row.ui_state === 'object'
+            ? row.ui_state
+            : {};
+
+      let statsJson;
+      let uiJson;
+      try {
+        statsJson = JSON.stringify(stats);
+        uiJson = JSON.stringify(uiState);
+      } catch (e) {
+        console.error('[practice] patch session json stringify', e);
+        return reply.code(400).send({ error: 'invalid_patch_json' });
+      }
+
+      const updated = await pool.query(
+        `UPDATE practice_sessions SET
+           idx = $1,
+           stats = $2::jsonb,
+           ui_state = $3::jsonb,
+           revision = revision + 1,
+           client_updated_at = $4,
+           updated_at = NOW()
+         WHERE session_id = $5 AND user_id = $6 AND status = 'active'
+         RETURNING session_id, revision, updated_at`,
+        [idx, statsJson, uiJson, clientUpdatedAt, sessionId, req.user.id]
+      );
+
+      if (!updated.rowCount || !updated.rows[0]) {
+        return reply.code(404).send({ error: 'session_not_found' });
+      }
+
+      const out = updated.rows[0];
       return {
         ok: true,
-        applied: false,
-        sessionId,
-        revision: Number(row.revision) || 0,
-        updatedAt: new Date(row.updated_at).getTime(),
+        applied: true,
+        sessionId: out.session_id,
+        revision: Number(out.revision) || 0,
+        updatedAt: new Date(out.updated_at).getTime(),
       };
+    } catch (e) {
+      console.error('[practice] patch session failed', { sessionId, userId: req.user.id, e });
+      return reply.code(500).send({
+        error: 'patch_session_failed',
+        message: e instanceof Error ? e.message : String(e),
+      });
     }
-
-    const idx = body.idx !== undefined ? Number(body.idx) : row.idx;
-    const stats = body.stats !== undefined ? body.stats : row.stats;
-    const uiState = body.uiState !== undefined ? body.uiState : row.ui_state;
-
-    const updated = await pool.query(
-      `UPDATE practice_sessions SET
-         idx = $1,
-         stats = $2::jsonb,
-         ui_state = $3::jsonb,
-         revision = revision + 1,
-         client_updated_at = $4,
-         updated_at = NOW()
-       WHERE session_id = $5 AND user_id = $6
-       RETURNING session_id, revision, updated_at`,
-      [idx, JSON.stringify(stats), JSON.stringify(uiState), clientUpdatedAt, sessionId, req.user.id]
-    );
-
-    const out = updated.rows[0];
-    return {
-      ok: true,
-      applied: true,
-      sessionId: out.session_id,
-      revision: Number(out.revision) || 0,
-      updatedAt: new Date(out.updated_at).getTime(),
-    };
   });
 
   app.put('/api/practice/sessions/:sessionId/items/:ordinal', { preHandler: requireAuth }, async (req, reply) => {
