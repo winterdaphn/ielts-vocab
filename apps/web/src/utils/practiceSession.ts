@@ -125,6 +125,31 @@ export function readSavedPracticeSession(): SavedPracticeSession | null {
   }
 }
 
+/** 同一轮练习：词序、模式、范围、难度一致 */
+export function sessionsSameRound(
+  a: SavedPracticeSession,
+  b: SavedPracticeSession
+): boolean {
+  return (
+    parsePracticeMode(a.mode) === parsePracticeMode(b.mode) &&
+    parseStudyScope(a.scope) === parseStudyScope(b.scope) &&
+    parseSentenceDifficulty(a.difficulty) === parseSentenceDifficulty(b.difficulty) &&
+    a.wordIds.length === b.wordIds.length &&
+    a.wordIds.every((id, i) => id === b.wordIds[i])
+  );
+}
+
+/** 同一轮且本机进度严格领先云端（题号或已答题数更大） */
+export function localPracticeAheadOfRemote(
+  local: SavedPracticeSession,
+  remote: SavedPracticeSession
+): boolean {
+  if (!sessionsSameRound(local, remote)) return false;
+  if (local.idx > remote.idx) return true;
+  if (local.idx < remote.idx) return false;
+  return (local.stats?.total ?? 0) > (remote.stats?.total ?? 0);
+}
+
 /** Prefer forward progress for the same round; otherwise prefer the newer round. */
 export function choosePracticeSession(
   local: SavedPracticeSession | null,
@@ -137,13 +162,7 @@ export function choosePracticeSession(
   if (!active(remote)) return local;
   if (!local || !remote) return local || remote;
 
-  const sameRound =
-    parsePracticeMode(local.mode) === parsePracticeMode(remote.mode) &&
-    parseStudyScope(local.scope) === parseStudyScope(remote.scope) &&
-    parseSentenceDifficulty(local.difficulty) ===
-      parseSentenceDifficulty(remote.difficulty) &&
-    local.wordIds.length === remote.wordIds.length &&
-    local.wordIds.every((id, i) => id === remote.wordIds[i]);
+  const sameRound = sessionsSameRound(local, remote);
 
   if (sameRound) {
     if (local.idx !== remote.idx) return local.idx > remote.idx ? local : remote;

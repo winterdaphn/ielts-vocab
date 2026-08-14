@@ -30,6 +30,7 @@ import {
   syncCloudItemAttempt,
   syncCloudItemExample,
   readCloudMeta,
+  pushLocalPracticeAheadOfRemote,
 } from '@/api/practiceCloudSync';
 import { getRelatedFromBank, mergeSynonymSources, getBankLexisExtras, ensureVocabBankRelated } from '@/utils/vocabBankRelated';
 import { setLS, getLS, todayKey } from '@/utils/date';
@@ -417,7 +418,8 @@ export function usePracticeSession() {
           judgeResult:
             overrides.judgeResult !== undefined ? overrides.judgeResult : judgeResult,
         },
-        clientUpdatedAt: savedAt,
+        // 用 max 避免夸克等后台 PATCH 丢包后 savedAt 落后于云端 client_updated_at
+        clientUpdatedAt: Math.max(savedAt, Date.now()),
       });
     } else if (settings.syncToken) {
       practiceSyncLog('warn', 'practice-cloud', '跳过 PATCH：未绑定 cloudId', {
@@ -816,6 +818,14 @@ export function usePracticeSession() {
       createdFreshCloud = !!cloud;
     } else if (remote) {
       bindPracticeCloudId(remote.sessionId, 'resume_remote');
+      if (
+        localWon &&
+        sameRemoteRound &&
+        activeLocal &&
+        activeLocal.idx > remote.idx
+      ) {
+        await pushLocalPracticeAheadOfRemote(remote, activeLocal);
+      }
     }
 
     setSessionWords(hydrated.sessionWords);
