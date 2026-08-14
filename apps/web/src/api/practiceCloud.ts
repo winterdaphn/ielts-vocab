@@ -216,6 +216,9 @@ export async function patchPracticeSession(
   }
 
   let resp: Response;
+  const controller = new AbortController();
+  const timeoutMs = opts?.keepalive ? 8000 : 25000;
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     resp = await fetch(
       getBase(settings) + '/api/practice/sessions/' + encodeURIComponent(sessionId),
@@ -224,13 +227,17 @@ export async function patchPracticeSession(
         headers: headers(settings),
         body,
         keepalive: !!opts?.keepalive,
+        signal: controller.signal,
       }
     );
   } catch (e) {
+    const aborted = e instanceof Error && e.name === 'AbortError';
     return {
-      error: 'network',
+      error: aborted ? 'timeout' : 'network',
       body: e instanceof Error ? e.message : String(e),
     };
+  } finally {
+    clearTimeout(timer);
   }
 
   const rawText = await resp.text();

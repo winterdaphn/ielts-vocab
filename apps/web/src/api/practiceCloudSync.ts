@@ -210,12 +210,14 @@ async function drainCloudSessionPatch(opts?: { keepalive?: boolean }): Promise<v
       }
       if ('error' in updated) {
         practiceSyncLog('error', 'practice-cloud', 'PATCH 失败', updated);
-        if (updated.error === 'network' || updated.error === 'serialize_failed') {
+        if (updated.error === 'network' || updated.error === 'timeout' || updated.error === 'serialize_failed') {
           notifyPracticeSyncFailure(
             'patch_network',
             updated.error === 'serialize_failed'
               ? '练习进度数据无法上传，请刷新后重试'
-              : `练习进度同步失败：${updated.body || '网络异常'}`
+              : updated.error === 'timeout'
+                ? '练习进度同步超时，请检查网络或稍后重试'
+                : `练习进度同步失败：${updated.body || '网络异常'}`
           );
         } else if (updated.status === 500) {
           notifyPracticeSyncFailure(
@@ -609,6 +611,8 @@ export async function completeStaleCloudPractice(sessionId: string): Promise<voi
   }
 }
 
+const pushAheadInFlight = new Map<string, Promise<boolean>>();
+
 function localUiState(local: SavedPracticeSession): Record<string, unknown> {
   return {
     showAnswer: !!local.showAnswer,
@@ -631,6 +635,21 @@ export async function pushLocalPracticeAheadOfRemote(
   const remoteSaved = cloudSessionFromSaved(remote);
   if (!localPracticeAheadOfRemote(local, remoteSaved)) return true;
 
+  const sid = remote.sessionId;
+  const inFlight = pushAheadInFlight.get(sid);
+  if (inFlight) return inFlight;
+
+  const work = pushLocalPracticeAheadOfRemoteInner(remote, local).finally(() => {
+    pushAheadInFlight.delete(sid);
+  });
+  pushAheadInFlight.set(sid, work);
+  return work;
+}
+
+async function pushLocalPracticeAheadOfRemoteInner(
+  remote: CloudPracticeSession,
+  local: SavedPracticeSession
+): Promise<boolean> {
   const s = settings();
   if (!s.syncToken) return false;
 
@@ -639,6 +658,7 @@ export async function pushLocalPracticeAheadOfRemote(
     remote.clientUpdatedAt ?? 0,
     Date.now()
   );
+  const metaBefore = readCloudMeta();
   lastSessionPatchKey = null;
   practiceSyncLog('info', 'practice-cloud', '本机领先，补推进度', {
     localIdx: local.idx,
@@ -646,27 +666,28 @@ export async function pushLocalPracticeAheadOfRemote(
     sessionId: remote.sessionId.slice(0, 8),
   });
 
-  let updated = await patchPracticeSession(s, remote.sessionId, {
+  // 走统一 PATCH 队列，避免与 idx 变更触发的 PATCH 并发挂起
+  scheduleCloudSessionPatch({
+    sessionId: remote.sessionId,
     idx: local.idx,
     stats: local.stats ?? { correct: 0, total: 0 },
     uiState: localUiState(local),
     clientUpdatedAt,
   });
-  if (updated && !('error' in updated) && updated.applied === false) {
-    updated = await patchPracticeSession(s, remote.sessionId, {
-      idx: local.idx,
-      stats: local.stats ?? { correct: 0, total: 0 },
-      uiState: localUiState(local),
-      clientUpdatedAt: Math.max(clientUpdatedAt + 1, Date.now()),
+  await flushCloudSessionPatch();
+
+  const metaAfter = readCloudMeta();
+  const pushed =
+    !!metaAfter &&
+    metaAfter.sessionId === remote.sessionId &&
+    (metaAfter.revision ?? 0) > (metaBefore?.revision ?? remote.revision);
+  if (!pushed) {
+    practiceSyncLog('warn', 'practice-cloud', '本机领先补推未完成', {
+      before: metaBefore?.revision,
+      after: metaAfter?.revision,
     });
-  }
-  if (!updated || 'error' in updated || updated.gone || updated.applied === false) {
-    practiceSyncLog('warn', 'practice-cloud', '本机领先补推失败', updated);
     return false;
   }
-
-  writeCloudMeta({ sessionId: updated.sessionId, revision: updated.revision });
-  setPracticeSyncBoundSession(updated.sessionId, 'push_ahead');
 
   const batch: Array<{
     ordinal: number;
