@@ -28,13 +28,9 @@ export function practiceSyncLog(
   else console.info(prefix, detail ?? '');
 }
 
-export function setPracticeSyncBoundSession(sessionId: string | null, source: string) {
+export function setPracticeSyncBoundSession(sessionId: string | null, _source: string) {
   boundSessionId = sessionId;
-  boundSource = source;
-  practiceSyncLog('info', 'practice-bind', sessionId ? '已绑定云端 session' : '未绑定云端 session', {
-    sessionId,
-    source,
-  });
+  boundSource = _source;
 }
 
 export function getPracticeSyncDiagnostics() {

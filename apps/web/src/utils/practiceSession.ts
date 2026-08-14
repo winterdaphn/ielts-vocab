@@ -139,17 +139,6 @@ export function sessionsSameRound(
   );
 }
 
-/** 同一轮且本机进度严格领先云端（题号或已答题数更大） */
-export function localPracticeAheadOfRemote(
-  local: SavedPracticeSession,
-  remote: SavedPracticeSession
-): boolean {
-  if (!sessionsSameRound(local, remote)) return false;
-  if (local.idx > remote.idx) return true;
-  if (local.idx < remote.idx) return false;
-  return (local.stats?.total ?? 0) > (remote.stats?.total ?? 0);
-}
-
 /** Prefer forward progress for the same round; otherwise prefer the newer round. */
 export function choosePracticeSession(
   local: SavedPracticeSession | null,

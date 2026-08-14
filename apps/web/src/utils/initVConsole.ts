@@ -1,7 +1,4 @@
-import { getPracticeSyncDiagnostics, practiceSyncLog } from '@/utils/practiceSyncDebug';
-
 let installed = false;
-
 const DEBUG_KEY = 'iv-debug';
 
 /** 仅 URL ?debug=1 或已手动开启时加载 vConsole（移动端/PC 一致） */
@@ -34,13 +31,6 @@ export async function initVConsoleIfNeeded(): Promise<void> {
 
   const { default: VConsole } = await import('vconsole');
   new VConsole({ theme: 'dark' });
-
-  practiceSyncLog(
-    'info',
-    'vconsole',
-    'vConsole 已启用（地址加 ?debug=1 唤醒；?debug=0 关闭）'
-  );
-  console.info('[practice-sync] 当前诊断', getPracticeSyncDiagnostics());
 }
 
 /** 持久开启（跨标签/重启仍有效）；一般只用 ?debug=1 即可 */

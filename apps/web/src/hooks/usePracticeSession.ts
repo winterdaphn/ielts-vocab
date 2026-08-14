@@ -30,7 +30,6 @@ import {
   syncCloudItemAttempt,
   syncCloudItemExample,
   readCloudMeta,
-  pushLocalPracticeAheadOfRemote,
 } from '@/api/practiceCloudSync';
 import { getRelatedFromBank, mergeSynonymSources, getBankLexisExtras, ensureVocabBankRelated } from '@/utils/vocabBankRelated';
 import { setLS, getLS, todayKey } from '@/utils/date';
@@ -50,7 +49,6 @@ import {
 } from '@/utils/practiceSession';
 import {
   notifyPracticeSyncFailure,
-  practiceSyncLog,
   setPracticeSyncBoundSession,
 } from '@/utils/practiceSyncDebug';
 import {
@@ -418,14 +416,9 @@ export function usePracticeSession() {
           judgeResult:
             overrides.judgeResult !== undefined ? overrides.judgeResult : judgeResult,
         },
-        // 用 max 避免夸克等后台 PATCH 丢包后 savedAt 落后于云端 client_updated_at
-        clientUpdatedAt: Math.max(savedAt, Date.now()),
+        clientUpdatedAt: savedAt,
       });
     } else if (settings.syncToken) {
-      practiceSyncLog('warn', 'practice-cloud', '跳过 PATCH：未绑定 cloudId', {
-        idx: overrides.idx ?? idx,
-        phase: overrides.phase ?? phase,
-      });
       notifyPracticeSyncFailure(
         'no_session',
         '练习未绑定云端会话，进度无法跨设备同步'
@@ -818,14 +811,6 @@ export function usePracticeSession() {
       createdFreshCloud = !!cloud;
     } else if (remote) {
       bindPracticeCloudId(remote.sessionId, 'resume_remote');
-      if (
-        localWon &&
-        sameRemoteRound &&
-        activeLocal &&
-        activeLocal.idx > remote.idx
-      ) {
-        await pushLocalPracticeAheadOfRemote(remote, activeLocal);
-      }
     }
 
     setSessionWords(hydrated.sessionWords);
@@ -885,12 +870,6 @@ export function usePracticeSession() {
     }
     setPhase('asking');
     kickPrefetch(sid, hydrated.sessionWords, hydrated.mode, hydrated.idx);
-    practiceSyncLog('info', 'practice-cloud', '续做完成', {
-      idx: hydrated.idx,
-      cloudId: cloudPracticeSessionIdRef.current?.slice(0, 8) ?? null,
-      remoteIdx: remote?.idx ?? null,
-      localWon,
-    });
     message.success('已恢复练习进度');
   }
 
