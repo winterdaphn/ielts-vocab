@@ -940,11 +940,19 @@ export default function WordDetailPage() {
                     source: 'dict',
                   });
                   message.success(existed ? '已在搭配本' : '已加入搭配本');
-                  if (existed) navigate(`/chunks/${chunk.id}`);
+                  if (existed) {
+                    navigate(`/chunks/${chunk.id}`, {
+                      state: wordDetailDrillLinkState(detailNav),
+                    });
+                  }
                 }}
                 onOpenInDeck={(phraseKey) => {
                   const cid = chunkIdByKey.get(phraseKey);
-                  if (cid) navigate(`/chunks/${cid}`);
+                  if (cid) {
+                    navigate(`/chunks/${cid}`, {
+                      state: wordDetailDrillLinkState(detailNav),
+                    });
+                  }
                 }}
               />
             </>
@@ -983,11 +991,19 @@ export default function WordDetailPage() {
                     source: 'manual',
                   });
                   message.success(existed ? '已在搭配本' : '已加入搭配本');
-                  if (existed) navigate(`/chunks/${chunk.id}`);
+                  if (existed) {
+                    navigate(`/chunks/${chunk.id}`, {
+                      state: wordDetailDrillLinkState(detailNav),
+                    });
+                  }
                 }}
                 onOpenInDeck={(phraseKey) => {
                   const cid = chunkIdByKey.get(phraseKey);
-                  if (cid) navigate(`/chunks/${cid}`);
+                  if (cid) {
+                    navigate(`/chunks/${cid}`, {
+                      state: wordDetailDrillLinkState(detailNav),
+                    });
+                  }
                 }}
               />
               {showColoAdd && (

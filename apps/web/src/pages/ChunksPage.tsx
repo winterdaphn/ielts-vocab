@@ -60,7 +60,7 @@ export default function ChunksPage() {
     if (!item) return;
     const { existed, frame } = await addFromPack(item);
     message.success(existed ? '已在模板本' : '已加入模板本');
-    if (!existed) navigate(`/frames/${frame.id}`);
+    if (!existed) navigate(`/frames/${frame.id}`, { state: entryNav });
   }
 
   return (
@@ -166,7 +166,7 @@ export default function ChunksPage() {
                 <button
                   type="button"
                   className="deck-list-item"
-                  onClick={() => navigate(`/chunks/${c.id}`)}
+                  onClick={() => navigate(`/chunks/${c.id}`, { state: entryNav })}
                 >
                   <div>
                     <b>{c.phrase}</b>
@@ -216,7 +216,7 @@ export default function ChunksPage() {
                   <button
                     type="button"
                     className="deck-list-item"
-                    onClick={() => navigate(`/frames/${f.id}`)}
+                    onClick={() => navigate(`/frames/${f.id}`, { state: entryNav })}
                   >
                     <div>
                       <b>{f.title}</b>

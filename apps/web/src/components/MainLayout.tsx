@@ -60,7 +60,9 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
 
   const isWordsList = location.pathname === '/words';
 
-  const hideMainNav = isPractice || isWordDetail || isChunkDetail || isFrameDetail;
+  const isDetailWithBottomBar = isWordDetail || isChunkDetail || isFrameDetail;
+
+  const hideMainNav = isPractice || isDetailWithBottomBar;
 
 
 
@@ -197,7 +199,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
 
       className={`app-container${isPractice ? ' practice-mode' : ''}${
 
-        isWordDetail ? ' word-detail-mode' : ''
+        isDetailWithBottomBar ? ' word-detail-mode' : ''
 
       }${isWordsList ? ' words-mode' : ''}`}
 

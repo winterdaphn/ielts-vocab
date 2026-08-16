@@ -41,10 +41,11 @@ export function useWordDetailEntryNav(): WordDetailNavState {
 
 export function resolveWordDetailBack(
   state: WordDetailNavState | null | undefined,
-  historyIdx: number | undefined
+  historyIdx: number | undefined,
+  defaultPath = '/words'
 ): { type: 'back' } | { type: 'to'; path: string } {
   if (state?.drill) return { type: 'back' };
   if (state?.returnTo) return { type: 'to', path: state.returnTo };
   if (typeof historyIdx === 'number' && historyIdx > 0) return { type: 'back' };
-  return { type: 'to', path: '/words' };
+  return { type: 'to', path: defaultPath };
 }
