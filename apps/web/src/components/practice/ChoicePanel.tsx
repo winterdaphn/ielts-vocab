@@ -51,7 +51,9 @@ export default function ChoicePanel({
   const zhText = current.example.zh
     ? resolveClozeChinese(current.example.zh, current.word).text
     : '';
-  const correct = showAnswer && picked === current.example.answer;
+  const hasPick = picked !== null;
+  const correct = showAnswer && hasPick && picked === current.example.answer;
+  const unknownPast = showAnswer && !hasPick;
 
   return (
     <>
@@ -106,11 +108,11 @@ export default function ChoicePanel({
       </div>
       {showAnswer && (
         <div
-          className={`feedback-area show ${correct ? 'correct' : 'wrong'}`}
+          className={`feedback-area show ${unknownPast ? '' : correct ? 'correct' : 'wrong'}`}
           style={{ display: 'block', marginTop: 12 }}
         >
           <div style={{ fontWeight: 600, marginBottom: 4 }}>
-            {correct ? '✓ 正确' : '✗ 不对'}
+            {unknownPast ? '已作答' : correct ? '✓ 正确' : '✗ 不对'}
           </div>
           <div>
             本题答案是{' '}

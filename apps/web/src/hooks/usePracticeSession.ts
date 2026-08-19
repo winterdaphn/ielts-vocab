@@ -135,19 +135,19 @@ export function usePracticeSession() {
   const sessionIdRef = useRef(0);
   /** 再次测试：同一批词重练，不写入 SRS / 学习统计 */
   const skipReviewRef = useRef(false);
+  type CardSnapshot = {
+    showAnswer: boolean;
+    picked: string | null;
+    judgeResult: JudgeResult;
+    hintShown: boolean;
+    translateHintLevel: number;
+    translateHints: TranslateHints | null;
+  };
   /** 已作答题目的 UI 快照，支持返回上一题 */
-  const cardStatesRef = useRef<
-    Map<
-      number,
-      {
-        showAnswer: boolean;
-        picked: string | null;
-        judgeResult: JudgeResult;
-        hintShown: boolean;
-        translateHintLevel: number;
-        translateHints: TranslateHints | null;
-      }
-    >
+  const cardStatesRef = useRef<Map<number, CardSnapshot>>(new Map());
+  /** 已提交作答摘要（无完整快照时的兜底，如续做恢复） */
+  const attemptByIdxRef = useRef<
+    Map<number, { picked: string | null; judgeResult: JudgeResult; correct: boolean }>
   >(new Map());
   /** 已写入 SRS 的题号，返回后再点下一题不重复计分 */
   const reviewedIndicesRef = useRef<Set<number>>(new Set());
@@ -268,8 +268,82 @@ export function usePracticeSession() {
 
   function resetNavigationHistory() {
     cardStatesRef.current = new Map();
+    attemptByIdxRef.current = new Map();
     reviewedIndicesRef.current = new Set();
     maxVisitedIdxRef.current = 0;
+  }
+
+  function rememberCardAt(ordinal: number, snap: CardSnapshot) {
+    cardStatesRef.current.set(ordinal, snap);
+  }
+
+  function rememberAttemptAt(
+    ordinal: number,
+    data: { picked: string | null; judgeResult: JudgeResult; correct: boolean }
+  ) {
+    attemptByIdxRef.current.set(ordinal, data);
+  }
+
+  function cardSnapshotFromAttempt(
+    attempt: Record<string, unknown>,
+    m: Mode
+  ): CardSnapshot | null {
+    const picked = typeof attempt.picked === 'string' ? attempt.picked : null;
+    const judgeResult = (attempt.judgeResult as JudgeResult) ?? null;
+    const correct = !!attempt.correct;
+
+    if (m === 'choice') {
+      if (!picked) return null;
+      return {
+        showAnswer: true,
+        picked,
+        judgeResult: null,
+        hintShown: false,
+        translateHintLevel: 0,
+        translateHints: null,
+      };
+    }
+    if (m === 'translate') {
+      return {
+        showAnswer: false,
+        picked: null,
+        judgeResult: judgeResult ?? { correct, feedback: '（已作答）' },
+        hintShown: false,
+        translateHintLevel: 0,
+        translateHints: null,
+      };
+    }
+    return {
+      showAnswer: true,
+      picked: null,
+      judgeResult: judgeResult ?? {
+        correct,
+        feedback: '（已作答）',
+        revealed: !correct,
+      },
+      hintShown: true,
+      translateHintLevel: 0,
+      translateHints: null,
+    };
+  }
+
+  function seedCardStatesFromAttempts(
+    items: { ordinal: number; attempt: Record<string, unknown> | null }[],
+    m: Mode,
+    upToIdx: number
+  ) {
+    for (const item of items) {
+      if (item.ordinal >= upToIdx || !item.attempt) continue;
+      const snap = cardSnapshotFromAttempt(item.attempt, m);
+      if (!snap) continue;
+      rememberCardAt(item.ordinal, snap);
+      rememberAttemptAt(item.ordinal, {
+        picked: snap.picked,
+        judgeResult: snap.judgeResult,
+        correct: !!item.attempt.correct,
+      });
+      reviewedIndicesRef.current.add(item.ordinal);
+    }
   }
 
   function snapshotCurrentCard() {
@@ -319,20 +393,35 @@ export function usePracticeSession() {
     const saved = cardStatesRef.current.get(target);
     if (saved) {
       applyCardSnapshot(saved);
-    } else if (reviewedIndicesRef.current.has(target) || target < stats.total) {
-      applyCardSnapshot({
-        showAnswer: mode !== 'translate',
-        picked: null,
-        judgeResult:
-          mode === 'translate'
-            ? { correct: true, feedback: '（已作答）' }
-            : null,
-        hintShown: mode === 'cloze',
-        translateHintLevel: 0,
-        translateHints: null,
-      });
     } else {
-      resetFreshCardUi();
+      const attempt = attemptByIdxRef.current.get(target);
+      const fromAttempt = attempt
+        ? cardSnapshotFromAttempt(
+            {
+              picked: attempt.picked,
+              judgeResult: attempt.judgeResult,
+              correct: attempt.correct,
+            },
+            mode
+          )
+        : null;
+      if (fromAttempt) {
+        applyCardSnapshot(fromAttempt);
+      } else if (reviewedIndicesRef.current.has(target) || target < stats.total) {
+        applyCardSnapshot({
+          showAnswer: mode !== 'translate',
+          picked: null,
+          judgeResult:
+            mode === 'translate'
+              ? { correct: true, feedback: '（已作答）' }
+              : null,
+          hintShown: mode === 'cloze',
+          translateHintLevel: 0,
+          translateHints: null,
+        });
+      } else {
+        resetFreshCardUi();
+      }
     }
     resetTransientUi();
     setIdx(target);
@@ -832,12 +921,15 @@ export function usePracticeSession() {
     setJudgeResult(hydrated.judgeResult);
 
     maxVisitedIdxRef.current = hydrated.idx;
+    if (remote?.items?.length) {
+      seedCardStatesFromAttempts(remote.items, hydrated.mode, hydrated.idx);
+    }
     for (let i = 0; i < hydrated.idx; i++) {
       reviewedIndicesRef.current.add(i);
     }
     if (hydrated.showAnswer || hydrated.judgeResult) {
       reviewedIndicesRef.current.add(hydrated.idx);
-      cardStatesRef.current.set(hydrated.idx, {
+      rememberCardAt(hydrated.idx, {
         showAnswer: hydrated.showAnswer,
         picked: hydrated.picked,
         judgeResult: hydrated.judgeResult,
@@ -1132,6 +1224,16 @@ export function usePracticeSession() {
       correct: stats.correct + (correct ? 1 : 0),
       total: stats.total + 1,
     };
+    const snap: CardSnapshot = {
+      showAnswer: true,
+      picked: letter,
+      judgeResult: null,
+      hintShown,
+      translateHintLevel,
+      translateHints,
+    };
+    rememberCardAt(idx, snap);
+    rememberAttemptAt(idx, { picked: letter, judgeResult: null, correct });
     setPicked(letter);
     setShowAnswer(true);
     setStats(nextStats);
@@ -1161,6 +1263,20 @@ export function usePracticeSession() {
         revealed: true,
       } as const;
       const nextStats = { correct: stats.correct, total: stats.total + 1 };
+      const snap: CardSnapshot = {
+        showAnswer: true,
+        picked: null,
+        judgeResult: emptyJudge,
+        hintShown: true,
+        translateHintLevel,
+        translateHints,
+      };
+      rememberCardAt(idx, snap);
+      rememberAttemptAt(idx, {
+        picked: null,
+        judgeResult: emptyJudge,
+        correct: false,
+      });
       setJudgeResult(emptyJudge);
       setShowAnswer(true);
       setHintShown(true);
@@ -1187,6 +1303,20 @@ export function usePracticeSession() {
         correct: stats.correct + (result.correct ? 1 : 0),
         total: stats.total + 1,
       };
+      const snap: CardSnapshot = {
+        showAnswer: true,
+        picked: null,
+        judgeResult: result,
+        hintShown,
+        translateHintLevel,
+        translateHints,
+      };
+      rememberCardAt(idx, snap);
+      rememberAttemptAt(idx, {
+        picked: null,
+        judgeResult: result,
+        correct: !!result.correct,
+      });
       setJudgeResult(result);
       setShowAnswer(true);
       setStats(nextStats);
@@ -1226,6 +1356,20 @@ export function usePracticeSession() {
         correct: stats.correct + (result.correct ? 1 : 0),
         total: stats.total + 1,
       };
+      const snap: CardSnapshot = {
+        showAnswer: false,
+        picked: null,
+        judgeResult: result,
+        hintShown,
+        translateHintLevel,
+        translateHints,
+      };
+      rememberCardAt(idx, snap);
+      rememberAttemptAt(idx, {
+        picked: null,
+        judgeResult: result,
+        correct: !!result.correct,
+      });
       setJudgeResult(result);
       setStats(nextStats);
       persist({
@@ -1245,19 +1389,21 @@ export function usePracticeSession() {
     if (!canGoNext && !browsingForward) return;
 
     if (canGoNext) {
-      cardStatesRef.current.set(idx, snapshotCurrentCard());
+      const snap = snapshotCurrentCard();
+      rememberCardAt(idx, snap);
     } else {
       goToCard(idx + 1);
       return;
     }
 
     const alreadyReviewed = reviewedIndicesRef.current.has(idx);
+    const wasCorrect =
+      mode === 'choice'
+        ? picked === current?.example.answer
+        : !!judgeResult?.correct;
+    rememberAttemptAt(idx, { picked, judgeResult, correct: wasCorrect });
 
     if (current && !skipReviewRef.current && !alreadyReviewed) {
-      const wasCorrect =
-        mode === 'choice'
-          ? picked === current.example.answer
-          : judgeResult?.correct;
       const quality = wasCorrect ? 5 : 1;
       const latest = latestWordSnapshot(current.word);
       const updated = applyReview(latest, quality as 1 | 5);
