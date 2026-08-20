@@ -213,15 +213,85 @@ export function reconcilePracticeSession(
   return chosen;
 }
 
-/** 题已全部作答或 idx 已越界 → 不应再展示「继续练习」 */
+/** idx 已越界 → 不应再展示「继续练习」（末题已作答但未点「完成」仍算进行中） */
 export function isPracticeSessionFinished(
-  snap: Pick<SavedPracticeSession, 'wordIds' | 'idx' | 'stats'>
+  snap: Pick<SavedPracticeSession, 'wordIds' | 'idx'>
 ): boolean {
   const total = snap.wordIds.length;
   if (!total) return true;
-  if ((snap.idx ?? 0) >= total) return true;
-  if ((snap.stats?.total ?? 0) >= total) return true;
-  return false;
+  return (snap.idx ?? 0) >= total;
+}
+
+/** 练习完成页快照：刷新 / 从词详情返回时仍可回到结果页 */
+export interface SavedPracticeDone {
+  version: 1;
+  savedAt: number;
+  mode: PracticeMode;
+  scope: StudyScope;
+  difficulty: SentenceDifficulty;
+  wordIds: string[];
+  stats: { correct: number; total: number };
+}
+
+const PRACTICE_DONE_KEY = 'practice-done';
+
+export function savePracticeDone(
+  payload: Omit<SavedPracticeDone, 'version' | 'savedAt'>
+): void {
+  const data: SavedPracticeDone = {
+    version: 1,
+    savedAt: Date.now(),
+    ...payload,
+  };
+  try {
+    setLS(PRACTICE_DONE_KEY, JSON.stringify(data));
+  } catch {
+    /* quota / private mode */
+  }
+}
+
+export function readPracticeDone(): SavedPracticeDone | null {
+  try {
+    const raw = getLS(PRACTICE_DONE_KEY);
+    if (!raw) return null;
+    const o = JSON.parse(raw) as Partial<SavedPracticeDone>;
+    if (o.version !== 1) return null;
+    const wordIds = Array.isArray(o.wordIds)
+      ? o.wordIds.map((id) => String(id)).filter(Boolean)
+      : [];
+    if (!wordIds.length) return null;
+    return {
+      version: 1,
+      savedAt: Number(o.savedAt) || Date.now(),
+      mode: parsePracticeMode(o.mode),
+      scope: parseStudyScope(o.scope),
+      difficulty: parseSentenceDifficulty(o.difficulty),
+      wordIds,
+      stats: {
+        correct: Number(o.stats?.correct) || 0,
+        total: Number(o.stats?.total) || 0,
+      },
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function clearPracticeDone(): void {
+  delLS(PRACTICE_DONE_KEY);
+}
+
+export function practiceDoneMatchesRoute(
+  done: SavedPracticeDone,
+  mode: PracticeMode,
+  scope: StudyScope,
+  difficulty: SentenceDifficulty
+): boolean {
+  return (
+    parsePracticeMode(done.mode) === mode &&
+    parseStudyScope(done.scope) === scope &&
+    parseSentenceDifficulty(done.difficulty) === difficulty
+  );
 }
 
 export function savedSessionToSummary(

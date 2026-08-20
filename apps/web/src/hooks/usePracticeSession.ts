@@ -44,8 +44,13 @@ import {
   parsePracticeMode,
   parseStudyScope,
   parseSentenceDifficulty,
+  readPracticeDone,
+  savePracticeDone,
+  clearPracticeDone,
+  practiceDoneMatchesRoute,
   type StudyScope,
   type SentenceDifficulty,
+  type SavedPracticeDone,
 } from '@/utils/practiceSession';
 import {
   notifyPracticeSyncFailure,
@@ -525,6 +530,14 @@ export function usePracticeSession() {
     }
     if (hasModeParam) {
       startedRef.current = true;
+      const done = readPracticeDone();
+      if (
+        done &&
+        practiceDoneMatchesRoute(done, initialMode, initialScope, initialDifficulty)
+      ) {
+        restoreDonePractice(done);
+        return;
+      }
       if (readSavedPracticeSession()) {
         resumePractice();
       } else {
@@ -546,6 +559,15 @@ export function usePracticeSession() {
       persist({ syncCloud: false });
     } else if (phase === 'done' && prevPhaseRef.current !== 'done') {
       // 仅进入 done 时收尾一次；勿在 next() 里重复 complete
+      if (sessionWords.length) {
+        savePracticeDone({
+          mode,
+          scope,
+          difficulty,
+          wordIds: sessionWords.map((w) => w.id),
+          stats,
+        });
+      }
       void clearPracticeProgress({ completed: true });
     }
     prevPhaseRef.current = phase;
@@ -826,11 +848,33 @@ export function usePracticeSession() {
     }
   }
 
+  function restoreDonePractice(done: SavedPracticeDone) {
+    const idToWord = new Map(words.map((w) => [w.id, w]));
+    const sessionWordsRestored = done.wordIds
+      .map((id) => idToWord.get(id))
+      .filter((w): w is Word => !!w);
+    setMode(parsePracticeMode(done.mode));
+    setScope(parseStudyScope(done.scope));
+    setDifficulty(parseSentenceDifficulty(done.difficulty));
+    difficultyRef.current = parseSentenceDifficulty(done.difficulty);
+    setSessionWords(sessionWordsRestored);
+    setStats(done.stats);
+    setPhase('done');
+  }
+
   async function resumePractice() {
     try {
       await ensureSyncBootstrap();
     } catch {
       /* 拉取失败仍尝试用本机恢复 */
+    }
+    const done = readPracticeDone();
+    if (
+      done &&
+      practiceDoneMatchesRoute(done, initialMode, initialScope, initialDifficulty)
+    ) {
+      restoreDonePractice(done);
+      return;
     }
     const localRaw = readSavedPracticeSession();
     const activeLocal =
@@ -1041,6 +1085,7 @@ export function usePracticeSession() {
     } catch {
       /* 拉取失败仍允许开练 */
     }
+    clearPracticeDone();
     // 只清本机：云端旧 active 由后面 createPracticeSession 一次性删掉，避免 abandon+create 重复
     await clearPracticeProgress({ cloud: false });
     const s = nextScope ?? scope ?? initialScope;
@@ -1178,6 +1223,9 @@ export function usePracticeSession() {
   function exitPractice() {
     const shouldSave =
       phase === 'asking' || phase === 'waiting' || phase === 'judging';
+    if (phase === 'done') {
+      clearPracticeDone();
+    }
     prepareExitPractice();
     navigate('/today', { replace: true });
     if (shouldSave) {
