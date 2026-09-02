@@ -1,158 +1,20 @@
 /**
- * TTS helper — prefer Youdao dictvoice (UK/US) for single words, fall back to speechSynthesis.
+ * TTS helper — prefer Youdao dictvoice (UK/US), fall back to speechSynthesis.
  *
- * Long sentences: browser speechSynthesis only (Youdao dictvoice is word-sized).
- * On iPhone/iPad, Chrome uses the same WebKit TTS as Safari — not Google cloud voices.
+ * Sentences: try Youdao first (short phrases), then browser speechSynthesis.
+ * Do not assign speechSynthesis.voice on Chrome/macOS — causes silent failures.
  */
 
 export type SpeakAccent = 'us' | 'uk';
 
 let currentAudio: HTMLAudioElement | null = null;
-let cachedVoices: SpeechSynthesisVoice[] = [];
 
-function refreshVoices(): SpeechSynthesisVoice[] {
-  if (typeof window === 'undefined' || !window.speechSynthesis) return [];
-  cachedVoices = window.speechSynthesis.getVoices() || [];
-  return cachedVoices;
-}
-
-if (typeof window !== 'undefined' && window.speechSynthesis) {
-  refreshVoices();
-  window.speechSynthesis.addEventListener('voiceschanged', refreshVoices);
-}
-
-function isApplePlatform(): boolean {
-  if (typeof navigator === 'undefined') return false;
-  return /iPhone|iPad|iPod|Macintosh|Mac OS X/i.test(navigator.userAgent);
-}
-
-/** Prefer natural / enhanced English voices (iOS Samantha, macOS Daniel, etc.). */
-function pickEnglishVoice(
-  voices: SpeechSynthesisVoice[],
-  accent: SpeakAccent
-): SpeechSynthesisVoice | null {
-  if (!voices.length) return null;
-  const langPrimary = accent === 'uk' ? 'en-gb' : 'en-us';
-  const quality =
-    /enhanced|premium|natural|neural|samantha|aaron|nicky|daniel|karen|moira|alex|ava|siri|google.*english/i;
-
-  const byLang = (prefix: string) =>
-    voices.find((v) => v.lang.toLowerCase().startsWith(prefix) && quality.test(v.name)) ||
-    voices.find((v) => v.lang.toLowerCase().startsWith(prefix));
-
-  return (
-    byLang(langPrimary) ||
-    voices.find((v) => v.lang.toLowerCase().startsWith('en') && quality.test(v.name)) ||
-    voices.find((v) => v.lang.toLowerCase().startsWith('en')) ||
-    null
-  );
-}
-
-function scheduleSynthesisEndGuards(
-  synth: SpeechSynthesis,
-  text: string,
-  end: () => void
-): void {
-  // Chromium/Windows only: queue can stay pending forever — clear loading if speech never starts.
-  // Do NOT run on macOS/iOS: enhanced voices may take >600ms to start and synth.speaking stays
-  // false while pending, which caused sentence TTS to be cancelled before any audio played.
-  if (!isApplePlatform()) {
-    setTimeout(() => {
-      if (!synth.speaking && !synth.pending) {
-        try {
-          synth.cancel();
-        } catch {
-          /* ignore */
-        }
-        end();
-      }
-    }, 800);
+function resumeSynth(synth: SpeechSynthesis): void {
+  try {
+    if (synth.paused) synth.resume();
+  } catch {
+    /* ignore */
   }
-
-  // Some builds never fire onend even while audio plays.
-  setTimeout(end, Math.min(120_000, Math.max(4_000, text.length * 90)));
-}
-
-/** Windows-safe path — matches pre-enhancement behavior (lang only, no voice object). */
-function speakSynthesisSimple(
-  text: string,
-  accent: SpeakAccent,
-  opts?: { onStart?: () => void; onEnd?: () => void }
-): void {
-  const synth = window.speechSynthesis;
-  if (!synth) {
-    opts?.onEnd?.();
-    return;
-  }
-
-  synth.cancel();
-  const u = new SpeechSynthesisUtterance(text);
-  u.lang = accent === 'uk' ? 'en-GB' : 'en-US';
-  u.rate = 0.9;
-
-  let ended = false;
-  const end = () => {
-    if (ended) return;
-    ended = true;
-    opts?.onEnd?.();
-  };
-
-  u.onend = end;
-  u.onerror = () => end();
-
-  opts?.onStart?.();
-  synth.speak(u);
-  scheduleSynthesisEndGuards(synth, text, end);
-}
-
-/** macOS/iOS — pick enhanced voice when available; fall back to lang-only on error. */
-function speakSynthesisEnhanced(
-  text: string,
-  accent: SpeakAccent,
-  voices: SpeechSynthesisVoice[],
-  opts?: { onStart?: () => void; onEnd?: () => void },
-  allowSimpleFallback = true
-): void {
-  const synth = window.speechSynthesis;
-  if (!synth) {
-    opts?.onEnd?.();
-    return;
-  }
-
-  synth.cancel();
-  const u = new SpeechSynthesisUtterance(text);
-  u.lang = accent === 'uk' ? 'en-GB' : 'en-US';
-  u.rate = 0.88;
-  u.pitch = 1;
-  const voice = pickEnglishVoice(voices, accent);
-  if (voice) u.voice = voice;
-
-  let ended = false;
-  const end = () => {
-    if (ended) return;
-    ended = true;
-    opts?.onEnd?.();
-  };
-
-  u.onend = end;
-  u.onerror = () => {
-    if (allowSimpleFallback && voice) {
-      speakSynthesisSimple(text, accent, opts);
-      return;
-    }
-    end();
-  };
-
-  opts?.onStart?.();
-  synth.speak(u);
-  if (synth.paused) {
-    try {
-      synth.resume();
-    } catch {
-      /* ignore */
-    }
-  }
-  scheduleSynthesisEndGuards(synth, text, end);
 }
 
 function speakSynthesis(
@@ -160,19 +22,54 @@ function speakSynthesis(
   accent: SpeakAccent,
   opts?: { onStart?: () => void; onEnd?: () => void }
 ): void {
-  if (!isApplePlatform()) {
-    speakSynthesisSimple(text, accent, opts);
+  const synth = window.speechSynthesis;
+  if (!synth) {
+    opts?.onEnd?.();
     return;
   }
 
-  const voices = refreshVoices();
-  if (voices.length) {
-    speakSynthesisEnhanced(text, accent, voices, opts);
-    return;
-  }
+  resumeSynth(synth);
+  synth.cancel();
+  resumeSynth(synth);
 
-  // Sync lang-only path preserves user-gesture activation; async wait broke TTS on some builds.
-  speakSynthesisSimple(text, accent, opts);
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = accent === 'uk' ? 'en-GB' : 'en-US';
+  u.rate = 0.9;
+  u.volume = 1;
+
+  let ended = false;
+  let started = false;
+  const end = () => {
+    if (ended) return;
+    ended = true;
+    opts?.onEnd?.();
+  };
+
+  u.onstart = () => {
+    started = true;
+  };
+  u.onend = end;
+  u.onerror = (e) => {
+    if (e.error === 'interrupted' || e.error === 'canceled') {
+      end();
+      return;
+    }
+    end();
+  };
+
+  opts?.onStart?.();
+  synth.speak(u);
+  resumeSynth(synth);
+
+  // Nothing entered the queue (Chrome/macOS silent fail).
+  setTimeout(() => {
+    if (!ended && !started && !synth.speaking && !synth.pending) end();
+  }, 500);
+
+  // onend sometimes never fires after successful playback.
+  setTimeout(() => {
+    if (!ended && started) end();
+  }, Math.min(120_000, Math.max(4_000, text.length * 90)));
 }
 
 export function stopSpeaking(): void {
@@ -194,9 +91,9 @@ export function stopSpeaking(): void {
   }
 }
 
-function youdaoUrl(word: string, accent: SpeakAccent): string {
+function youdaoUrl(text: string, accent: SpeakAccent): string {
   const type = accent === 'uk' ? 1 : 2;
-  return `https://dict.youdao.com/dictvoice?audio=${encodeURIComponent(word)}&type=${type}`;
+  return `https://dict.youdao.com/dictvoice?audio=${encodeURIComponent(text)}&type=${type}`;
 }
 
 function playAudioUrl(url: string): Promise<void> {
@@ -204,19 +101,22 @@ function playAudioUrl(url: string): Promise<void> {
     stopSpeaking();
     const audio = new Audio(url);
     currentAudio = audio;
-    audio.onended = () => {
+    let settled = false;
+    const done = (ok: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
       if (currentAudio === audio) currentAudio = null;
-      resolve();
+      ok ? resolve() : reject(new Error('audio failed'));
     };
-    audio.onerror = () => {
-      if (currentAudio === audio) currentAudio = null;
-      reject(new Error('audio failed'));
-    };
-    audio.play().catch(reject);
+    const timer = setTimeout(() => done(false), 5_000);
+    audio.onended = () => done(true);
+    audio.onerror = () => done(false);
+    audio.play().catch(() => done(false));
   });
 }
 
-/** Speak text; single words try Youdao MP3 first. Sentences use system speechSynthesis. */
+/** Speak text; tries Youdao MP3 first, then system speechSynthesis. */
 export function speakEnglish(
   text: string,
   opts?: {
@@ -231,15 +131,10 @@ export function speakEnglish(
   const accent: SpeakAccent = opts?.accent === 'uk' ? 'uk' : 'us';
   stopSpeaking();
 
-  if (!/\s/.test(trimmed)) {
-    opts?.onStart?.();
-    playAudioUrl(youdaoUrl(trimmed, accent))
-      .then(() => opts?.onEnd?.())
-      .catch(() => {
-        speakSynthesis(trimmed, accent, opts);
-      });
-    return;
-  }
-
-  speakSynthesis(trimmed, accent, opts);
+  opts?.onStart?.();
+  playAudioUrl(youdaoUrl(trimmed, accent))
+    .then(() => opts?.onEnd?.())
+    .catch(() => {
+      speakSynthesis(trimmed, accent, opts);
+    });
 }
