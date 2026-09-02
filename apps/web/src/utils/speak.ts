@@ -21,29 +21,6 @@ if (typeof window !== 'undefined' && window.speechSynthesis) {
   window.speechSynthesis.addEventListener('voiceschanged', refreshVoices);
 }
 
-function waitForVoices(maxMs = 900): Promise<SpeechSynthesisVoice[]> {
-  const synth = window.speechSynthesis;
-  if (!synth) return Promise.resolve([]);
-  const existing = refreshVoices();
-  if (existing.length) return Promise.resolve(existing);
-
-  return new Promise((resolve) => {
-    let settled = false;
-    const finish = () => {
-      if (settled) return;
-      settled = true;
-      synth.removeEventListener('voiceschanged', onChange);
-      clearTimeout(timer);
-      resolve(refreshVoices());
-    };
-    const onChange = () => {
-      if (refreshVoices().length) finish();
-    };
-    synth.addEventListener('voiceschanged', onChange);
-    const timer = setTimeout(finish, maxMs);
-  });
-}
-
 function isApplePlatform(): boolean {
   if (typeof navigator === 'undefined') return false;
   return /iPhone|iPad|iPod|Macintosh|Mac OS X/i.test(navigator.userAgent);
@@ -76,17 +53,21 @@ function scheduleSynthesisEndGuards(
   text: string,
   end: () => void
 ): void {
-  // Chromium/Windows: queue can stay pending forever — clear loading if speech never starts.
-  setTimeout(() => {
-    if (!synth.speaking) {
-      try {
-        synth.cancel();
-      } catch {
-        /* ignore */
+  // Chromium/Windows only: queue can stay pending forever — clear loading if speech never starts.
+  // Do NOT run on macOS/iOS: enhanced voices may take >600ms to start and synth.speaking stays
+  // false while pending, which caused sentence TTS to be cancelled before any audio played.
+  if (!isApplePlatform()) {
+    setTimeout(() => {
+      if (!synth.speaking && !synth.pending) {
+        try {
+          synth.cancel();
+        } catch {
+          /* ignore */
+        }
+        end();
       }
-      end();
-    }
-  }, 600);
+    }, 800);
+  }
 
   // Some builds never fire onend even while audio plays.
   setTimeout(end, Math.min(120_000, Math.max(4_000, text.length * 90)));
@@ -124,12 +105,13 @@ function speakSynthesisSimple(
   scheduleSynthesisEndGuards(synth, text, end);
 }
 
-/** macOS/iOS — pick enhanced voice when available. */
+/** macOS/iOS — pick enhanced voice when available; fall back to lang-only on error. */
 function speakSynthesisEnhanced(
   text: string,
   accent: SpeakAccent,
   voices: SpeechSynthesisVoice[],
-  opts?: { onStart?: () => void; onEnd?: () => void }
+  opts?: { onStart?: () => void; onEnd?: () => void },
+  allowSimpleFallback = true
 ): void {
   const synth = window.speechSynthesis;
   if (!synth) {
@@ -153,7 +135,13 @@ function speakSynthesisEnhanced(
   };
 
   u.onend = end;
-  u.onerror = () => end();
+  u.onerror = () => {
+    if (allowSimpleFallback && voice) {
+      speakSynthesisSimple(text, accent, opts);
+      return;
+    }
+    end();
+  };
 
   opts?.onStart?.();
   synth.speak(u);
@@ -183,7 +171,8 @@ function speakSynthesis(
     return;
   }
 
-  void waitForVoices().then((loaded) => speakSynthesisEnhanced(text, accent, loaded, opts));
+  // Sync lang-only path preserves user-gesture activation; async wait broke TTS on some builds.
+  speakSynthesisSimple(text, accent, opts);
 }
 
 export function stopSpeaking(): void {
