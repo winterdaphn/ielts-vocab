@@ -112,6 +112,8 @@ function WordPracticePage() {
         total={s.total}
         progressPct={s.progressPct}
         onBeforeExit={s.prepareExitPractice}
+        onJumpTo={s.jumpToCard}
+        jumpDisabled={busy}
       />
 
       <div className="practice-card">

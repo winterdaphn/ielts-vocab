@@ -109,44 +109,51 @@ export default function ClozePanel({
           </Button>
         </div>
       ) : (
-        judgeResult && (
-          <div
-            className={`feedback-area show ${
-              judgeResult.revealed ? '' : judgeResult.correct ? 'correct' : 'wrong'
-            }`}
-            style={{ display: 'block' }}
-          >
-            <div style={{ fontWeight: 600, marginBottom: 4 }}>
-              {judgeResult.revealed
+        <div
+          className={`feedback-area show ${
+            !judgeResult
+              ? ''
+              : judgeResult.revealed
+                ? ''
+                : judgeResult.correct
+                  ? 'correct'
+                  : 'wrong'
+          }`}
+          style={{ display: 'block' }}
+        >
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>
+            {!judgeResult
+              ? '已作答'
+              : judgeResult.revealed
                 ? '已显示答案'
                 : judgeResult.correct
                   ? '✓ 正确'
                   : '✗ 不对'}
-            </div>
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-              本题答案是{' '}
-              <b>{judgeResult.expected || current.example.blank || current.word.word}</b>
-              <SpeakButton
-                text={judgeResult.expected || current.example.blank || current.word.word}
-                title="复习读音"
-              />
-            </div>
-            {!judgeResult.revealed && judgeResult.feedback && (
-              <div style={{ marginTop: 6 }}>{judgeResult.feedback}</div>
-            )}
-            {judgeResult.wordCompare && (
+          </div>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            本题答案是{' '}
+            <b>{judgeResult?.expected || current.example.blank || current.word.word}</b>
+            <SpeakButton
+              text={judgeResult?.expected || current.example.blank || current.word.word}
+              title="复习读音"
+            />
+          </div>
+          {judgeResult && !judgeResult.revealed && judgeResult.feedback && (
+            <div style={{ marginTop: 6 }}>{judgeResult.feedback}</div>
+          )}
+          {judgeResult?.wordCompare && (
               <div className="suggestion" style={{ marginTop: 8 }}>
                 <div className="text-light" style={{ fontSize: 12 }}>用词对比</div>
                 {judgeResult.wordCompare}
               </div>
             )}
-            {judgeResult.usageTip && (
+            {judgeResult?.usageTip && (
               <div className="suggestion" style={{ marginTop: 8 }}>
                 <div className="text-light" style={{ fontSize: 12 }}>使用习惯</div>
                 {judgeResult.usageTip}
               </div>
             )}
-            {judgeResult.grammarTip && (
+            {judgeResult?.grammarTip && (
               <div className="suggestion" style={{ marginTop: 8 }}>
                 <div className="text-light" style={{ fontSize: 12 }}>语法纠正</div>
                 {judgeResult.grammarTip}
@@ -223,8 +230,7 @@ export default function ClozePanel({
                 )}
               </CollapsibleTip>
             )}
-          </div>
-        )
+        </div>
       )}
     </>
   );

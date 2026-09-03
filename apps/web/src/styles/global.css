@@ -834,8 +834,35 @@ input, textarea, select {
   color: var(--accent);
 }
 
-.practice-header .progress-bar {
+.practice-header .progress-scrubber {
   flex: 1;
+  position: relative;
+  min-width: 0;
+}
+
+.practice-header .progress-scrubber-track {
+  width: 100%;
+  height: 6px;
+  background: var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.practice-header .progress-scrubber.interactive {
+  height: 28px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.practice-header .progress-bar,
+.practice-header .progress-scrubber-track {
+  flex: 1;
+}
+
+.practice-header .progress-bar {
   height: 6px;
   background: var(--border);
   border-radius: 3px;
@@ -847,6 +874,56 @@ input, textarea, select {
   background: var(--accent);
   transition: width 0.3s;
   border-radius: 3px;
+}
+
+.practice-header .progress-scrubber.dragging .progress-fill {
+  transition: none;
+}
+
+.practice-header .progress-thumb {
+  position: absolute;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  margin-left: -7px;
+  transform: translateY(-50%);
+  background: var(--accent);
+  border: 2px solid var(--bg);
+  border-radius: 50%;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
+  pointer-events: none;
+  transition: left 0.3s;
+}
+
+.practice-header .progress-scrubber.dragging .progress-thumb {
+  transition: none;
+  transform: translateY(-50%) scale(1.12);
+}
+
+.practice-header .progress-scrub-tip {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  transform: translateX(-50%);
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+}
+
+.practice-header .progress-scrub-tip::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  margin-left: -4px;
+  border: 4px solid transparent;
+  border-top-color: var(--accent);
 }
 
 .practice-header .progress-text {

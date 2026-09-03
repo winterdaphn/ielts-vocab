@@ -58,6 +58,7 @@ import {
 } from '@/utils/practiceSyncDebug';
 import {
   exampleFromCache,
+  isClozeFamily,
   llmGenMode,
   pickSessionWords,
   selectDailyWords,
@@ -147,6 +148,14 @@ export function usePracticeSession() {
     hintShown: boolean;
     translateHintLevel: number;
     translateHints: TranslateHints | null;
+    mnemonicTip?: string;
+    mnemonicLoading?: boolean;
+    synonymsTip?: RelatedWord[];
+    similarsTip?: RelatedWord[];
+    derivativesTip?: Derivative[];
+    relatedLoading?: boolean;
+    structureTip?: SentenceStructureAnalysis | null;
+    structureLoading?: boolean;
   };
   /** 已作答题目的 UI 快照，支持返回上一题 */
   const cardStatesRef = useRef<Map<number, CardSnapshot>>(new Map());
@@ -218,8 +227,12 @@ export function usePracticeSession() {
   const current = queue[idx] || null;
   const total = sessionWords.length;
   const progressPct = Math.min(100, Math.round((idx / Math.max(total, 1)) * 100));
-  const canGoNext = mode === 'choice' ? showAnswer : !!judgeResult;
-  const canNavigateNext = canGoNext || idx < maxVisitedIdxRef.current;
+  const canGoNext =
+    mode === 'choice' || mode === 'cloze' ? showAnswer : !!judgeResult;
+  const canNavigateNext =
+    canGoNext ||
+    idx < maxVisitedIdxRef.current ||
+    ((mode === 'cloze' || mode === 'choice') && showAnswer && idx + 1 < total);
   const nextRef = useRef<() => void>(() => {});
   const prevPhaseRef = useRef<Phase>(phase);
   const remainingCount =
@@ -276,6 +289,21 @@ export function usePracticeSession() {
     attemptByIdxRef.current = new Map();
     reviewedIndicesRef.current = new Set();
     maxVisitedIdxRef.current = 0;
+  }
+
+  function answeredReviewJudge(correct: boolean): NonNullable<JudgeResult> {
+    return { correct, feedback: '（已作答）', revealed: !correct };
+  }
+
+  function ensureClozeReviewJudge(
+    m: Mode,
+    revealed: boolean,
+    judge: JudgeResult
+  ): JudgeResult {
+    if (judge) return judge;
+    if (m !== 'cloze' && m !== 'choice') return judge;
+    if (!revealed) return judge;
+    return answeredReviewJudge(true);
   }
 
   function rememberCardAt(ordinal: number, snap: CardSnapshot) {
@@ -351,14 +379,22 @@ export function usePracticeSession() {
     }
   }
 
-  function snapshotCurrentCard() {
+  function snapshotCurrentCard(): CardSnapshot {
     return {
       showAnswer,
       picked,
-      judgeResult,
+      judgeResult: ensureClozeReviewJudge(mode, showAnswer, judgeResult),
       hintShown,
       translateHintLevel,
       translateHints,
+      mnemonicTip,
+      mnemonicLoading,
+      synonymsTip,
+      similarsTip,
+      derivativesTip,
+      relatedLoading,
+      structureTip,
+      structureLoading,
     };
   }
 
@@ -380,17 +416,49 @@ export function usePracticeSession() {
     setJudgeResult(null);
   }
 
-  function resetTransientUi() {
+  function resetTransientUi(saved?: CardSnapshot) {
     setTranslateHintLoading(false);
-    setMnemonicTip('');
-    setMnemonicLoading(false);
-    setSynonymsTip([]);
-    setSimilarsTip([]);
-    setRelatedLoading(false);
-    setStructureTip(null);
-    setStructureLoading(false);
+    setMnemonicTip(saved?.mnemonicTip ?? '');
+    setMnemonicLoading(saved?.mnemonicLoading ?? false);
+    setSynonymsTip(saved?.synonymsTip ?? []);
+    setSimilarsTip(saved?.similarsTip ?? []);
+    setDerivativesTip(saved?.derivativesTip ?? []);
+    setRelatedLoading(saved?.relatedLoading ?? false);
+    setStructureTip(saved?.structureTip ?? null);
+    setStructureLoading(saved?.structureLoading ?? false);
     setUserText('');
     setPhase('asking');
+  }
+
+  function seedReviewedCardFallbacks(upToIdx: number, m: Mode) {
+    for (let i = 0; i < upToIdx; i++) {
+      if (cardStatesRef.current.has(i)) continue;
+      const attempt = attemptByIdxRef.current.get(i);
+      if (attempt) {
+        const snap = cardSnapshotFromAttempt(
+          {
+            picked: attempt.picked,
+            judgeResult: attempt.judgeResult,
+            correct: attempt.correct,
+          },
+          m
+        );
+        if (snap) rememberCardAt(i, snap);
+        continue;
+      }
+      if (!reviewedIndicesRef.current.has(i)) continue;
+      rememberCardAt(i, {
+        showAnswer: m !== 'translate',
+        picked: null,
+        judgeResult:
+          m === 'translate'
+            ? { correct: true, feedback: '（已作答）' }
+            : answeredReviewJudge(true),
+        hintShown: m === 'cloze',
+        translateHintLevel: 0,
+        translateHints: null,
+      });
+    }
   }
 
   function goToCard(target: number) {
@@ -419,7 +487,9 @@ export function usePracticeSession() {
           judgeResult:
             mode === 'translate'
               ? { correct: true, feedback: '（已作答）' }
-              : null,
+              : isClozeFamily(mode)
+                ? answeredReviewJudge(true)
+                : null,
           hintShown: mode === 'cloze',
           translateHintLevel: 0,
           translateHints: null,
@@ -428,7 +498,7 @@ export function usePracticeSession() {
         resetFreshCardUi();
       }
     }
-    resetTransientUi();
+    resetTransientUi(saved);
     setIdx(target);
     kickPrefetch(sessionIdRef.current, sessionWords, mode, target);
   }
@@ -585,6 +655,10 @@ export function usePracticeSession() {
   // 输入填空：提交后加载 / 生成助记提示（同 example.html）
   useEffect(() => {
     if (mode !== 'cloze' || !showAnswer || !current) return;
+    if (mnemonicTip) {
+      setMnemonicLoading(false);
+      return;
+    }
     const word = current.word;
     const existing = String(word.mnemonic || '').trim();
     if (existing) {
@@ -624,6 +698,10 @@ export function usePracticeSession() {
   // 揭晓后：近义（词库+AI）/ 形近（仅词库）；有缓存用缓存
   useEffect(() => {
     if ((mode !== 'cloze' && mode !== 'choice') || !showAnswer || !current) {
+      return;
+    }
+    if (synonymsTip.length > 0 || similarsTip.length > 0 || derivativesTip.length > 0) {
+      setRelatedLoading(false);
       return;
     }
     const word = current.word;
@@ -968,6 +1046,7 @@ export function usePracticeSession() {
     if (remote?.items?.length) {
       seedCardStatesFromAttempts(remote.items, hydrated.mode, hydrated.idx);
     }
+    seedReviewedCardFallbacks(hydrated.idx, hydrated.mode);
     for (let i = 0; i < hydrated.idx; i++) {
       reviewedIndicesRef.current.add(i);
     }
@@ -1432,6 +1511,26 @@ export function usePracticeSession() {
     }
   }
 
+  function resolveCardCorrect(ordinal: number): boolean {
+    if (mode === 'choice') {
+      const snap = cardStatesRef.current.get(ordinal);
+      const letter =
+        ordinal === idx ? picked : snap?.picked ?? attemptByIdxRef.current.get(ordinal)?.picked ?? null;
+      const q = queueRef.current[ordinal];
+      return !!letter && letter === q?.example.answer;
+    }
+    const jr =
+      ordinal === idx
+        ? judgeResult
+        : cardStatesRef.current.get(ordinal)?.judgeResult ??
+          attemptByIdxRef.current.get(ordinal)?.judgeResult ??
+          null;
+    if (jr) return !!jr.correct;
+    const attempt = attemptByIdxRef.current.get(ordinal);
+    if (attempt) return attempt.correct;
+    return false;
+  }
+
   async function next() {
     const browsingForward = !canGoNext && idx < maxVisitedIdxRef.current;
     if (!canGoNext && !browsingForward) return;
@@ -1445,10 +1544,7 @@ export function usePracticeSession() {
     }
 
     const alreadyReviewed = reviewedIndicesRef.current.has(idx);
-    const wasCorrect =
-      mode === 'choice'
-        ? picked === current?.example.answer
-        : !!judgeResult?.correct;
+    const wasCorrect = resolveCardCorrect(idx);
     rememberAttemptAt(idx, { picked, judgeResult, correct: wasCorrect });
 
     if (current && !skipReviewRef.current && !alreadyReviewed) {
@@ -1476,10 +1572,7 @@ export function usePracticeSession() {
         wasCorrect ? `答对 · 下次复习：${when}` : `答错 · 已回退，${when}再练`
       );
     } else if (current && skipReviewRef.current && !alreadyReviewed) {
-      const wasCorrect =
-        mode === 'choice'
-          ? picked === current.example.answer
-          : judgeResult?.correct;
+      const wasCorrect = resolveCardCorrect(idx);
       const cloudId = cloudPracticeSessionIdRef.current;
       if (cloudId) {
         syncCloudItemAttempt(cloudId, idx, {
@@ -1512,6 +1605,13 @@ export function usePracticeSession() {
     if (idx <= 0) return;
     cardStatesRef.current.set(idx, snapshotCurrentCard());
     goToCard(idx - 1);
+  }
+
+  function jumpToCard(target: number) {
+    if (!total || target < 0 || target >= total || target === idx) return;
+    if (phase === 'judging' || regenerating) return;
+    cardStatesRef.current.set(idx, snapshotCurrentCard());
+    goToCard(target);
   }
 
   const canGoPrevious = idx > 0;
@@ -1818,6 +1918,7 @@ export function usePracticeSession() {
     requestStructureTip,
     next,
     prev,
+    jumpToCard,
     exitPractice,
     prepareExitPractice,
     regenerateCurrent,
