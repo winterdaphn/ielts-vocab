@@ -231,6 +231,8 @@ export interface SavedPracticeDone {
   difficulty: SentenceDifficulty;
   wordIds: string[];
   stats: { correct: number; total: number };
+  /** 各题对错，用于结束页复习列表 */
+  review?: { word: string; translation?: string; correct: boolean | null }[];
 }
 
 const PRACTICE_DONE_KEY = 'practice-done';
@@ -260,6 +262,24 @@ export function readPracticeDone(): SavedPracticeDone | null {
       ? o.wordIds.map((id) => String(id)).filter(Boolean)
       : [];
     if (!wordIds.length) return null;
+    const reviewRaw = Array.isArray(o.review) ? o.review : [];
+    const review = reviewRaw
+      .map((item) => {
+        if (!item || typeof item !== 'object') return null;
+        const word = String((item as { word?: string }).word || '').trim();
+        if (!word) return null;
+        const correctVal = (item as { correct?: boolean | null }).correct;
+        return {
+          word,
+          translation:
+            typeof (item as { translation?: string }).translation === 'string'
+              ? (item as { translation?: string }).translation
+              : undefined,
+          correct:
+            correctVal === true ? true : correctVal === false ? false : null,
+        };
+      })
+      .filter((item): item is NonNullable<typeof item> => !!item);
     return {
       version: 1,
       savedAt: Number(o.savedAt) || Date.now(),
@@ -271,6 +291,7 @@ export function readPracticeDone(): SavedPracticeDone | null {
         correct: Number(o.stats?.correct) || 0,
         total: Number(o.stats?.total) || 0,
       },
+      review: review.length ? review : undefined,
     };
   } catch {
     return null;

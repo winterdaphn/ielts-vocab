@@ -39,6 +39,13 @@ export type AttemptRecord = {
   correct: boolean;
 };
 
+/** 练习结束页：本轮各题结果 */
+export type SessionReviewItem = {
+  word: string;
+  translation?: string;
+  correct: boolean | null;
+};
+
 /** Start after 1 ready; small background batches keep the queue warm without long waits */
 export const PREFETCH_INITIAL = 1;
 export const PREFETCH_BATCH = 3;

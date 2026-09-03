@@ -1,5 +1,6 @@
 import { isClozeFamily, type Mode, type Question } from '@/utils/practiceSelect';
-import type { AttemptRecord, CardSnapshot, JudgeResult } from './types';
+import type { Word } from '@/types/word';
+import type { AttemptRecord, CardSnapshot, JudgeResult, SessionReviewItem } from './types';
 
 export function computeMaxJumpIdx(args: {
   mode: Mode;
@@ -33,6 +34,20 @@ export function computeMaxJumpIdx(args: {
   if (currentDone) mark(idx);
 
   return Math.max(0, max);
+}
+
+export function buildSessionReviewList(
+  sessionWords: Word[],
+  attempts: Map<number, AttemptRecord>
+): SessionReviewItem[] {
+  return sessionWords.map((w, i) => {
+    const attempt = attempts.get(i);
+    return {
+      word: w.word,
+      translation: w.translation || undefined,
+      correct: attempt ? attempt.correct : null,
+    };
+  });
 }
 
 export function answeredReviewJudge(correct: boolean): NonNullable<JudgeResult> {

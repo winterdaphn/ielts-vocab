@@ -70,6 +70,7 @@ import {
   ensureClozeReviewJudge,
   resolveCardCorrect,
   resolveGoToCardSnapshot,
+  buildSessionReviewList,
   computeMaxJumpIdx,
   seedCardStatesFromAttempts,
   seedReviewedCardFallbacks,
@@ -82,6 +83,7 @@ import {
   type CardSnapshot,
   type JudgeResult,
   type Phase,
+  type SessionReviewItem,
 } from './practice/types';
 
 export type { Phase, JudgeResult } from './practice/types';
@@ -130,6 +132,7 @@ export function usePracticeSession() {
   const [userText, setUserText] = useState('');
   const [judgeResult, setJudgeResult] = useState<JudgeResult>(null);
   const [stats, setStats] = useState({ correct: 0, total: 0 });
+  const [sessionReview, setSessionReview] = useState<SessionReviewItem[]>([]);
 
   const sessionIdRef = useRef(0);
   /** 再次测试：同一批词重练，不写入 SRS / 学习统计 */
@@ -496,6 +499,11 @@ export function usePracticeSession() {
       persist({ syncCloud: false });
     } else if (phase === 'done' && prevPhaseRef.current !== 'done') {
       // 仅进入 done 时收尾一次；勿在 next() 里重复 complete
+      let review = sessionReview;
+      if (!review.length && sessionWords.length) {
+        review = buildSessionReviewList(sessionWords, attemptByIdxRef.current);
+        setSessionReview(review);
+      }
       if (sessionWords.length) {
         savePracticeDone({
           mode,
@@ -503,6 +511,7 @@ export function usePracticeSession() {
           difficulty,
           wordIds: sessionWords.map((w) => w.id),
           stats,
+          review,
         });
       }
       void clearPracticeProgress({ completed: true });
@@ -606,6 +615,7 @@ export function usePracticeSession() {
     difficultyRef.current = parseSentenceDifficulty(done.difficulty);
     setSessionWords(sessionWordsRestored);
     setStats(done.stats);
+    setSessionReview(done.review ?? []);
     setPhase('done');
   }
 
@@ -849,6 +859,7 @@ export function usePracticeSession() {
     setUserText('');
     setJudgeResult(null);
     setStats({ correct: 0, total: 0 });
+    setSessionReview([]);
     setPhase('loading');
 
     const initial = pool.slice(0, Math.min(PREFETCH_INITIAL, pool.length));
@@ -1517,6 +1528,7 @@ export function usePracticeSession() {
     canGoPrevious,
     maxJumpIdx,
     jumpWordLabels,
+    sessionReview,
     remainingCount,
     sessionSize: SESSION_SIZE,
     setUserText,

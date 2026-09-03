@@ -71,6 +71,7 @@ function WordPracticePage() {
         sessionTotal={s.total}
         remaining={s.remainingCount}
         mode={s.mode}
+        review={s.sessionReview}
         onContinue={() => s.startPractice(s.mode, s.scope, s.difficulty)}
         onRetestSame={() => s.retestSessionWords()}
         onRetestAsCloze={

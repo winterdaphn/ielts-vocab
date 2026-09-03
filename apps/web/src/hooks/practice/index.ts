@@ -3,6 +3,7 @@ export type {
   JudgeResult,
   CardSnapshot,
   AttemptRecord,
+  SessionReviewItem,
 } from './types';
 export {
   PREFETCH_INITIAL,
@@ -18,6 +19,7 @@ export {
   resolveCardCorrect,
   resolveGoToCardSnapshot,
   computeMaxJumpIdx,
+  buildSessionReviewList,
   seedCardStatesFromAttempts,
   seedReviewedCardFallbacks,
 } from './cardState';
