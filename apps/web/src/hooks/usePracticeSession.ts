@@ -8,8 +8,6 @@ import {
   judgeTranslation,
   judgeCloze,
   getClozeExpectedForm,
-  generateMnemonicTip,
-  generateRelatedWords,
   analyzeSentenceStructure,
   generateTranslateHints,
   type SentenceStructureAnalysis,
@@ -31,7 +29,6 @@ import {
   syncCloudItemExample,
   readCloudMeta,
 } from '@/api/practiceCloudSync';
-import { getRelatedFromBank, mergeSynonymSources, getBankLexisExtras, ensureVocabBankRelated } from '@/utils/vocabBankRelated';
 import { setLS, getLS, todayKey } from '@/utils/date';
 import type { RelatedWord, Word, Derivative } from '@/types/word';
 import {
@@ -57,8 +54,6 @@ import {
   setPracticeSyncBoundSession,
 } from '@/utils/practiceSyncDebug';
 import {
-  exampleFromCache,
-  isClozeFamily,
   llmGenMode,
   pickSessionWords,
   selectDailyWords,
@@ -71,27 +66,25 @@ import {
   type Question,
 } from '@/utils/practiceSelect';
 import { recordLearningEvent } from '@/utils/learningLog';
-import { lookupYoudaoWord, canUseYoudao } from '@/api/youdao';
+import {
+  ensureClozeReviewJudge,
+  resolveCardCorrect,
+  resolveGoToCardSnapshot,
+  computeMaxJumpIdx,
+  seedCardStatesFromAttempts,
+  seedReviewedCardFallbacks,
+} from './practice/cardState';
+import { fillBatch, kickPrefetch, toQuestion, type GenerationRefs } from './practice/generation';
+import { isAbortError, latestWordSnapshot } from './practice/helpers';
+import { usePracticeTipsEffects } from './practice/usePracticeTipsEffects';
+import {
+  PREFETCH_INITIAL,
+  type CardSnapshot,
+  type JudgeResult,
+  type Phase,
+} from './practice/types';
 
-export type Phase = 'selecting' | 'loading' | 'asking' | 'judging' | 'waiting' | 'done';
-
-export type JudgeResult = {
-  score?: number;
-  correct: boolean;
-  feedback: string;
-  improved?: string;
-  expected?: string;
-  wordCompare?: string;
-  usageTip?: string;
-  grammarTip?: string;
-  /** 未作答，直接揭晓 */
-  revealed?: boolean;
-} | null;
-
-/** Start after 1 ready; small background batches keep the queue warm without long waits */
-const PREFETCH_INITIAL = 1;
-const PREFETCH_BATCH = 3;
-const PREFETCH_AHEAD = 5;
+export type { Phase, JudgeResult } from './practice/types';
 
 export function usePracticeSession() {
   const { message } = App.useApp();
@@ -141,22 +134,6 @@ export function usePracticeSession() {
   const sessionIdRef = useRef(0);
   /** 再次测试：同一批词重练，不写入 SRS / 学习统计 */
   const skipReviewRef = useRef(false);
-  type CardSnapshot = {
-    showAnswer: boolean;
-    picked: string | null;
-    judgeResult: JudgeResult;
-    hintShown: boolean;
-    translateHintLevel: number;
-    translateHints: TranslateHints | null;
-    mnemonicTip?: string;
-    mnemonicLoading?: boolean;
-    synonymsTip?: RelatedWord[];
-    similarsTip?: RelatedWord[];
-    derivativesTip?: Derivative[];
-    relatedLoading?: boolean;
-    structureTip?: SentenceStructureAnalysis | null;
-    structureLoading?: boolean;
-  };
   /** 已作答题目的 UI 快照，支持返回上一题 */
   const cardStatesRef = useRef<Map<number, CardSnapshot>>(new Map());
   /** 已提交作答摘要（无完整快照时的兜底，如续做恢复） */
@@ -192,6 +169,28 @@ export function usePracticeSession() {
   /** Sync copy for fillBatch / prefetch (avoids stale state after setDifficulty) */
   const difficultyRef = useRef<SentenceDifficulty>(initialDifficulty);
   difficultyRef.current = difficulty;
+
+  const genRefs: GenerationRefs = {
+    sessionIdRef,
+    inflightRef,
+    prefetchFailedRef,
+    queueRef,
+    abortRef,
+    cloudPracticeSessionIdRef,
+    difficultyRef,
+    wasNewRef,
+    prefetchRunningRef,
+    prefetchFromRef,
+  };
+
+  function runFillBatch(sid: number, list: Word[], m: Mode, pool: Word[]) {
+    return fillBatch(genRefs, settings, (next) => setQueue(next), setGenError, sid, list, m, pool);
+  }
+
+  function runKickPrefetch(sid: number, pool: Word[], m: Mode, fromIdx: number) {
+    kickPrefetch(genRefs, settings, (next) => setQueue(next), setGenError, sid, pool, m, fromIdx);
+  }
+
   /** 关页保存用：始终指向最新练习状态，避免 effect 依赖 queue 导致预取时狂刷云端 */
   const leaveSnapshotRef = useRef({
     phase,
@@ -233,6 +232,17 @@ export function usePracticeSession() {
     canGoNext ||
     idx < maxVisitedIdxRef.current ||
     ((mode === 'cloze' || mode === 'choice') && showAnswer && idx + 1 < total);
+  const maxJumpIdx = computeMaxJumpIdx({
+    mode,
+    idx,
+    showAnswer,
+    picked,
+    judgeResult,
+    cardStates: cardStatesRef.current,
+    attempts: attemptByIdxRef.current,
+    reviewedIndices: reviewedIndicesRef.current,
+  });
+  const jumpWordLabels = sessionWords.map((w) => w.word);
   const nextRef = useRef<() => void>(() => {});
   const prevPhaseRef = useRef<Phase>(phase);
   const remainingCount =
@@ -250,24 +260,6 @@ export function usePracticeSession() {
       queueRef.current = next;
       return next;
     });
-  }
-
-  function latestWordSnapshot(word: Word): Word {
-    const candidates = [
-      word,
-      words.find((item) => item.id === word.id),
-      useWordsStore.getState().words.find((item) => item.id === word.id),
-    ].filter((item): item is Word => !!item);
-    return candidates.reduce((best, item) =>
-      (item.updatedAt || 0) > (best.updatedAt || 0) ? item : best
-    );
-  }
-
-  function isAbortError(e: unknown): boolean {
-    return (
-      (e instanceof DOMException && e.name === 'AbortError') ||
-      (e instanceof Error && e.name === 'AbortError')
-    );
   }
 
   /** Bump session id + abort in-flight LLM so leave/home stops retries. */
@@ -291,21 +283,6 @@ export function usePracticeSession() {
     maxVisitedIdxRef.current = 0;
   }
 
-  function answeredReviewJudge(correct: boolean): NonNullable<JudgeResult> {
-    return { correct, feedback: '（已作答）', revealed: !correct };
-  }
-
-  function ensureClozeReviewJudge(
-    m: Mode,
-    revealed: boolean,
-    judge: JudgeResult
-  ): JudgeResult {
-    if (judge) return judge;
-    if (m !== 'cloze' && m !== 'choice') return judge;
-    if (!revealed) return judge;
-    return answeredReviewJudge(true);
-  }
-
   function rememberCardAt(ordinal: number, snap: CardSnapshot) {
     cardStatesRef.current.set(ordinal, snap);
   }
@@ -315,68 +292,6 @@ export function usePracticeSession() {
     data: { picked: string | null; judgeResult: JudgeResult; correct: boolean }
   ) {
     attemptByIdxRef.current.set(ordinal, data);
-  }
-
-  function cardSnapshotFromAttempt(
-    attempt: Record<string, unknown>,
-    m: Mode
-  ): CardSnapshot | null {
-    const picked = typeof attempt.picked === 'string' ? attempt.picked : null;
-    const judgeResult = (attempt.judgeResult as JudgeResult) ?? null;
-    const correct = !!attempt.correct;
-
-    if (m === 'choice') {
-      if (!picked) return null;
-      return {
-        showAnswer: true,
-        picked,
-        judgeResult: null,
-        hintShown: false,
-        translateHintLevel: 0,
-        translateHints: null,
-      };
-    }
-    if (m === 'translate') {
-      return {
-        showAnswer: false,
-        picked: null,
-        judgeResult: judgeResult ?? { correct, feedback: '（已作答）' },
-        hintShown: false,
-        translateHintLevel: 0,
-        translateHints: null,
-      };
-    }
-    return {
-      showAnswer: true,
-      picked: null,
-      judgeResult: judgeResult ?? {
-        correct,
-        feedback: '（已作答）',
-        revealed: !correct,
-      },
-      hintShown: true,
-      translateHintLevel: 0,
-      translateHints: null,
-    };
-  }
-
-  function seedCardStatesFromAttempts(
-    items: { ordinal: number; attempt: Record<string, unknown> | null }[],
-    m: Mode,
-    upToIdx: number
-  ) {
-    for (const item of items) {
-      if (item.ordinal >= upToIdx || !item.attempt) continue;
-      const snap = cardSnapshotFromAttempt(item.attempt, m);
-      if (!snap) continue;
-      rememberCardAt(item.ordinal, snap);
-      rememberAttemptAt(item.ordinal, {
-        picked: snap.picked,
-        judgeResult: snap.judgeResult,
-        correct: !!item.attempt.correct,
-      });
-      reviewedIndicesRef.current.add(item.ordinal);
-    }
   }
 
   function snapshotCurrentCard(): CardSnapshot {
@@ -430,77 +345,29 @@ export function usePracticeSession() {
     setPhase('asking');
   }
 
-  function seedReviewedCardFallbacks(upToIdx: number, m: Mode) {
-    for (let i = 0; i < upToIdx; i++) {
-      if (cardStatesRef.current.has(i)) continue;
-      const attempt = attemptByIdxRef.current.get(i);
-      if (attempt) {
-        const snap = cardSnapshotFromAttempt(
-          {
-            picked: attempt.picked,
-            judgeResult: attempt.judgeResult,
-            correct: attempt.correct,
-          },
-          m
-        );
-        if (snap) rememberCardAt(i, snap);
-        continue;
-      }
-      if (!reviewedIndicesRef.current.has(i)) continue;
-      rememberCardAt(i, {
-        showAnswer: m !== 'translate',
-        picked: null,
-        judgeResult:
-          m === 'translate'
-            ? { correct: true, feedback: '（已作答）' }
-            : answeredReviewJudge(true),
-        hintShown: m === 'cloze',
-        translateHintLevel: 0,
-        translateHints: null,
-      });
-    }
-  }
-
   function goToCard(target: number) {
     maxVisitedIdxRef.current = Math.max(maxVisitedIdxRef.current, target);
     const saved = cardStatesRef.current.get(target);
+    const resolved = resolveGoToCardSnapshot({
+      target,
+      mode,
+      statsTotal: stats.total,
+      cardStates: cardStatesRef.current,
+      attempts: attemptByIdxRef.current,
+      reviewedIndices: reviewedIndicesRef.current,
+    });
+
     if (saved) {
       applyCardSnapshot(saved);
+    } else if (resolved === 'fresh') {
+      resetFreshCardUi();
     } else {
-      const attempt = attemptByIdxRef.current.get(target);
-      const fromAttempt = attempt
-        ? cardSnapshotFromAttempt(
-            {
-              picked: attempt.picked,
-              judgeResult: attempt.judgeResult,
-              correct: attempt.correct,
-            },
-            mode
-          )
-        : null;
-      if (fromAttempt) {
-        applyCardSnapshot(fromAttempt);
-      } else if (reviewedIndicesRef.current.has(target) || target < stats.total) {
-        applyCardSnapshot({
-          showAnswer: mode !== 'translate',
-          picked: null,
-          judgeResult:
-            mode === 'translate'
-              ? { correct: true, feedback: '（已作答）' }
-              : isClozeFamily(mode)
-                ? answeredReviewJudge(true)
-                : null,
-          hintShown: mode === 'cloze',
-          translateHintLevel: 0,
-          translateHints: null,
-        });
-      } else {
-        resetFreshCardUi();
-      }
+      applyCardSnapshot(resolved);
     }
+
     resetTransientUi(saved);
     setIdx(target);
-    kickPrefetch(sessionIdRef.current, sessionWords, mode, target);
+    runKickPrefetch(sessionIdRef.current, sessionWords, mode, target);
   }
 
   function beginSessionWork(): { sid: number; signal: AbortSignal } {
@@ -652,133 +519,24 @@ export function usePracticeSession() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [idx]);
 
-  // 输入填空：提交后加载 / 生成助记提示（同 example.html）
-  useEffect(() => {
-    if (mode !== 'cloze' || !showAnswer || !current) return;
-    if (mnemonicTip) {
-      setMnemonicLoading(false);
-      return;
-    }
-    const word = current.word;
-    const existing = String(word.mnemonic || '').trim();
-    if (existing) {
-      setMnemonicTip(existing);
-      setMnemonicLoading(false);
-      return;
-    }
-    if (!settings.apiKey) {
-      setMnemonicTip('');
-      setMnemonicLoading(false);
-      return;
-    }
-
-    let cancelled = false;
-    setMnemonicLoading(true);
-    (async () => {
-      try {
-        const tip = await generateMnemonicTip(word.word, settings);
-        if (cancelled) return;
-        if (tip) {
-          setMnemonicTip(tip);
-          await updateWord({ ...word, mnemonic: tip });
-        }
-      } catch {
-        /* ignore generate failures */
-      } finally {
-        if (!cancelled) setMnemonicLoading(false);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, showAnswer, current?.word.id, idx]);
-
-  // 揭晓后：近义（词库+AI）/ 形近（仅词库）；有缓存用缓存
-  useEffect(() => {
-    if ((mode !== 'cloze' && mode !== 'choice') || !showAnswer || !current) {
-      return;
-    }
-    if (synonymsTip.length > 0 || similarsTip.length > 0 || derivativesTip.length > 0) {
-      setRelatedLoading(false);
-      return;
-    }
-    const word = current.word;
-    const cachedSyn = Array.isArray(word.synonyms) ? word.synonyms : [];
-    const cachedSim = Array.isArray(word.similars) ? word.similars : [];
-
-    let cancelled = false;
-    setRelatedLoading(true);
-    void (async () => {
-      await ensureVocabBankRelated();
-      if (cancelled) return;
-      const bankExtras = getBankLexisExtras(word.word);
-      const deriv =
-        Array.isArray(word.derivatives) && word.derivatives.length
-          ? word.derivatives
-          : bankExtras.derivatives;
-      setDerivativesTip(deriv);
-
-      if (cachedSyn.length || cachedSim.length) {
-        setSynonymsTip(cachedSyn);
-        setSimilarsTip(cachedSim);
-        setRelatedLoading(false);
-        return;
-      }
-
-      setSynonymsTip([]);
-      setSimilarsTip([]);
-      try {
-        const fromBank = getRelatedFromBank(word.word, word.translation || '');
-        let youdaoSyn = fromBank.synonyms;
-        const similars = fromBank.similars;
-        if (canUseYoudao(settings)) {
-          try {
-            const yd = await lookupYoudaoWord(word.word, settings);
-            if (yd.synonyms?.length) youdaoSyn = yd.synonyms;
-          } catch {
-            /* keep bank */
-          }
-        }
-        const baseSynonyms = mergeSynonymSources([youdaoSyn], 10);
-        let aiSyn: RelatedWord[] = [];
-        // Dictionary results are enough for practice; only ask the LLM to fill gaps.
-        if (settings.apiKey && baseSynonyms.length < 3) {
-          try {
-            const fromAi = await generateRelatedWords(
-              word.word,
-              word.translation || '',
-              settings
-            );
-            aiSyn = fromAi.synonyms || [];
-          } catch {
-            /* keep youdao/bank */
-          }
-        }
-        const synonyms = mergeSynonymSources([baseSynonyms, aiSyn], 10);
-        if (cancelled) return;
-        setSynonymsTip(synonyms);
-        setSimilarsTip(similars);
-        if (synonyms.length || similars.length) {
-          await updateWord({
-            ...word,
-            synonyms,
-            similars,
-          });
-        }
-      } catch {
-        /* ignore */
-      } finally {
-        if (!cancelled) setRelatedLoading(false);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, showAnswer, current?.word.id, idx]);
+  usePracticeTipsEffects({
+    mode,
+    showAnswer,
+    current,
+    idx,
+    mnemonicTip,
+    synonymsTip,
+    similarsTip,
+    derivativesTip,
+    settings,
+    setMnemonicTip,
+    setMnemonicLoading,
+    setSynonymsTip,
+    setSimilarsTip,
+    setDerivativesTip,
+    setRelatedLoading,
+    updateWord,
+  });
 
   // 句型分析改为按需加载（见 requestStructureTip）
 
@@ -836,95 +594,6 @@ export function usePracticeSession() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  function toQuestion(
-    word: Word,
-    sentence: { en: string; zh: string; source?: Question['source'] },
-    m: Mode,
-    pool: Word[]
-  ): Question {
-    const distractors = pool.filter((w) => w.id !== word.id).map((w) => w.word);
-    const source = sentence.source || 'llm';
-    if (typeof console !== 'undefined') {
-      console.info(`[practice] ${word.word} ← ${source}`);
-    }
-    return {
-      word,
-      example: {
-        ...exampleFromCache(word, sentence, m, distractors),
-        difficulty: difficultyRef.current,
-      },
-      source,
-      wasNew: wasNewRef.current.get(word.id) ?? isNew(word),
-    };
-  }
-
-  /** Returns error message if generation failed hard (API / parse). */
-  async function fillBatch(sid: number, list: Word[], m: Mode, pool: Word[]): Promise<string> {
-    // 词条 examples 只作收藏回忆，做题不复用；每题走 LLM / 本轮会话预取。
-    const todo = list.filter(
-      (w) =>
-        !inflightRef.current.has(w.id) &&
-        !prefetchFailedRef.current.has(w.id) &&
-        !queueRef.current[pool.findIndex((x) => x.id === w.id)]
-    );
-    if (!todo.length) return '';
-    todo.forEach((w) => inflightRef.current.add(w.id));
-
-    try {
-      const signal = abortRef.current?.signal;
-      const map = await generatePracticeBatch(todo, llmGenMode(m), settings, {
-        difficulty: difficultyRef.current,
-        signal,
-        // Prefetch already loops; avoid 2× API calls per word on soft failures
-        noRetry: todo.length > 1,
-      });
-      if (sessionIdRef.current !== sid) return '';
-
-      const next = [...queueRef.current];
-      for (const w of todo) {
-        const i = pool.findIndex((x) => x.id === w.id);
-        if (i < 0 || next[i] || !map[w.id]) continue;
-        next[i] = toQuestion(w, map[w.id], m, pool);
-      }
-      queueRef.current = next;
-      setQueue(next);
-
-      // LLM 新生成的例句 → 同步到云端会话；已从后台/本机恢复的不在这里
-      const cloudId = cloudPracticeSessionIdRef.current;
-      if (cloudId) {
-        for (const w of todo) {
-          const i = pool.findIndex((x) => x.id === w.id);
-          const q = next[i];
-          if (i >= 0 && q?.example) {
-            syncCloudItemExample(cloudId, i, q.example, !!q.wasNew);
-          }
-        }
-      }
-
-      const failed = todo.filter((w) => !map[w.id]);
-      for (const w of failed) prefetchFailedRef.current.add(w.id);
-      if (failed.length) {
-        console.warn('[practice] fillBatch missing', failed.map((w) => w.word).join(', '));
-      }
-      if (failed.length === todo.length) {
-        return '模型返回的句子未通过校验（过短/过长或模板句），请重试';
-      }
-      return '';
-    } catch (e) {
-      if (isAbortError(e) || sessionIdRef.current !== sid) return '';
-      console.warn('[practice] fillBatch error', e);
-      for (const w of todo) prefetchFailedRef.current.add(w.id);
-      const msg =
-        e instanceof Error && e.message
-          ? e.message
-          : '出题失败，请检查 API Key / 网络后重试';
-      if (sessionIdRef.current === sid) setGenError(msg);
-      return msg;
-    } finally {
-      todo.forEach((w) => inflightRef.current.delete(w.id));
-    }
-  }
 
   function restoreDonePractice(done: SavedPracticeDone) {
     const idToWord = new Map(words.map((w) => [w.id, w]));
@@ -1044,9 +713,22 @@ export function usePracticeSession() {
 
     maxVisitedIdxRef.current = hydrated.idx;
     if (remote?.items?.length) {
-      seedCardStatesFromAttempts(remote.items, hydrated.mode, hydrated.idx);
+      seedCardStatesFromAttempts(
+        remote.items,
+        hydrated.mode,
+        hydrated.idx,
+        cardStatesRef.current,
+        attemptByIdxRef.current,
+        reviewedIndicesRef.current
+      );
     }
-    seedReviewedCardFallbacks(hydrated.idx, hydrated.mode);
+    seedReviewedCardFallbacks(
+      hydrated.idx,
+      hydrated.mode,
+      cardStatesRef.current,
+      attemptByIdxRef.current,
+      reviewedIndicesRef.current
+    );
     for (let i = 0; i < hydrated.idx; i++) {
       reviewedIndicesRef.current.add(i);
     }
@@ -1080,77 +762,12 @@ export function usePracticeSession() {
 
     if (!hydrated.queue[hydrated.idx]) {
       setPhase('loading');
-      await fillBatch(sid, [hydrated.sessionWords[hydrated.idx]], hydrated.mode, hydrated.sessionWords);
+      await runFillBatch(sid, [hydrated.sessionWords[hydrated.idx]], hydrated.mode, hydrated.sessionWords);
       if (sessionIdRef.current !== sid) return;
     }
     setPhase('asking');
-    kickPrefetch(sid, hydrated.sessionWords, hydrated.mode, hydrated.idx);
+    runKickPrefetch(sid, hydrated.sessionWords, hydrated.mode, hydrated.idx);
     message.success('已恢复练习进度');
-  }
-
-  function kickPrefetch(sid: number, pool: Word[], m: Mode, fromIdx: number) {
-    prefetchFromRef.current = fromIdx;
-    if (prefetchRunningRef.current) return;
-    if (sessionIdRef.current !== sid) return;
-    prefetchRunningRef.current = true;
-    (async () => {
-      try {
-        let idleRounds = 0;
-        while (sessionIdRef.current === sid) {
-          const start = prefetchFromRef.current;
-          const missing: Word[] = [];
-          const end = Math.min(pool.length, start + PREFETCH_AHEAD);
-          for (let i = start; i < end && missing.length < PREFETCH_BATCH; i++) {
-            const w = pool[i];
-            if (
-              !queueRef.current[i] &&
-              !inflightRef.current.has(w.id) &&
-              !prefetchFailedRef.current.has(w.id)
-            ) {
-              missing.push(w);
-            }
-          }
-          if (!missing.length) break;
-
-          const filledBefore = missing.filter((w) => {
-            const i = pool.findIndex((x) => x.id === w.id);
-            return i >= 0 && !!queueRef.current[i];
-          }).length;
-
-          await fillBatch(sid, missing, m, pool);
-          if (sessionIdRef.current !== sid) break;
-
-          const filledAfter = missing.filter((w) => {
-            const i = pool.findIndex((x) => x.id === w.id);
-            return i >= 0 && !!queueRef.current[i];
-          }).length;
-
-          // No progress → stop spinning on the same failures
-          if (filledAfter <= filledBefore) {
-            idleRounds += 1;
-            if (idleRounds >= 1) break;
-          } else {
-            idleRounds = 0;
-          }
-        }
-      } finally {
-        prefetchRunningRef.current = false;
-        // Only re-kick if idx advanced and there are still non-failed gaps
-        if (sessionIdRef.current === sid) {
-          const start = prefetchFromRef.current;
-          const end = Math.min(pool.length, start + PREFETCH_AHEAD);
-          const stillNeed = pool.slice(start, end).some((w, j) => {
-            const i = start + j;
-            return (
-              !queueRef.current[i] &&
-              !inflightRef.current.has(w.id) &&
-              !prefetchFailedRef.current.has(w.id)
-            );
-          });
-          if (stillNeed) kickPrefetch(sid, pool, m, start);
-        }
-      }
-    })();
   }
 
   async function startPractice(
@@ -1243,7 +860,7 @@ export function usePracticeSession() {
 
     let batchErr = '';
     if (needLlm.length) {
-      batchErr = await fillBatch(sid, needLlm, m, pool);
+      batchErr = await runFillBatch(sid, needLlm, m, pool);
     }
     if (sessionIdRef.current !== sid) return;
 
@@ -1260,7 +877,7 @@ export function usePracticeSession() {
     setPhase('asking');
     // Let the first question paint, then warm a small ahead window
     setTimeout(() => {
-      if (sessionIdRef.current === sid) kickPrefetch(sid, pool, m, 0);
+      if (sessionIdRef.current === sid) runKickPrefetch(sid, pool, m, 0);
     }, 300);
   }
 
@@ -1280,7 +897,7 @@ export function usePracticeSession() {
     if (!sessionWords.length) return;
     const m = nextMode ?? mode;
     const pool = shuffle(
-      sessionWords.map((w) => latestWordSnapshot(w))
+      sessionWords.map((w) => latestWordSnapshot(w, words))
     );
     void startPractice(m, scope, difficulty, { pool, skipReview: true });
   }
@@ -1330,7 +947,7 @@ export function usePracticeSession() {
     if (!w) return;
     // Manual wait for current card — allow one more attempt even if prefetch failed it
     prefetchFailedRef.current.delete(w.id);
-    fillBatch(sid, [w], mode, sessionWords).then((err) => {
+    runFillBatch(sid, [w], mode, sessionWords).then((err) => {
       if (sessionIdRef.current !== sid) return;
       if (queueRef.current[idx]) {
         setGenError('');
@@ -1340,9 +957,22 @@ export function usePracticeSession() {
         message.error('本题出题失败，可重试');
       }
     });
-    kickPrefetch(sid, sessionWords, mode, idx);
+    runKickPrefetch(sid, sessionWords, mode, idx);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [idx, queue, phase, sessionWords, mode]);
+
+  function cardCorrectAt(ordinal: number) {
+    return resolveCardCorrect({
+      mode,
+      ordinal,
+      idx,
+      picked,
+      judgeResult,
+      cardStates: cardStatesRef.current,
+      attempts: attemptByIdxRef.current,
+      queue: queueRef.current,
+    });
+  }
 
   function pickAnswer(letter: string) {
     if (showAnswer || !current || mode !== 'choice') return;
@@ -1511,26 +1141,6 @@ export function usePracticeSession() {
     }
   }
 
-  function resolveCardCorrect(ordinal: number): boolean {
-    if (mode === 'choice') {
-      const snap = cardStatesRef.current.get(ordinal);
-      const letter =
-        ordinal === idx ? picked : snap?.picked ?? attemptByIdxRef.current.get(ordinal)?.picked ?? null;
-      const q = queueRef.current[ordinal];
-      return !!letter && letter === q?.example.answer;
-    }
-    const jr =
-      ordinal === idx
-        ? judgeResult
-        : cardStatesRef.current.get(ordinal)?.judgeResult ??
-          attemptByIdxRef.current.get(ordinal)?.judgeResult ??
-          null;
-    if (jr) return !!jr.correct;
-    const attempt = attemptByIdxRef.current.get(ordinal);
-    if (attempt) return attempt.correct;
-    return false;
-  }
-
   async function next() {
     const browsingForward = !canGoNext && idx < maxVisitedIdxRef.current;
     if (!canGoNext && !browsingForward) return;
@@ -1544,12 +1154,12 @@ export function usePracticeSession() {
     }
 
     const alreadyReviewed = reviewedIndicesRef.current.has(idx);
-    const wasCorrect = resolveCardCorrect(idx);
+    const wasCorrect = cardCorrectAt(idx);
     rememberAttemptAt(idx, { picked, judgeResult, correct: wasCorrect });
 
     if (current && !skipReviewRef.current && !alreadyReviewed) {
       const quality = wasCorrect ? 5 : 1;
-      const latest = latestWordSnapshot(current.word);
+      const latest = latestWordSnapshot(current.word, words);
       const updated = applyReview(latest, quality as 1 | 5);
       await updateWord(updated);
       recordLearningEvent({
@@ -1572,7 +1182,7 @@ export function usePracticeSession() {
         wasCorrect ? `答对 · 下次复习：${when}` : `答错 · 已回退，${when}再练`
       );
     } else if (current && skipReviewRef.current && !alreadyReviewed) {
-      const wasCorrect = resolveCardCorrect(idx);
+      const wasCorrect = cardCorrectAt(idx);
       const cloudId = cloudPracticeSessionIdRef.current;
       if (cloudId) {
         syncCloudItemAttempt(cloudId, idx, {
@@ -1609,6 +1219,7 @@ export function usePracticeSession() {
 
   function jumpToCard(target: number) {
     if (!total || target < 0 || target >= total || target === idx) return;
+    if (target > maxJumpIdx) return;
     if (phase === 'judging' || regenerating) return;
     cardStatesRef.current.set(idx, snapshotCurrentCard());
     goToCard(target);
@@ -1748,7 +1359,7 @@ export function usePracticeSession() {
         message.error('出题失败，请重试');
         return;
       }
-      const generated = toQuestion(w, map[w.id], m, pool);
+      const generated = toQuestion(genRefs, w, map[w.id], m, pool);
 
       // Only reset the answered card after the replacement is safely ready.
       if (current && (showAnswer || judgeResult)) {
@@ -1803,12 +1414,12 @@ export function usePracticeSession() {
     setPhase('loading');
     inflightRef.current.delete(sessionWords[idx].id);
     prefetchFailedRef.current.delete(sessionWords[idx].id);
-    await fillBatch(sid, [sessionWords[idx]], mode, sessionWords);
+    await runFillBatch(sid, [sessionWords[idx]], mode, sessionWords);
     if (sessionIdRef.current !== sid) return;
     if (queueRef.current[idx]) {
       setGenError('');
       setPhase('asking');
-      kickPrefetch(sid, sessionWords, mode, idx);
+      runKickPrefetch(sid, sessionWords, mode, idx);
     } else {
       setGenError('出题失败，请检查 API Key / 网络后重试');
     }
@@ -1816,7 +1427,7 @@ export function usePracticeSession() {
 
   async function toggleStarred() {
     if (!current) return;
-    const latest = latestWordSnapshot(current.word);
+    const latest = latestWordSnapshot(current.word, words);
     const nextStarred = !latest.starred;
     const updated = { ...latest, starred: nextStarred };
     await updateWord(updated);
@@ -1835,7 +1446,7 @@ export function usePracticeSession() {
 
   async function toggleExampleFavorite() {
     if (!current) return;
-    const latest = latestWordSnapshot(current.word);
+    const latest = latestWordSnapshot(current.word, words);
     const isSame = (example: Word['examples'][number]) =>
       example.en === current.example.en && example.zh === current.example.zh;
     const alreadySaved = (latest.examples || []).some(isSame);
@@ -1904,6 +1515,8 @@ export function usePracticeSession() {
     canGoNext,
     canNavigateNext,
     canGoPrevious,
+    maxJumpIdx,
+    jumpWordLabels,
     remainingCount,
     sessionSize: SESSION_SIZE,
     setUserText,

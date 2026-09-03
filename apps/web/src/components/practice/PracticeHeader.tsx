@@ -6,6 +6,10 @@ interface Props {
   idx: number;
   total: number;
   progressPct?: number;
+  /** 可跳转的最远题号（0-based，仅已作答题） */
+  maxJumpIdx?: number;
+  /** 与题目顺序对应的单词，用于拖动预览 */
+  wordLabels?: string[];
   /** 跳转前同步保存本机进度；导航由 Link 负责，避免部分移动端 onClick+navigate 失效 */
   onBeforeExit?: () => void;
   /** 拖动/点击进度条跳转到指定题（0-based）；仅在松手时触发 */
@@ -13,12 +17,18 @@ interface Props {
   jumpDisabled?: boolean;
 }
 
-function idxFromClientX(clientX: number, track: HTMLElement, total: number): number {
+function idxFromClientX(
+  clientX: number,
+  track: HTMLElement,
+  total: number,
+  maxIdx: number
+): number {
   if (total <= 1) return 0;
   const rect = track.getBoundingClientRect();
   if (rect.width <= 0) return 0;
   const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-  return Math.min(total - 1, Math.floor(ratio * total));
+  const raw = Math.min(total - 1, Math.floor(ratio * total));
+  return Math.min(maxIdx, raw);
 }
 
 function thumbLeftPct(index: number, total: number): number {
@@ -32,10 +42,17 @@ function fillWidthPct(index: number, total: number): number {
   return Math.round(((index + 1) / total) * 100);
 }
 
+function jumpTipText(previewIndex: number, wordLabels?: string[]): string {
+  const word = wordLabels?.[previewIndex]?.trim();
+  return word ? `第 ${previewIndex + 1} 题 · ${word}` : `第 ${previewIndex + 1} 题`;
+}
+
 export default function PracticeHeader({
   idx,
   total,
   progressPct,
+  maxJumpIdx,
+  wordLabels,
   onBeforeExit,
   onJumpTo,
   jumpDisabled = false,
@@ -49,11 +66,14 @@ export default function PracticeHeader({
   const previewIdxRef = useRef(idx);
   const [dragging, setDragging] = useState(false);
 
-  const interactive = total > 1 && !!onJumpTo && !jumpDisabled;
+  const jumpMax = Math.min(total > 0 ? total - 1 : 0, maxJumpIdx ?? total - 1);
+  const interactive = total > 1 && jumpMax >= 0 && !!onJumpTo && !jumpDisabled;
   const pct =
     progressPct ??
     (total ? Math.round(((idx + 1) / total) * 100) : 0);
   const thumbPct = thumbLeftPct(idx, total);
+  const unreachedLeftPct =
+    total && jumpMax + 1 < total ? ((jumpMax + 1) / total) * 100 : 100;
 
   const applyPreviewVisual = useCallback(
     (previewIndex: number) => {
@@ -64,13 +84,13 @@ export default function PracticeHeader({
       if (thumbRef.current) thumbRef.current.style.left = left;
       if (tipRef.current) {
         tipRef.current.style.left = left;
-        tipRef.current.textContent = `第 ${previewIndex + 1} 题`;
+        tipRef.current.textContent = jumpTipText(previewIndex, wordLabels);
       }
       if (textRef.current && total) {
         textRef.current.textContent = `${previewIndex + 1} / ${total}`;
       }
     },
-    [total]
+    [total, wordLabels]
   );
 
   const clearPreviewVisual = useCallback(() => {
@@ -87,7 +107,9 @@ export default function PracticeHeader({
       if (!draggingRef.current) return;
       const track = trackRef.current;
       const target =
-        track && total ? idxFromClientX(clientX, track, total) : previewIdxRef.current;
+        track && total
+          ? idxFromClientX(clientX, track, total, jumpMax)
+          : previewIdxRef.current;
 
       draggingRef.current = false;
       setDragging(false);
@@ -97,7 +119,7 @@ export default function PracticeHeader({
         onJumpTo(target);
       }
     },
-    [clearPreviewVisual, idx, onJumpTo, total]
+    [clearPreviewVisual, idx, jumpMax, onJumpTo, total]
   );
 
   function onTrackPointerDown(e: React.PointerEvent<HTMLDivElement>) {
@@ -105,13 +127,13 @@ export default function PracticeHeader({
     e.preventDefault();
     draggingRef.current = true;
     setDragging(true);
-    applyPreviewVisual(idxFromClientX(e.clientX, e.currentTarget, total));
+    applyPreviewVisual(idxFromClientX(e.clientX, e.currentTarget, total, jumpMax));
     e.currentTarget.setPointerCapture(e.pointerId);
   }
 
   function onTrackPointerMove(e: React.PointerEvent<HTMLDivElement>) {
     if (!draggingRef.current) return;
-    applyPreviewVisual(idxFromClientX(e.clientX, e.currentTarget, total));
+    applyPreviewVisual(idxFromClientX(e.clientX, e.currentTarget, total, jumpMax));
   }
 
   function onTrackPointerUp(e: React.PointerEvent<HTMLDivElement>) {
@@ -140,18 +162,27 @@ export default function PracticeHeader({
         }`}
         role={interactive ? 'slider' : undefined}
         aria-valuemin={interactive ? 1 : undefined}
-        aria-valuemax={interactive ? total : undefined}
+        aria-valuemax={interactive ? jumpMax + 1 : undefined}
         aria-valuenow={interactive ? idx + 1 : undefined}
         aria-label={
-          interactive ? `题目进度，拖动松手后切换，当前第 ${idx + 1} 题` : undefined
+          interactive
+            ? `题目进度，可在已作答题间拖动切换，当前第 ${idx + 1} 题`
+            : undefined
         }
-        title={interactive ? '拖动松手后切换题目' : undefined}
+        title={interactive ? '拖动松手后切换已作答题' : undefined}
         onPointerDown={onTrackPointerDown}
         onPointerMove={onTrackPointerMove}
         onPointerUp={onTrackPointerUp}
         onPointerCancel={onTrackPointerUp}
       >
         <div className="progress-scrubber-track" aria-hidden>
+          {interactive && jumpMax + 1 < total ? (
+            <div
+              className="progress-scrubber-unreached"
+              style={{ left: `${unreachedLeftPct}%` }}
+              aria-hidden
+            />
+          ) : null}
           <div
             ref={fillRef}
             className="progress-fill"
@@ -172,7 +203,7 @@ export default function PracticeHeader({
               style={{ left: `${thumbPct}%`, display: dragging ? 'block' : 'none' }}
               aria-hidden
             >
-              第 {idx + 1} 题
+              {jumpTipText(idx, wordLabels)}
             </div>
           </>
         ) : null}

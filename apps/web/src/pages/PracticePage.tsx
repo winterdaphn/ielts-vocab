@@ -111,6 +111,8 @@ function WordPracticePage() {
         idx={s.idx}
         total={s.total}
         progressPct={s.progressPct}
+        maxJumpIdx={s.maxJumpIdx}
+        wordLabels={s.jumpWordLabels}
         onBeforeExit={s.prepareExitPractice}
         onJumpTo={s.jumpToCard}
         jumpDisabled={busy}

@@ -846,6 +846,23 @@ input, textarea, select {
   background: var(--border);
   border-radius: 3px;
   overflow: hidden;
+  position: relative;
+}
+
+.practice-header .progress-scrubber-unreached {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  background: repeating-linear-gradient(
+    -45deg,
+    transparent,
+    transparent 3px,
+    rgba(0, 0, 0, 0.04) 3px,
+    rgba(0, 0, 0, 0.04) 6px
+  );
+  pointer-events: none;
+  border-radius: 0 3px 3px 0;
 }
 
 .practice-header .progress-scrubber.interactive {
@@ -904,14 +921,17 @@ input, textarea, select {
   position: absolute;
   bottom: calc(100% + 6px);
   transform: translateX(-50%);
-  padding: 4px 8px;
+  padding: 4px 10px;
   border-radius: 6px;
   background: var(--accent);
   color: #fff;
   font-size: 11px;
   font-weight: 600;
-  line-height: 1.2;
+  line-height: 1.35;
   white-space: nowrap;
+  max-width: min(240px, 70vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
   pointer-events: none;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
 }
